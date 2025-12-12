@@ -162,18 +162,45 @@ const loadSeasons = async () => {
   try {
     const parsedData = parseCSV(csvText);
 
-    const response = await api.post('/volunteers/import', {
-      volunteers: parsedData,
-      season_id: seasonId,
+    const response = await fetch('/api/volunteers/import', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        volunteers: parsedData,
+        season_id: seasonId,
+      }),
     });
 
-    const result = response.data;
-    console.log('Import result:', result);
+    // Read the JSON response once and reuse it
+    const responseData = await response.json();
+
+    if (!response.ok) {
+      // Our backend sends { error: "...", ... } or { message: "...", ... }
+      const message =
+        responseData?.error ||
+        responseData?.message ||
+        'Failed to import volunteers';
+      throw new Error(message);
+    }
+
+    // Reload volunteers so the UI is up to date
     await loadVolunteers();
+
+    // Return a consistent result object for CSVImport
+    return {
+      success: true,
+      message:
+        responseData?.message || 'Volunteers imported successfully',
+      data: responseData,
+    };
   } catch (error) {
-    throw new Error(error.message);
+    // Re-throw with a clean message for CSVImport to display
+    throw new Error(error.message || 'Failed to import volunteers');
   }
 };
+
 
 
   const handleAddVolunteer = async (e) => {

@@ -102,7 +102,7 @@ export const gamesAPI = {
   delete: (id) => api.delete(`/games/${id}`),
 };
 
-// Users API
+// Users API ✅ (this fixes your Users.jsx error)
 export const usersAPI = {
   getAll: () => api.get('/users'),
   create: (data) => api.post('/users', data),
@@ -122,7 +122,6 @@ export const notificationsAPI = {
 };
 
 // CSV parsing helpers
-
 export const parseCSVLine = (line) => {
   const result = [];
   let current = '';

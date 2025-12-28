@@ -1,6 +1,69 @@
-import React, { useState, useEffect } from 'react';
+
+import React, { useEffect, useMemo, useState } from 'react';
 import { Save, Users, Mail, Phone, Trophy, Plus, X, Hash, Undo, Edit, Users as UsersIcon, Shield, Star, MapPin } from 'lucide-react';
 import Modal from './Modal';
+import api from '../services/api';
+
+
+
+// --- Helpers: volunteer interest roles (for Draft volunteer prompt) ---
+const ASSIGNABLE_ROLES = ['Manager', 'Assistant Coach', 'Team Parent'];
+
+function parseInterestedRoles(volunteer) {
+  const raw = String(
+    volunteer?.interested_roles ??
+    volunteer?.interested_role ??
+    volunteer?.preferred_role ??
+    ''
+  ).trim();
+
+  if (!raw) return [];
+  return raw
+    .split(/[,;|\n]+/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((s) => {
+      const lower = s.toLowerCase();
+      if (lower === 'coach') return 'Assistant Coach';
+      if (lower === 'assistant coach') return 'Assistant Coach';
+      if (lower === 'team parent') return 'Team Parent';
+      if (lower === 'manager') return 'Manager';
+      return s;
+    });
+}
+
+function getVolunteerInterestedRoles(volunteer) {
+  const roles = new Set();
+
+  // Get roles from interested_roles
+  for (const r of parseInterestedRoles(volunteer)) {
+    if (ASSIGNABLE_ROLES.includes(r)) roles.add(r);
+  }
+  
+  // Also respect existing assignment (completed draft)
+  const current = String(volunteer?.role || '').trim();
+  if (ASSIGNABLE_ROLES.includes(current)) roles.add(current);
+  if (String(current).toLowerCase() === 'coach') roles.add('Assistant Coach');
+
+  return Array.from(roles);
+}
+
+function getEligibleAssignmentRoles(volunteer) {
+  // Return ALL assignable roles so draft manager can choose any
+  return [...ASSIGNABLE_ROLES];
+}
+
+function playerHasEligibleVolunteers(player) {
+  const vols = Array.isArray(player?.volunteers) ? player.volunteers : [];
+  return vols.some((v) => getVolunteerInterestedRoles(v).length > 0);
+}
+
+function getVolunteerBadgeText(volunteer) {
+  const interestedRoles = getVolunteerInterestedRoles(volunteer);
+  if (interestedRoles.length) return interestedRoles.join(', ');
+  return String(volunteer?.role || 'Volunteer');
+}
+// --- end helpers ---
 
 const DraftGrid = ({ draftData, divisionId, seasonId, onPicksUpdate, onDraftStart, onDraftComplete }) => {
   const [managers, setManagers] = useState([]);
@@ -8,9 +71,30 @@ const DraftGrid = ({ draftData, divisionId, seasonId, onPicksUpdate, onDraftStar
   const [currentRound, setCurrentRound] = useState(1);
   const [draftStarted, setDraftStarted] = useState(false);
   const [draftComplete, setDraftComplete] = useState(false);
+  // When draftComplete becomes true, keep the user on the draft board so they can review/edit.
+  // We only move to the team assignment/commit step after an explicit "Proceed" click.
+  const [showTeamAssignments, setShowTeamAssignments] = useState(false);
+
+  // Email sending (restored from DraftGrid_old)
+  const [draftCommitted, setDraftCommitted] = useState(false);
+  const [sendManagersEmail, setSendManagersEmail] = useState(true);
+  const [sendPlayerAgentEmail, setSendPlayerAgentEmail] = useState(false);
+  const [emailBusy, setEmailBusy] = useState(false);
+
   const [teamAssignments, setTeamAssignments] = useState({});
   const [saving, setSaving] = useState(false);
   const [availablePlayers, setAvailablePlayers] = useState([]);
+
+  // Derived values for performance & correctness
+  const draftedCount = useMemo(() => managers.reduce((sum, m) => sum + (m.picks?.length || 0), 0), [managers]);
+  const allPlayersDrafted = draftStarted && availablePlayers.length === 0;
+
+  // Keep draftComplete in sync with remaining players (handles partial last round)
+  useEffect(() => {
+    if (!draftStarted) return;
+    setDraftComplete(allPlayersDrafted);
+  }, [allPlayersDrafted, draftStarted]);
+
   const [showVolunteerModal, setShowVolunteerModal] = useState(false);
   const [currentPlayerWithVolunteers, setCurrentPlayerWithVolunteers] = useState(null);
   const [pickInputs, setPickInputs] = useState({});
@@ -59,16 +143,9 @@ const DraftGrid = ({ draftData, divisionId, seasonId, onPicksUpdate, onDraftStar
     }
   }, [managers, draftStarted]);
 
-  // Check if draft should be complete based on available players
-  useEffect(() => {
-    if (draftStarted && !draftComplete && availablePlayers.length === 0 && managers.length > 0) {
-      console.log('Draft automatically completed - no players left');
-      setDraftComplete(true);
-      if (onDraftComplete) {
-        onDraftComplete();
-      }
-    }
-  }, [availablePlayers.length, draftStarted, draftComplete, managers.length, onDraftComplete]);
+  // NOTE:
+  // We intentionally do NOT auto-redirect to the post-draft team assignment step.
+  // The draft is marked complete from handlePickEntry when the last player is drafted.
 
   const initializeDraftBoard = () => {
     // Create empty draft board with rounds
@@ -133,7 +210,7 @@ const DraftGrid = ({ draftData, divisionId, seasonId, onPicksUpdate, onDraftStar
     if (!player) return { name: 'Player not found', details: '' };
     
     const status = getPlayerStatus(player);
-    const hasVolunteers = player.volunteers && player.volunteers.length > 0;
+    const hasVolunteers = playerHasEligibleVolunteers(player);
     
     return {
       name: `${player.first_name} ${player.last_name}`,
@@ -217,50 +294,57 @@ const DraftGrid = ({ draftData, divisionId, seasonId, onPicksUpdate, onDraftStar
         footer={VolunteerModalFooter}
       >
         <div className="space-y-4">
-          {player?.volunteers?.map(volunteer => (
-            <div key={volunteer.id} className="border border-gray-200 rounded-lg p-4">
-              <div className="flex items-center justify-between mb-3">
+          {player?.volunteers?.map(volunteer => {
+            const interestedRoles = getVolunteerInterestedRoles(volunteer);
+            return (
+              <div key={volunteer.id} className="border border-gray-200 rounded-lg p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <div className="font-medium text-gray-900">{volunteer.name}</div>
+                    {interestedRoles.length > 0 && (
+                      <div className="text-xs text-gray-500 mt-1">
+                        Interested in: {interestedRoles.join(', ')}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                
+                <div className="text-sm text-gray-600 space-y-1 mb-3">
+                  {volunteer.email && (
+                    <div className="flex items-center">
+                      <Mail className="h-3 w-3 mr-2" />
+                      {volunteer.email}
+                    </div>
+                  )}
+                  {volunteer.phone && (
+                    <div className="flex items-center">
+                      <Phone className="h-3 w-3 mr-2" />
+                      {volunteer.phone}
+                    </div>
+                  )}
+                </div>
+
                 <div>
-                  <div className="font-medium text-gray-900">{volunteer.name}</div>
-                  <div className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${getRoleColor(volunteer.role)} mt-1`}>
-                    {volunteer.role}
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Assign as:
+                  </label>
+                  <select
+  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-blue-500 focus:border-blue-500"
+  value={assignments[volunteer.id] || ''}
+  onChange={(e) => handleAssignment(volunteer.id, e.target.value)}
+>
+  <option value="">No assignment</option>
+  <option value="Manager">Manager</option>
+  <option value="Assistant Coach">Assistant Coach</option>
+  <option value="Team Parent">Team Parent</option>
+</select>
+                  <div className="text-xs text-gray-500 mt-1">
+                    Checkmark ✓ indicates role they expressed interest in
                   </div>
                 </div>
               </div>
-              
-              <div className="text-sm text-gray-600 space-y-1 mb-3">
-                {volunteer.email && (
-                  <div className="flex items-center">
-                    <Mail className="h-3 w-3 mr-2" />
-                    {volunteer.email}
-                  </div>
-                )}
-                {volunteer.phone && (
-                  <div className="flex items-center">
-                    <Phone className="h-3 w-3 mr-2" />
-                    {volunteer.phone}
-                  </div>
-                )}
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Assign as:
-                </label>
-                <select
-                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-blue-500 focus:border-blue-500"
-                  value={assignments[volunteer.id] || ''}
-                  onChange={(e) => handleAssignment(volunteer.id, e.target.value)}
-                >
-                  <option value="">No assignment</option>
-                  {volunteer.role === 'Manager' && <option value="Manager">Manager</option>}
-                  {volunteer.role === 'Assistant Coach' && <option value="Assistant Coach">Assistant Coach</option>}
-                  {volunteer.role === 'Coach' && <option value="Assistant Coach">Assistant Coach</option>}
-                  {volunteer.role === 'Team Parent' && <option value="Team Parent">Team Parent</option>}
-                </select>
-              </div>
-            </div>
-          ))}
+            );
+          })}
           
           {(!player?.volunteers || player.volunteers.length === 0) && (
             <div className="text-center py-4 text-gray-500">
@@ -375,7 +459,7 @@ const DraftGrid = ({ draftData, divisionId, seasonId, onPicksUpdate, onDraftStar
             }}
             onMouseOver={(e) => e.target.style.backgroundColor = '#1d4ed8'}
             onMouseOut={(e) => e.target.style.backgroundColor = '#2563eb'}
-          >
+        >
             <Save style={{ width: '16px', height: '16px' }} />
             Move Player & Volunteers
           </button>
@@ -403,12 +487,18 @@ const DraftGrid = ({ draftData, divisionId, seasonId, onPicksUpdate, onDraftStar
 
           {player?.volunteers?.map(volunteer => {
             const currentRole = getCurrentAssignments()[volunteer.id];
+            const interestedRoles = getVolunteerInterestedRoles(volunteer);
             
             return (
               <div key={volunteer.id} className="border border-gray-200 rounded-lg p-4">
                 <div className="flex items-center justify-between mb-3">
                   <div>
                     <div className="font-medium text-gray-900">{volunteer.name}</div>
+                    {interestedRoles.length > 0 && (
+                      <div className="text-xs text-gray-500 mt-1">
+                        Interested in: {interestedRoles.join(', ')}
+                      </div>
+                    )}
                     <div className="text-sm text-gray-600">
                       Current: <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs ${getRoleColor(currentRole)}`}>
                         {currentRole || 'Not Assigned'}
@@ -437,16 +527,18 @@ const DraftGrid = ({ draftData, divisionId, seasonId, onPicksUpdate, onDraftStar
                     Assign to {toManager?.name} as:
                   </label>
                   <select
-                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-blue-500 focus:border-blue-500"
-                    value={assignments[volunteer.id] || ''}
-                    onChange={(e) => handleAssignment(volunteer.id, e.target.value)}
-                  >
-                    <option value="">No assignment (remove volunteer)</option>
-                    {volunteer.role === 'Manager' && <option value="Manager">Manager</option>}
-                    {volunteer.role === 'Assistant Coach' && <option value="Assistant Coach">Assistant Coach</option>}
-                    {volunteer.role === 'Coach' && <option value="Assistant Coach">Assistant Coach</option>}
-                    {volunteer.role === 'Team Parent' && <option value="Team Parent">Team Parent</option>}
-                  </select>
+  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-blue-500 focus:border-blue-500"
+  value={assignments[volunteer.id] || ''}
+  onChange={(e) => handleAssignment(volunteer.id, e.target.value)}
+>
+  <option value="">No assignment</option>
+  <option value="Manager">Manager</option>
+  <option value="Assistant Coach">Assistant Coach</option>
+  <option value="Team Parent">Team Parent</option>
+</select>
+                  <div className="text-xs text-gray-500 mt-1">
+                    Checkmark ✓ indicates role they expressed interest in
+                  </div>
                 </div>
               </div>
             );
@@ -504,6 +596,8 @@ const DraftGrid = ({ draftData, divisionId, seasonId, onPicksUpdate, onDraftStar
 
     // Update draft picks
     setDraftPicks([...draftPicks, ...newPicks]);
+    // Any change after commit invalidates the saved draft
+    if (draftCommitted) setDraftCommitted(false);
     
     // Update manager's picks
     const updatedManagers = [...managers];
@@ -519,6 +613,12 @@ const DraftGrid = ({ draftData, divisionId, seasonId, onPicksUpdate, onDraftStar
     };
     setDraftBoard(updatedDraftBoard);
 
+    // Keep draftPicks in sync so drafted count and pick order stay correct
+    setDraftPicks(prev => prev.filter(p => p.playerNumber !== playerNumber));
+
+    // Any change after commit invalidates the saved draft
+    if (draftCommitted) setDraftCommitted(false);
+
     // Remove all picked players (main player + siblings) from available players
     const playerNumbersToRemove = allPlayersToPick.map(p => p.draftNumber);
     const updatedAvailablePlayers = availablePlayers.filter(p => !playerNumbersToRemove.includes(p.draftNumber));
@@ -531,7 +631,7 @@ const DraftGrid = ({ draftData, divisionId, seasonId, onPicksUpdate, onDraftStar
     });
 
     // Show volunteer assignment modal for the main player (and siblings if they have volunteers)
-    const playersWithVolunteers = allPlayersToPick.filter(p => p.volunteers && p.volunteers.length > 0);
+    const playersWithVolunteers = allPlayersToPick.filter(p => playerHasEligibleVolunteers(p));
     
     if (playersWithVolunteers.length > 0) {
       console.log('Players with volunteers, showing assignment modal:', playersWithVolunteers);
@@ -645,7 +745,7 @@ const DraftGrid = ({ draftData, divisionId, seasonId, onPicksUpdate, onDraftStar
       ) : [];
 
     // Check if player has volunteers that need handling
-    const hasVolunteers = player.volunteers && player.volunteers.length > 0;
+    const hasVolunteers = playerHasEligibleVolunteers(player);
     const hasAssignedVolunteers = hasVolunteers && (
       manager.volunteers.manager && player.volunteers.some(v => v.id === manager.volunteers.manager?.id) ||
       manager.volunteers.teamParent && player.volunteers.some(v => v.id === manager.volunteers.teamParent?.id) ||
@@ -734,6 +834,12 @@ const DraftGrid = ({ draftData, divisionId, seasonId, onPicksUpdate, onDraftStar
       }
     }
     setDraftBoard(updatedDraftBoard);
+
+    // Keep draftPicks in sync so drafted count and pick order stay correct
+    setDraftPicks(prev => prev.filter(p => p.playerNumber !== playerNumber));
+
+    // Any change after commit invalidates the saved draft
+    if (draftCommitted) setDraftCommitted(false);
   };
 
   // Move player to another team
@@ -764,7 +870,7 @@ const DraftGrid = ({ draftData, divisionId, seasonId, onPicksUpdate, onDraftStar
     }
 
     // Check if player has volunteers that need reassignment
-    const hasVolunteers = player.volunteers && player.volunteers.length > 0;
+    const hasVolunteers = playerHasEligibleVolunteers(player);
     const hasAssignedVolunteers = hasVolunteers && (
       fromManager.volunteers.manager && player.volunteers.some(v => v.id === fromManager.volunteers.manager?.id) ||
       fromManager.volunteers.teamParent && player.volunteers.some(v => v.id === fromManager.volunteers.teamParent?.id) ||
@@ -910,11 +1016,23 @@ const DraftGrid = ({ draftData, divisionId, seasonId, onPicksUpdate, onDraftStar
     }
     
     setDraftStarted(true);
+    setDraftCommitted(false);
     setCurrentRound(1);
+    setShowTeamAssignments(false);
     
     if (onDraftStart) {
       onDraftStart();
     }
+  };
+
+  const proceedToTeamAssignments = () => {
+    setShowTeamAssignments(true);
+  };
+
+  const backToDraftBoard = () => {
+    // Allow edits after completion (move/remove + re-draft)
+    setShowTeamAssignments(false);
+    setDraftComplete(false);
   };
 
   const assignTeamToManager = (managerId, teamId) => {
@@ -926,6 +1044,47 @@ const DraftGrid = ({ draftData, divisionId, seasonId, onPicksUpdate, onDraftStar
       [managerId]: teamId
     });
   };
+
+  // ✅ Send roster emails (restored)
+  // Uses the authenticated axios "api" client; backend honors Email Settings Test Mode automatically.
+  const sendRosterEmails = async () => {
+    if (!draftCommitted) {
+      alert('Please click "Commit Draft Results" first. Emails are generated from saved teams.');
+      return;
+    }
+
+    if (!sendManagersEmail && !sendPlayerAgentEmail) {
+      alert('Please select at least one email option (Managers and/or Player Agent).');
+      return;
+    }
+
+    setEmailBusy(true);
+    try {
+      const payload = { season_id: seasonId, division_id: divisionId };
+
+      if (sendManagersEmail) {
+        await api.post('/notifications/send-manager-rosters', payload);
+      }
+
+      if (sendPlayerAgentEmail) {
+        await api.post('/notifications/send-player-agent-rosters', payload);
+      }
+
+      alert('Roster emails sent! If Email Settings Test Mode is ON, they went to the test email.');
+    } catch (err) {
+      const msg =
+        err?.response?.data?.details ||
+        err?.response?.data?.error ||
+        err?.message ||
+        String(err);
+
+      console.error('Error sending roster emails:', err);
+      alert(`Error sending roster emails: ${msg}`);
+    } finally {
+      setEmailBusy(false);
+    }
+  };
+
 
   const commitDraft = async () => {
     const unassignedManagers = managers.filter(manager => !teamAssignments[manager.id]);
@@ -1020,7 +1179,9 @@ const DraftGrid = ({ draftData, divisionId, seasonId, onPicksUpdate, onDraftStar
       }
 
       console.log('Draft commit completed successfully');
-      alert('Draft committed successfully! All players and volunteers have been assigned to teams.');
+      setDraftCommitted(true);
+        setDraftCommitted(true);
+        alert('Draft committed successfully! All players and volunteers have been assigned to teams.');
       
       if (onDraftComplete) {
         onDraftComplete();
@@ -1038,8 +1199,9 @@ const DraftGrid = ({ draftData, divisionId, seasonId, onPicksUpdate, onDraftStar
     if (window.confirm('Are you sure you want to cancel the draft? All progress will be lost.')) {
       setDraftStarted(false);
       setCurrentRound(1);
-      setDraftComplete(false);
+      setShowTeamAssignments(false);
       setDraftPicks([]);
+      setDraftCommitted(false);
       setDraftBoard([]);
       
       const playersWithNumbers = draftData.players.map((player, index) => ({
@@ -1173,7 +1335,7 @@ const DraftGrid = ({ draftData, divisionId, seasonId, onPicksUpdate, onDraftStar
               {draftData.teams && draftData.teams.length > 0 ? (
                 draftData.teams.map(team => (
                   <div key={team.id} className="border border-gray-200 rounded-lg p-3 text-center">
-                    <div className="font-medium text-gray-900">{team.name}</div>
+                    <div className="font-medium text-gray-900">{team.name} - {team.color}</div>
                   </div>
                 ))
               ) : (
@@ -1199,14 +1361,39 @@ const DraftGrid = ({ draftData, divisionId, seasonId, onPicksUpdate, onDraftStar
       )}
 
       {/* Draft Phase - Table Layout */}
-      {draftStarted && !draftComplete && (
+      {draftStarted && (!draftComplete || !showTeamAssignments) && (
         <div className="space-y-6">
+          {/* Draft Complete (review/edit) banner + navigation */}
+          {(draftComplete || allPlayersDrafted) && !showTeamAssignments && (
+            <div className="bg-green-50 border border-green-200 rounded-lg p-6">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                <div className="flex items-center">
+                  <Trophy className="h-8 w-8 text-green-500 mr-3" />
+                  <div>
+                    <h3 className="text-lg font-semibold text-green-800">Draft Complete! 🎉</h3>
+                    <p className="text-green-700">
+                      All players have been drafted. You can still go back and edit (move/remove players),
+                      then proceed when you’re ready.
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  onClick={proceedToTeamAssignments}
+                  className="inline-flex items-center px-5 py-3 border border-transparent text-base font-medium rounded-md text-white bg-green-600 hover:bg-green-700"
+                >
+                  <Save className="h-5 w-5 mr-2" />
+                  Proceed to Team Assignments
+                </button>
+              </div>
+            </div>
+          )}
           {/* Draft Status */}
           <div className="bg-white shadow rounded-lg p-6">
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-xl font-semibold text-gray-900">Draft Board - Round {currentRound}</h2>
               <div className="text-sm text-gray-600">
-                {availablePlayers.length} players remaining • {draftPicks.length} players drafted
+                {availablePlayers.length} players remaining • {draftedCount} players drafted
               </div>
             </div>
 
@@ -1303,14 +1490,22 @@ const DraftGrid = ({ draftData, divisionId, seasonId, onPicksUpdate, onDraftStar
                                     {getPlayerPreview(pickInputs[manager.id]).hasVolunteers && (
                                       <div className="mt-2">
                                         <div className="text-xs font-medium text-gray-700 mb-1">Parent Volunteers:</div>
-                                        {getPlayerPreview(pickInputs[manager.id]).volunteers.map((volunteer, idx) => (
-                                          <div key={idx} className="text-xs text-gray-600 flex items-center">
-                                            <span className={`inline-flex items-center px-1.5 py-0.5 rounded mr-1 ${getRoleColor(volunteer.role)}`}>
-                                              {volunteer.role}
-                                            </span>
-                                            {volunteer.name}
-                                          </div>
-                                        ))}
+                                        {getPlayerPreview(pickInputs[manager.id]).volunteers.map((volunteer, idx) => {
+                                          const interestedRoles = getVolunteerInterestedRoles(volunteer);
+                                          return (
+                                            <div key={idx} className="text-xs text-gray-600 flex items-center">
+                                              <span className={`inline-flex items-center px-1.5 py-0.5 rounded mr-1 ${getRoleColor(volunteer.derived_role || volunteer.role)}`}>
+                                                {getVolunteerBadgeText(volunteer)}
+                                              </span>
+                                              {volunteer.name}
+                                              {interestedRoles.length > 0 && (
+                                                <span className="text-blue-500 ml-1">
+                                                  ({interestedRoles.join(', ')})
+                                                </span>
+                                              )}
+                                            </div>
+                                          );
+                                        })}
                                       </div>
                                     )}
                                   </div>
@@ -1341,7 +1536,7 @@ const DraftGrid = ({ draftData, divisionId, seasonId, onPicksUpdate, onDraftStar
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2 max-h-60 overflow-y-auto">
                 {availablePlayers.map(player => {
                   const status = getPlayerStatus(player);
-                  const hasVolunteers = player.volunteers && player.volunteers.length > 0;
+                  const hasVolunteers = playerHasEligibleVolunteers(player);
                   
                   return (
                     <div
@@ -1369,14 +1564,22 @@ const DraftGrid = ({ draftData, divisionId, seasonId, onPicksUpdate, onDraftStar
                         {hasVolunteers && (
                           <div className="mt-2">
                             <div className="text-xs font-medium text-gray-700">Parent Volunteers:</div>
-                            {player.volunteers.map((volunteer, index) => (
-                              <div key={index} className="text-xs text-gray-600 flex items-center">
-                                <span className={`inline-flex items-center px-1.5 py-0.5 rounded mr-1 ${getRoleColor(volunteer.role)}`}>
-                                  {volunteer.role}
-                                </span>
-                                {volunteer.name}
-                              </div>
-                            ))}
+                            {player.volunteers.map((volunteer, index) => {
+                              const interestedRoles = getVolunteerInterestedRoles(volunteer);
+                              return (
+                                <div key={index} className="text-xs text-gray-600 flex items-center">
+                                  <span className={`inline-flex items-center px-1.5 py-0.5 rounded mr-1 ${getRoleColor(volunteer.derived_role || volunteer.role)}`}>
+                                    {getVolunteerBadgeText(volunteer)}
+                                  </span>
+                                  {volunteer.name}
+                                  {interestedRoles.length > 0 && (
+                                    <span className="text-blue-500 ml-1">
+                                      ({interestedRoles.join(', ')})
+                                    </span>
+                                  )}
+                                </div>
+                              );
+                            })}
                           </div>
                         )}
                       </div>
@@ -1458,14 +1661,22 @@ const DraftGrid = ({ draftData, divisionId, seasonId, onPicksUpdate, onDraftStar
                             {hasVolunteers && (
                               <div className="mt-1">
                                 <div className="text-xs font-medium text-gray-700">Parent Volunteers:</div>
-                                {player.volunteers.map((volunteer, idx) => (
-                                  <div key={idx} className="text-xs text-gray-600 flex items-center">
-                                    <span className={`inline-flex items-center px-1.5 py-0.5 rounded mr-1 ${getRoleColor(volunteer.role)}`}>
-                                      {volunteer.role}
-                                    </span>
-                                    {volunteer.name}
-                                  </div>
-                                ))}
+                                {player.volunteers.map((volunteer, idx) => {
+                                  const interestedRoles = getVolunteerInterestedRoles(volunteer);
+                                  return (
+                                    <div key={idx} className="text-xs text-gray-600 flex items-center">
+                                      <span className={`inline-flex items-center px-1.5 py-0.5 rounded mr-1 ${getRoleColor(volunteer.derived_role || volunteer.role)}`}>
+                                        {getVolunteerBadgeText(volunteer)}
+                                      </span>
+                                      {volunteer.name}
+                                      {interestedRoles.length > 0 && (
+                                        <span className="text-blue-500 ml-1">
+                                          ({interestedRoles.join(', ')})
+                                        </span>
+                                      )}
+                                    </div>
+                                  );
+                                })}
                               </div>
                             )}
                           </div>
@@ -1516,7 +1727,7 @@ const DraftGrid = ({ draftData, divisionId, seasonId, onPicksUpdate, onDraftStar
       )}
 
       {/* Draft Results - After Draft Complete */}
-      {draftComplete && (
+      {(draftComplete || allPlayersDrafted) && showTeamAssignments && (
         <div className="space-y-6">
           {/* Success Banner */}
           <div className="bg-green-50 border border-green-200 rounded-lg p-6">
@@ -1528,6 +1739,16 @@ const DraftGrid = ({ draftData, divisionId, seasonId, onPicksUpdate, onDraftStar
                   All players have been drafted. Now assign each manager to their team.
                 </p>
               </div>
+            </div>
+
+            <div className="mt-4">
+              <button
+                onClick={backToDraftBoard}
+                className="inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
+              >
+                <Undo className="h-4 w-4 mr-2" />
+                Back to Draft Board
+              </button>
             </div>
           </div>
 
@@ -1557,7 +1778,7 @@ const DraftGrid = ({ draftData, divisionId, seasonId, onPicksUpdate, onDraftStar
                     >
                       <option value="">Select Team...</option>
                       {draftData.teams.map(team => (
-                        <option key={team.id} value={team.id}>{team.name}</option>
+                        <option key={team.id} value={team.id}>{team.name} - {team.color}</option>
                       ))}
                     </select>
                     
@@ -1628,6 +1849,51 @@ const DraftGrid = ({ draftData, divisionId, seasonId, onPicksUpdate, onDraftStar
               </button>
             </div>
           </div>
+
+
+          {/* Send Roster Emails */}
+          <div className="bg-white shadow rounded-lg p-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">Send Roster Emails</h3>
+            <p className="text-sm text-gray-600 mb-4">
+              Choose who to email. Emails are only available after you commit/save the draft.
+            </p>
+
+            <div className="space-y-2 mb-4">
+              <label className="flex items-center space-x-2 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={sendManagersEmail}
+                  onChange={(e) => setSendManagersEmail(e.target.checked)}
+                />
+                <span>Managers</span>
+              </label>
+
+              <label className="flex items-center space-x-2 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={sendPlayerAgentEmail}
+                  onChange={(e) => setSendPlayerAgentEmail(e.target.checked)}
+                />
+                <span>Player Agent</span>
+              </label>
+            </div>
+
+            <button
+              onClick={sendRosterEmails}
+              disabled={emailBusy || !draftCommitted || (!sendManagersEmail && !sendPlayerAgentEmail)}
+              className={`inline-flex items-center px-4 py-2 rounded-md text-white text-sm font-medium ${
+                (emailBusy || !draftCommitted || (!sendManagersEmail && !sendPlayerAgentEmail))
+                  ? 'bg-gray-400 cursor-not-allowed'
+                  : 'bg-blue-600 hover:bg-blue-700'
+              }`}
+              title={!draftCommitted ? 'Commit the draft first to enable emails' : ''}
+            >
+              <Mail className="h-4 w-4 mr-2" />
+              {emailBusy ? 'Sending...' : 'Send Emails'}
+            </button>
+          </div>
+
+
         </div>
       )}
 

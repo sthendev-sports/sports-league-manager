@@ -198,26 +198,102 @@ const cleanHeaderName = (header) => {
   return headerMap[normalized] || normalized.replace(/\s+/g, '_');
 };
 
+// Robust CSV row parser that supports commas, quotes, and NEWLINES inside quoted fields.
+// Returns rows as arrays of strings (already unescaped for double quotes).
+const parseCSVRows = (csvText) => {
+  const rows = [];
+  let row = [];
+  let field = '';
+  let inQuotes = false;
+
+  // Normalize newlines to \n
+  const s = (csvText || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+
+    if (ch === '"') {
+      // If we're inside quotes and the next char is also a quote, it's an escaped quote.
+      if (inQuotes && s[i + 1] === '"') {
+        field += '"';
+        i++; // skip the escaped quote
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+
+    if (ch === ',' && !inQuotes) {
+      row.push(field);
+      field = '';
+      continue;
+    }
+
+    if (ch === '\n' && !inQuotes) {
+      row.push(field);
+      field = '';
+      // Avoid pushing a trailing completely empty row at EOF
+      if (row.length > 1 || row.some((v) => (v || '').trim() !== '')) {
+        rows.push(row);
+      }
+      row = [];
+      continue;
+    }
+
+    field += ch;
+  }
+
+  // Flush last field/row
+  row.push(field);
+  if (row.length > 1 || row.some((v) => (v || '').trim() !== '')) {
+    rows.push(row);
+  }
+
+  return rows;
+};
+
 export const parseCSVData = (csvContent) => {
   if (!csvContent) return [];
 
-  const lines = csvContent
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0);
+  const rows = parseCSVRows(csvContent);
+  if (rows.length < 2) return [];
 
-  if (lines.length < 2) return [];
+  const rawHeaders = rows[0].map((h) => (h ?? '').toString());
+  const cleanHeaders = rawHeaders.map((h) => cleanHeaderName(h));
 
-  const headers = parseCSVLine(lines[0]);
+  // Build a map: cleanHeader -> list of column indices where it appears.
+  const headerIndexMap = {};
+  cleanHeaders.forEach((h, idx) => {
+    if (!headerIndexMap[h]) headerIndexMap[h] = [];
+    headerIndexMap[h].push(idx);
+  });
 
-  return lines.slice(1).map((line) => {
-    const values = parseCSVLine(line);
-    const row = {};
-    headers.forEach((header, index) => {
-      const cleanHeader = cleanHeaderName(header);
-      row[cleanHeader] = values[index] || '';
+  // Preserve a stable output header list in the order headers first appear (de-duped).
+  const uniqueHeaders = [];
+  cleanHeaders.forEach((h) => {
+    if (!uniqueHeaders.includes(h)) uniqueHeaders.push(h);
+  });
+
+  return rows.slice(1).map((values) => {
+    const rowObj = {};
+
+    uniqueHeaders.forEach((h) => {
+      const indices = headerIndexMap[h] || [];
+
+      // Merge duplicates for this row: take the first non-empty value among duplicate columns.
+      let merged = '';
+      for (const i of indices) {
+        const v = (values[i] ?? '').toString().trim();
+        if (v !== '') {
+          merged = v;
+          break;
+        }
+      }
+
+      rowObj[h] = merged;
     });
-    return row;
+
+    return rowObj;
   });
 };
 
@@ -226,6 +302,9 @@ export const parseCSV = (csvContent) => parseCSVData(csvContent);
 
 // CSV import helper for backend endpoints (players/volunteers)
 export const importAPI = {
+  // Players import (JSON) - used by Players page
+  players: (playersData, seasonId) => api.post('/players/import', { players: playersData, season_id: seasonId }),
+
   uploadPlayersCSV: (file, seasonId) => {
     const formData = new FormData();
     formData.append('file', file);

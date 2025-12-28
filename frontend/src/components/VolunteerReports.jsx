@@ -1,7 +1,38 @@
-import React, { useState, useEffect } from 'react';
-import { Download, Users, Filter, Mail, Phone, MapPin, Target } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Download, Users, Mail, Phone } from 'lucide-react';
 import api, { divisionsAPI, teamsAPI, seasonsAPI } from '../services/api';
 
+const DIVISION_SORT_ORDER = [
+  'T-Ball Division',
+  'Baseball - Coach Pitch Division',
+  'Baseball - Rookies Division',
+  'Baseball - Minors Division',
+  'Baseball - Majors Division',
+  'Softball - Rookies Division (Coach Pitch)',
+  'Softball - Minors Division',
+  'Softball - Majors Division',
+  'Challenger Division'
+];
+
+const sortDivisionName = (a, b) => {
+  const ai = DIVISION_SORT_ORDER.indexOf(a);
+  const bi = DIVISION_SORT_ORDER.indexOf(b);
+  const aIn = ai !== -1;
+  const bIn = bi !== -1;
+  if (aIn && bIn) return ai - bi;
+  if (aIn) return -1;
+  if (bIn) return 1;
+  return String(a).localeCompare(String(b));
+};
+
+const sortTeamNameWithinDivision = (a, b) => {
+  // non-empty team names first, then empty last
+  const aEmpty = !a;
+  const bEmpty = !b;
+  if (aEmpty && !bEmpty) return 1;
+  if (!aEmpty && bEmpty) return -1;
+  return String(a).localeCompare(String(b));
+};
 
 const VolunteerReports = () => {
   const [volunteers, setVolunteers] = useState([]);
@@ -26,62 +57,60 @@ const VolunteerReports = () => {
   }, [selectedDivision, selectedSeason, selectedTeam]);
 
   const loadVolunteers = async () => {
-  try {
-    setLoading(true);
+    try {
+      setLoading(true);
 
-    const params = {};
-    if (selectedDivision) params.division_id = selectedDivision;
-    if (selectedSeason) params.season_id = selectedSeason;
+      const params = {};
+      if (selectedDivision) params.division_id = selectedDivision;
+      if (selectedSeason) params.season_id = selectedSeason;
 
-    const response = await api.get('/volunteers', { params });
-    let data = Array.isArray(response.data) ? response.data : [];
+      const response = await api.get('/volunteers', { params });
+      let data = Array.isArray(response.data) ? response.data : [];
 
-    if (selectedTeam) {
-      data = data.filter(volunteer => volunteer.team_id === selectedTeam);
+      // Keep existing behavior: team filter is applied client-side
+      if (selectedTeam) {
+        data = data.filter(volunteer => volunteer.team_id === selectedTeam);
+      }
+
+      setVolunteers(data || []);
+    } catch (error) {
+      console.error('Error loading volunteers:', error);
+      setVolunteers([]);
+    } finally {
+      setLoading(false);
     }
-
-    console.log('Loaded volunteers for reports:', data);
-    setVolunteers(data || []);
-  } catch (error) {
-    console.error('Error loading volunteers:', error);
-    setVolunteers([]);
-  } finally {
-    setLoading(false);
-  }
-};
-
+  };
 
   const loadDivisions = async () => {
-  try {
-    const response = await divisionsAPI.getAll();
-    const data = response.data;
-    setDivisions(Array.isArray(data) ? data : []);
-  } catch (error) {
-    console.error('Error loading divisions:', error);
-  }
-};
+    try {
+      const response = await divisionsAPI.getAll();
+      const data = response.data;
+      setDivisions(Array.isArray(data) ? data : []);
+    } catch (error) {
+      console.error('Error loading divisions:', error);
+    }
+  };
 
-const loadTeams = async () => {
-  try {
-    const response = await teamsAPI.getAll();
-    const data = response.data;
-    setTeams(Array.isArray(data) ? data : []);
-  } catch (error) {
-    console.error('Error loading teams:', error);
-  }
-};
+  const loadTeams = async () => {
+    try {
+      const response = await teamsAPI.getAll();
+      const data = response.data;
+      setTeams(Array.isArray(data) ? data : []);
+    } catch (error) {
+      console.error('Error loading teams:', error);
+    }
+  };
 
-const loadSeasons = async () => {
-  try {
-    const response = await seasonsAPI.getAll();
-    const data = response.data;
-    setSeasons(Array.isArray(data) ? data : []);
-    if (data.length > 0) setSelectedSeason(data[0].id);
-  } catch (error) {
-    console.error('Error loading seasons:', error);
-  }
-};
-
+  const loadSeasons = async () => {
+    try {
+      const response = await seasonsAPI.getAll();
+      const data = response.data;
+      setSeasons(Array.isArray(data) ? data : []);
+      if (Array.isArray(data) && data.length > 0) setSelectedSeason(data[0].id);
+    } catch (error) {
+      console.error('Error loading seasons:', error);
+    }
+  };
 
   const exportToCSV = () => {
     const headers = [
@@ -111,7 +140,7 @@ const loadSeasons = async () => {
     ]);
 
     const csvContent = [headers, ...csvData]
-      .map(row => row.map(field => `"${field}"`).join(','))
+      .map(row => row.map(field => `"${String(field ?? '').replace(/"/g, '""')}"`).join(','))
       .join('\n');
 
     const blob = new Blob([csvContent], { type: 'text/csv' });
@@ -128,40 +157,126 @@ const loadSeasons = async () => {
   const getRoleStats = () => {
     const stats = {};
     volunteers.forEach(volunteer => {
-      stats[volunteer.role] = (stats[volunteer.role] || 0) + 1;
+      const role = volunteer.role || 'Parent';
+      stats[role] = (stats[role] || 0) + 1;
     });
     return stats;
   };
 
-  const getDivisionStats = () => {
-    const stats = {};
-    volunteers.forEach(volunteer => {
-      const divisionName = volunteer.division?.name || 'Any Division';
-      stats[divisionName] = (stats[divisionName] || 0) + 1;
-    });
-    return stats;
-  };
+  // Division table: Division | Parents | Team Parent | Assistant Coach | Manager | Coach | Board Member
+  const divisionTableRows = useMemo(() => {
+    const roleKeys = {
+      parents: 'Parent',
+      teamParent: 'Team Parent',
+      assistantCoach: 'Assistant Coach',
+      manager: 'Manager',
+      coach: 'Coach',
+      boardMember: 'Board Member'
+    };
 
-  const getTeamStats = () => {
-    const stats = {};
-    volunteers.forEach(volunteer => {
-      const teamName = volunteer.team?.name || 'Unallocated';
-      stats[teamName] = (stats[teamName] || 0) + 1;
-    });
-    return stats;
-  };
+    const byDivision = new Map();
 
-  const getVolunteersByTeam = () => {
-    const byTeam = {};
-    volunteers.forEach(volunteer => {
-      const teamName = volunteer.team?.name || 'Unallocated';
-      if (!byTeam[teamName]) {
-        byTeam[teamName] = [];
+    // Seed rows using known division list so they always appear (even if 0)
+    const allDivisionNames = new Set();
+    DIVISION_SORT_ORDER.forEach(d => allDivisionNames.add(d));
+    divisions.forEach(d => {
+      if (d?.name) allDivisionNames.add(d.name);
+    });
+
+    // Initialize
+    for (const divName of allDivisionNames) {
+      byDivision.set(divName, {
+        division: divName,
+        parents: 0,
+        teamParent: 0,
+        assistantCoach: 0,
+        manager: 0,
+        coach: 0,
+        boardMember: 0
+      });
+    }
+
+    // Count
+    volunteers.forEach(v => {
+      const divName = v.division?.name || 'Any Division';
+      if (!byDivision.has(divName)) {
+        byDivision.set(divName, {
+          division: divName,
+          parents: 0,
+          teamParent: 0,
+          assistantCoach: 0,
+          manager: 0,
+          coach: 0,
+          boardMember: 0
+        });
       }
-      byTeam[teamName].push(volunteer);
+      const row = byDivision.get(divName);
+      const role = v.role || 'Parent';
+
+      if (role === roleKeys.parents) row.parents += 1;
+      else if (role === roleKeys.teamParent) row.teamParent += 1;
+      else if (role === roleKeys.assistantCoach) row.assistantCoach += 1;
+      else if (role === roleKeys.manager) row.manager += 1;
+      else if (role === roleKeys.coach) row.coach += 1;
+      else if (role === roleKeys.boardMember) row.boardMember += 1;
+      else {
+        // If you have other roles, they aren't part of the requested table.
+        // Keeping them out maintains the exact requested layout.
+      }
     });
-    return byTeam;
-  };
+
+    // Only show the divisions you listed (in that order), plus any others if they exist and are relevant.
+    // For your requested view, we prioritize the DIVISION_SORT_ORDER list.
+    const ordered = Array.from(byDivision.values()).sort((a, b) => sortDivisionName(a.division, b.division));
+
+    // If you only want the explicit list and nothing else, uncomment:
+    // return ordered.filter(r => DIVISION_SORT_ORDER.includes(r.division));
+
+    return ordered;
+  }, [volunteers, divisions]);
+
+  // Teams table: Division | Team | Parents | Team Parent | Assistant Coach | Manager
+  const teamTableRows = useMemo(() => {
+    const byDivTeam = new Map();
+
+    const keyOf = (divName, teamName) => `${divName}|||${teamName}`;
+
+    volunteers.forEach(v => {
+      const divName = v.division?.name || 'Any Division';
+      const teamName = v.team?.name || ''; // blank cell like your example for unallocated
+      const key = keyOf(divName, teamName);
+
+      if (!byDivTeam.has(key)) {
+        byDivTeam.set(key, {
+          division: divName,
+          team: teamName,
+          parents: 0,
+          teamParent: 0,
+          assistantCoach: 0,
+          manager: 0
+        });
+      }
+
+      const row = byDivTeam.get(key);
+      const role = v.role || 'Parent';
+
+      if (role === 'Parent') row.parents += 1;
+      else if (role === 'Team Parent') row.teamParent += 1;
+      else if (role === 'Assistant Coach') row.assistantCoach += 1;
+      else if (role === 'Manager') row.manager += 1;
+      // (Coach/Board/etc not included per your requested team table)
+    });
+
+    const rows = Array.from(byDivTeam.values());
+
+    rows.sort((a, b) => {
+      const d = sortDivisionName(a.division, b.division);
+      if (d !== 0) return d;
+      return sortTeamNameWithinDivision(a.team, b.team);
+    });
+
+    return rows;
+  }, [volunteers]);
 
   const roleColors = {
     'Manager': 'bg-blue-100 text-blue-800',
@@ -176,9 +291,6 @@ const loadSeasons = async () => {
   };
 
   const roleStats = getRoleStats();
-  const divisionStats = getDivisionStats();
-  const teamStats = getTeamStats();
-  const volunteersByTeam = getVolunteersByTeam();
 
   return (
     <div className="space-y-6">
@@ -244,117 +356,140 @@ const loadSeasons = async () => {
         </div>
       </div>
 
-      {/* Statistics */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {/* Role Statistics */}
-        <div className="bg-white rounded-lg shadow p-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">Volunteers by Role</h3>
-          <div className="space-y-3">
-            {Object.entries(roleStats).map(([role, count]) => (
-              <div key={role} className="flex items-center justify-between">
-                <div className="flex items-center">
-                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${roleColors[role] || 'bg-gray-100 text-gray-800'} mr-3`}>
-                    {role}
-                  </span>
-                  <span className="text-sm font-medium text-gray-900">- {count}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Division Statistics */}
-        <div className="bg-white rounded-lg shadow p-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">Volunteers by Division</h3>
-          <div className="space-y-3">
-            {Object.entries(divisionStats).map(([division, count]) => (
-              <div key={division} className="flex items-center justify-between">
-                <span className="text-sm text-gray-700">{division}</span>
-                <span className="text-sm font-medium text-gray-900">{count}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Team Statistics */}
-        <div className="bg-white rounded-lg shadow p-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">Volunteers by Team</h3>
-          <div className="space-y-3">
-            {Object.entries(teamStats).map(([team, count]) => (
-              <div key={team} className="flex items-center justify-between">
-                <span className="text-sm text-gray-700">{team}</span>
-                <span className="text-sm font-medium text-gray-900">{count}</span>
-              </div>
-            ))}
-          </div>
+      {/* Role Statistics (kept exactly like your existing section) */}
+      <div className="bg-white rounded-lg shadow p-6">
+        <h3 className="text-lg font-semibold text-gray-900 mb-4">Volunteers by Role</h3>
+        <div className="space-y-3">
+          {Object.entries(roleStats).map(([role, count]) => (
+            <div key={role} className="flex items-center">
+              <span
+                className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${roleColors[role] || 'bg-gray-100 text-gray-800'} mr-3`}
+              >
+                {role}
+              </span>
+              <span className="text-sm font-medium text-gray-900">- {count}</span>
+            </div>
+          ))}
         </div>
       </div>
 
-      {/* Volunteers by Team Breakdown */}
-      {Object.keys(volunteersByTeam).length > 0 && (
-        <div className="bg-white rounded-lg shadow">
-          <div className="px-6 py-4 border-b border-gray-200">
-            <h3 className="text-lg font-semibold text-gray-900">
-              Volunteers by Team
-            </h3>
-          </div>
-          
-          <div className="divide-y divide-gray-200">
-            {Object.entries(volunteersByTeam).map(([teamName, teamVolunteers]) => (
-              <div key={teamName} className="p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <h4 className="text-md font-semibold text-gray-900 flex items-center">
-                    <Target className="h-4 w-4 mr-2 text-blue-500" />
-                    {teamName} ({teamVolunteers.length} volunteers)
-                  </h4>
-                </div>
-                
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {teamVolunteers.map((volunteer) => (
-                    <div key={volunteer.id} className="border border-gray-200 rounded-lg p-4">
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1">
-                          <div className="font-medium text-gray-900">{volunteer.name}</div>
-                          <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium mt-1 ${roleColors[volunteer.role] || 'bg-gray-100 text-gray-800'}`}>
-                            {volunteer.role}
-                          </span>
-                          
-                          {volunteer.email && (
-                            <div className="flex items-center text-sm text-gray-600 mt-2">
-                              <Mail className="h-3 w-3 mr-1" />
-                              {volunteer.email}
-                            </div>
-                          )}
-                          
-                          {volunteer.phone && (
-                            <div className="flex items-center text-sm text-gray-600 mt-1">
-                              <Phone className="h-3 w-3 mr-1" />
-                              {volunteer.phone}
-                            </div>
-                          )}
-                          
-                          <div className="text-xs text-gray-500 mt-2">
-                            Division: {volunteer.division?.name || 'Any Division'}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
+      {/* Volunteers by Division (table layout like your screenshot) */}
+      <div className="bg-white rounded-lg shadow">
+        <div className="px-6 py-4 border-b border-gray-200">
+          <h3 className="text-lg font-semibold text-gray-900">Volunteers by Division</h3>
         </div>
-      )}
 
-      {/* All Volunteers List */}
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Division
+                </th>
+                <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Parents
+                </th>
+                <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Team Parent
+                </th>
+                <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Assistant Coach
+                </th>
+                <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Manager
+                </th>
+                <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Coach
+                </th>
+                <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Board
+                </th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {divisionTableRows
+                .filter(r => DIVISION_SORT_ORDER.includes(r.division)) // show only your requested divisions
+                .map((r) => (
+                  <tr key={r.division} className="hover:bg-gray-50">
+                    <td className="px-6 py-3 text-sm font-medium text-gray-900 whitespace-nowrap">
+                      {r.division}
+                    </td>
+                    <td className="px-6 py-3 text-sm text-gray-900 text-center">{r.parents || ''}</td>
+                    <td className="px-6 py-3 text-sm text-gray-900 text-center">{r.teamParent || ''}</td>
+                    <td className="px-6 py-3 text-sm text-gray-900 text-center">{r.assistantCoach || ''}</td>
+                    <td className="px-6 py-3 text-sm text-gray-900 text-center">{r.manager || ''}</td>
+                    <td className="px-6 py-3 text-sm text-gray-900 text-center">{r.coach || ''}</td>
+                    <td className="px-6 py-3 text-sm text-gray-900 text-center">{r.boardMember || ''}</td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Volunteers by Teams (table layout like your screenshot) */}
+      <div className="bg-white rounded-lg shadow">
+        <div className="px-6 py-4 border-b border-gray-200">
+          <h3 className="text-lg font-semibold text-gray-900">Volunteers by Teams</h3>
+          <p className="text-sm text-gray-500 mt-1">
+            Sorted by your division order, then by team name (blank team rows are unallocated for that division).
+          </p>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Division
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Team
+                </th>
+                <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Parents
+                </th>
+                <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Team Parent
+                </th>
+                <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Assistant Coach
+                </th>
+                <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Manager
+                </th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {teamTableRows
+                .filter(r => DIVISION_SORT_ORDER.includes(r.division)) // keep to requested divisions
+                .map((r, idx) => (
+                  <tr key={`${r.division}|||${r.team}|||${idx}`} className="hover:bg-gray-50">
+                    <td className="px-6 py-3 text-sm font-medium text-gray-900 whitespace-nowrap">
+                      {r.division}
+                    </td>
+                    <td className="px-6 py-3 text-sm text-gray-900">
+                      {r.team /* blank is allowed per your example */}
+                    </td>
+                    <td className="px-6 py-3 text-sm text-gray-900 text-center">{r.parents || ''}</td>
+                    <td className="px-6 py-3 text-sm text-gray-900 text-center">{r.teamParent || ''}</td>
+                    <td className="px-6 py-3 text-sm text-gray-900 text-center">{r.assistantCoach || ''}</td>
+                    <td className="px-6 py-3 text-sm text-gray-900 text-center">{r.manager || ''}</td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* All Volunteers List (unchanged) */}
       <div className="bg-white rounded-lg shadow">
         <div className="px-6 py-4 border-b border-gray-200">
           <h3 className="text-lg font-semibold text-gray-900">
             All Volunteer Details ({volunteers.length} total)
           </h3>
         </div>
-        
+
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
@@ -412,7 +547,7 @@ const loadSeasons = async () => {
               ))}
             </tbody>
           </table>
-          
+
           {volunteers.length === 0 && !loading && (
             <div className="text-center py-12">
               <Users className="mx-auto h-12 w-12 text-gray-400" />

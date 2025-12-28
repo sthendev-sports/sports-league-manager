@@ -1,7 +1,7 @@
 import React from 'react';
 import { Download } from 'lucide-react';
 
-const CSVTemplate = ({ templateType, headers }) => {
+const CSVTemplate = ({ templateType = 'players', headers }) => {
   const getVolunteerTemplate = () => {
     const volunteerHeaders = [
       'Division Name', 
@@ -31,16 +31,28 @@ const CSVTemplate = ({ templateType, headers }) => {
   const getPlayerTemplate = () => {
     // Your existing player template logic
     const playerHeaders = headers || [
+      'registration_no',
+      'program_title',
       'first_name',
       'last_name',
       'birth_date',
       'gender',
-      'is_new_player',
-      'is_travel_player',
-      'program_title',
-      'primary_contact_name',
-      'primary_contact_email',
-      'primary_contact_phone'
+      'medical_conditions',
+      'medical_release_form',
+      'new_or_returning',
+      'travel_player',
+      'uniform_shirt_size',
+      'uniform_pants_size',
+      'parent1_firstname',
+      'parent1_lastname',
+      'parent1_email',
+      'parent1_phone1',
+      'parent2_firstname',
+      'parent2_lastname',
+      'parent2_email',
+      'parent2_phone1',
+      'payment_status',
+      'workbond_check_status'
     ];
     
     const sampleData = [

@@ -26,11 +26,6 @@ const Layout = ({ children }) => {
   const location = useLocation();
   const { user, logout } = useAuth();
 
-  // Hide layout on login page
-  if (location.pathname === '/login') {
-    return <>{children}</>;
-  }
-
   // Navigation items (roles = which roles can see it; no roles = everyone)
   const navigation = [
     { name: 'Dashboard', href: '/', icon: Home },
@@ -38,23 +33,22 @@ const Layout = ({ children }) => {
     { name: 'Teams', href: '/teams', icon: Trophy },
     { name: 'Draft', href: '/draft', icon: DraftingCompass },
     { name: 'Team Uniforms', href: '/team-uniforms', icon: Shirt },
-    { name: 'Board Members', href: '/boardmembers', icon: UserCheck },
+    {
+      name: 'Game Scheduler',
+      href: '/games',
+      icon: CalendarDays,
+    },
     {
       name: 'Workbond Management',
       href: '/workbond-management',
       icon: ClipboardCheck,
       roles: ['Administrator', 'President', 'Work Bond Manager'],
     },
-    { name: 'Seasons', href: '/seasons', icon: Calendar },
-    {
-      name: 'Game Scheduler',
-      href: '/games',
-      icon: CalendarDays,
-    },
-    { name: 'Mailing List', href: '/mailing-list', icon: Mail },
-    { name: 'Configuration', href: '/configuration', icon: Settings },
+    //{ name: 'Seasons', href: '/seasons', icon: Calendar },
     { name: 'Volunteers', href: '/volunteers', icon: HandHelping },
-    {
+	{ name: 'Mailing List', href: '/mailing-list', icon: Mail },
+    { name: 'Board Members', href: '/boardmembers', icon: UserCheck },
+	{
       name: 'Users',
       href: '/users',
       icon: Shield,
@@ -66,6 +60,7 @@ const Layout = ({ children }) => {
       icon: Mail,
       roles: ['Administrator', 'President'],
     },
+	{ name: 'Configuration', href: '/configuration', icon: Settings },
   ];
 
   // Lock body scroll when mobile menu is open
@@ -80,6 +75,13 @@ const Layout = ({ children }) => {
       document.body.style.overflow = 'unset';
     };
   }, [sidebarOpen]);
+
+  // Hide layout on login page and checkworkbond page
+  // IMPORTANT: This must be AFTER all hooks (useState/useEffect/etc.)
+  // so that hooks are called in the same order on every render.
+  if (location.pathname === '/login' || location.pathname === '/checkworkbond') {
+    return <>{children}</>;
+  }
 
   const handleLogout = () => {
     logout();

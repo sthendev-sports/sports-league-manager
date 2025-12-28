@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, {useState, useEffect, useRef, useMemo, useDeferredValue } from 'react';
 import { Plus, Search, Users, RefreshCw, Mail, Phone, Filter, ChevronDown, ChevronUp, Link } from 'lucide-react';
-import { playersAPI, seasonsAPI, importAPI, parseCSV } from '../services/api';
+import { playersAPI, seasonsAPI, importAPI, parseCSV, teamsAPI } from '../services/api';
 import CSVImport from '../components/CSVImport';
 import CSVTemplate from '../components/CSVTemplate';
 import Modal from '../components/Modal';
@@ -8,9 +8,18 @@ import Modal from '../components/Modal';
 const Players = () => {
   const [players, setPlayers] = useState([]);
   const [seasons, setSeasons] = useState([]);
+  const [teams, setTeams] = useState([]);
+
+  // Team edit (only team assignment)
+  const [showTeamEditModal, setShowTeamEditModal] = useState(false);
+  const [editingPlayer, setEditingPlayer] = useState(null);
+  const [editTeamId, setEditTeamId] = useState('');
+  const [savingTeam, setSavingTeam] = useState(false);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedSeason, setSelectedSeason] = useState('');
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
+  const deferredSearchTerm = useDeferredValue(searchTerm);
+  const [selectedSeason, setSelectedSeason] = useState(null);
   const [error, setError] = useState(null);
   const [showFilters, setShowFilters] = useState(false);
   const [columnFilters, setColumnFilters] = useState({
@@ -19,8 +28,11 @@ const Players = () => {
     gender: '',
     registrationPaid: '',
     workbondCheck: '',
+    guardianName: '',
     medicalConditions: ''
   });
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 50;
   const [showFamilyLinker, setShowFamilyLinker] = useState(false);
   const [unlinkedVolunteers, setUnlinkedVolunteers] = useState([]);
   const [linkSelections, setLinkSelections] = useState({
@@ -28,12 +40,77 @@ const Players = () => {
     playerId: ''
   });
 
+  // Map family_id -> sibling names for quick visual indicator
+  const siblingsByFamily = useMemo(() => {
+    const map = new Map();
+    for (const p of players || []) {
+      const fid = String(p?.family_id || '');
+      if (!fid) continue;
+      if (!map.has(fid)) map.set(fid, []);
+      map.get(fid).push(`${p.first_name || ''} ${p.last_name || ''}`.trim());
+    }
+    // de-dupe + sort names
+    for (const [fid, names] of map.entries()) {
+      const uniq = Array.from(new Set(names.filter(Boolean)));
+      uniq.sort((a, b) => a.localeCompare(b));
+      map.set(fid, uniq);
+    }
+    return map;
+  }, [players]);
+
+  const getSiblingInfo = (player) => {
+    const fid = String(player?.family_id || '');
+    if (!fid) return { hasSiblings: false, title: '' };
+    const names = siblingsByFamily.get(fid) || [];
+    if (names.length <= 1) return { hasSiblings: false, title: '' };
+    // show all sibling names in tooltip
+    return {
+      hasSiblings: true,
+      title: `Siblings: ${names.join(', ')}`,
+    };
+  };
+
+  // Prevent race conditions when season changes rapidly
+  const playersLoadSeq = useRef(0);
+
+  const playerStats = useMemo(() => {
+    const total = players.length;
+    let paid = 0;
+    let unpaid = 0;
+    let workbondCheck = 0;
+
+    for (const p of players) {
+      if (p.payment_received) paid += 1;
+      else unpaid += 1;
+      if (p.family?.work_bond_check_received) workbondCheck += 1;
+    }
+
+    return { total, paid, unpaid, workbondCheck };
+  }, [players]);
+
   useEffect(() => {
-    loadPlayers();
     loadSeasons();
+  }, []);
+
+  // Debounce global search to keep filtering responsive on large datasets
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearchTerm(deferredSearchTerm), 200);
+    return () => clearTimeout(t);
+  }, [deferredSearchTerm]);
+
+  // When filters change, jump back to page 1
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedSearchTerm, columnFilters, selectedSeason]);
+
+  useEffect(() => {
+    // Wait until we have initialized selectedSeason from active season
+    if (selectedSeason === null) return;
+    loadPlayers();
   }, [selectedSeason]);
 
   const loadPlayers = async () => {
+    const seqId = ++playersLoadSeq.current;
     try {
       setLoading(true);
       setError(null);
@@ -44,171 +121,259 @@ const Players = () => {
       
       // Use the improved volunteer data enhancement
       const playersWithVolunteers = await enhancePlayersWithVolunteerData(response.data || []);
+      // Ignore stale responses (e.g., initial "all seasons" load finishing after active-season load)
+      if (seqId !== playersLoadSeq.current) return;
       setPlayers(playersWithVolunteers);
     } catch (error) {
       console.error('Error loading players:', error);
+      if (seqId !== playersLoadSeq.current) return;
       setError('Failed to load players. ' + error.message);
       setPlayers([]);
     } finally {
-      setLoading(false);
+      if (seqId === playersLoadSeq.current) {
+        setLoading(false);
+      }
     }
   };
 
-  // FIXED: Improved volunteer data enhancement with direct family_id matching
+  const loadTeams = async () => {
+    if (!selectedSeason) {
+      setTeams([]);
+      return;
+    }
+    try {
+      const res = await teamsAPI.getAll({ season_id: selectedSeason });
+      setTeams(Array.isArray(res.data) ? res.data : []);
+    } catch (e) {
+      console.error('Error loading teams:', e);
+      setTeams([]);
+    }
+  };
+
+  // Open the "Change Team" modal for a player
+  const openTeamEdit = (player) => {
+    setEditingPlayer(player);
+    // allow blank (unassigned)
+    setEditTeamId(player?.team_id || '');
+    setShowTeamEditModal(true);
+  };
+
+  // Save only the team change for the selected player
+  const handleSaveTeamChange = async () => {
+    if (!editingPlayer) return;
+
+    try {
+      setSavingTeam(true);
+
+      // empty string => null (unassigned)
+      const newTeamId = editTeamId ? editTeamId : null;
+
+      await playersAPI.update(editingPlayer.id, { team_id: newTeamId });
+
+      setShowTeamEditModal(false);
+      setEditingPlayer(null);
+
+      // reload players so the UI updates immediately
+      await loadPlayers();
+    } catch (err) {
+      console.error('Error updating player team:', err);
+      alert('Failed to update player team. Check the console for details.');
+    } finally {
+      setSavingTeam(false);
+    }
+  };
+
+  useEffect(() => {
+    if (selectedSeason) {
+      loadTeams();
+    }
+  }, [selectedSeason]);
+
+  // FIXED: Enhanced volunteer data matching using family_id
   const enhancePlayersWithVolunteerData = async (playersData) => {
     try {
-      console.log('=== ENHANCING PLAYERS WITH VOLUNTEER DATA ===');
-      console.log('Players data received:', playersData.length, 'players');
+      // Fetch volunteers for the current season
+      let url = '/api/volunteers';
+      if (selectedSeason) {
+        url += `?season_id=${selectedSeason}`;
+      }
       
-      // Fetch volunteers WITH family relationships included
-      const volunteersResponse = await fetch('/api/volunteers?include=family');
+      console.log('Fetching volunteers from:', url);
+      const volunteersResponse = await fetch(url);
       if (!volunteersResponse.ok) throw new Error('Failed to fetch volunteers');
       const volunteersData = await volunteersResponse.json();
       
-      console.log('Volunteers data loaded:', volunteersData.length, 'volunteers');
-      
-      // Log family_id relationships for debugging
-      playersData.forEach(player => {
-        console.log(`Player: ${player.first_name} ${player.last_name}, Family ID: ${player.family_id}`);
-      });
-      
-      volunteersData.forEach(volunteer => {
-        console.log(`Volunteer: ${volunteer.name}, Family ID: ${volunteer.family_id}, Role: ${volunteer.role}`);
-      });
+      console.log('Total volunteers found:', volunteersData?.length || 0);
 
-      // Find unlinked volunteers for the family linker tool
-      const unlinked = volunteersData.filter(volunteer => !volunteer.family_id);
-      setUnlinkedVolunteers(unlinked);
-      console.log('Unlinked volunteers found:', unlinked.length);
+      // Create lookup maps
+      const volunteersByFamilyId = new Map();
+      const volunteersByEmail = new Map();
 
-      // Enhance players with volunteer information using direct family_id matching
-      return playersData.map(player => {
-        if (!player.family_id) {
-          console.log(`Player ${player.first_name} ${player.last_name} has no family_id`);
-          return {
-            ...player,
-            shirt_size: player.uniform_shirt_size,
-            pants_size: player.uniform_pants_size,
-            volunteers: [],
-            primary_guardian_volunteer: null,
-            secondary_guardian_volunteer: null
-          };
+      // Organize volunteers by family_id
+      for (const volunteer of volunteersData || []) {
+        const familyId = volunteer.family_id;
+        if (familyId) {
+          const key = String(familyId);
+          if (!volunteersByFamilyId.has(key)) volunteersByFamilyId.set(key, []);
+          volunteersByFamilyId.get(key).push(volunteer);
         }
 
-        // STRATEGY 1: Find volunteers by exact family_id match (MOST RELIABLE)
-        const familyVolunteers = volunteersData.filter(volunteer => 
-          volunteer.family_id === player.family_id
-        );
-        
-        console.log(`Player ${player.first_name} ${player.last_name} (family: ${player.family_id}) has ${familyVolunteers.length} volunteers by family_id match`);
+        // Also index by email for fallback matching
+        if (volunteer.email) {
+          const emailKey = String(volunteer.email).toLowerCase().trim();
+          if (!volunteersByEmail.has(emailKey)) volunteersByEmail.set(emailKey, []);
+          volunteersByEmail.get(emailKey).push(volunteer);
+        }
+      }
 
-        // STRATEGY 2: If no family_id matches, try email matching as fallback
-        let additionalVolunteers = [];
-        if (familyVolunteers.length === 0 && player.family) {
+      // Enhance each player with their family's volunteers
+      return (playersData || []).map((player) => {
+        const familyId = player.family_id ? String(player.family_id) : null;
+        let playerVolunteers = [];
+
+        // Primary strategy: Match by family_id
+        if (familyId && volunteersByFamilyId.has(familyId)) {
+          playerVolunteers = [...volunteersByFamilyId.get(familyId)];
+          console.log(`Found ${playerVolunteers.length} volunteers for player ${player.first_name} ${player.last_name} via family_id ${familyId}`);
+        } 
+        // Fallback strategy: Match by email if family_id doesn't work
+        else if (player.family) {
           const familyEmails = [
-            player.family.primary_contact_email?.toLowerCase(),
-            player.family.parent2_email?.toLowerCase()
-          ].filter(Boolean);
-          
-          additionalVolunteers = volunteersData.filter(volunteer => 
-            volunteer.email && familyEmails.includes(volunteer.email.toLowerCase())
-          );
-          
-          if (additionalVolunteers.length > 0) {
-            console.log(`Found ${additionalVolunteers.length} volunteers by email match for ${player.first_name} ${player.last_name}`);
+            player.family.primary_contact_email,
+            player.family.parent2_email,
+          ]
+            .filter(Boolean)
+            .map((e) => String(e).toLowerCase().trim());
+
+          const emailMatched = [];
+          for (const email of familyEmails) {
+            if (volunteersByEmail.has(email)) {
+              emailMatched.push(...volunteersByEmail.get(email));
+            }
+          }
+
+          // Deduplicate
+          const seenIds = new Set();
+          playerVolunteers = emailMatched.filter((v) => {
+            if (v.id && !seenIds.has(v.id)) {
+              seenIds.add(v.id);
+              return true;
+            }
+            return false;
+          });
+
+          if (playerVolunteers.length > 0) {
+            console.log(`Found ${playerVolunteers.length} volunteers for player ${player.first_name} ${player.last_name} via email matching`);
           }
         }
 
-        // Combine both strategies
-        const allVolunteers = [...familyVolunteers, ...additionalVolunteers];
-        
-        // For primary guardian volunteer - look for exact matches first
-        const primaryGuardianVolunteer = allVolunteers.find(volunteer => {
-          // Direct family_id match is primary indicator
-          if (volunteer.family_id === player.family_id) {
-            return true;
-          }
-          
-          // Email match with primary contact
-          if (player.family?.primary_contact_email && volunteer.email) {
-            return volunteer.email.toLowerCase() === player.family.primary_contact_email.toLowerCase();
-          }
-          
-          return false;
-        });
-
-        // For secondary guardian volunteer - look for other volunteers in the same family
-        const secondaryGuardianVolunteer = allVolunteers.find(volunteer => 
-          volunteer !== primaryGuardianVolunteer
-        );
-
-        // Log the results for debugging
-        if (allVolunteers.length > 0) {
-          console.log(`>>> VOLUNTEERS ASSIGNED to ${player.first_name} ${player.last_name}:`, 
-            allVolunteers.map(v => `${v.name} (${v.role})`));
+        // For debugging the Bartlinski case
+        if (player.last_name === 'Bartlinski') {
+          console.log('DEBUG - Bartlinski player:', {
+            name: `${player.first_name} ${player.last_name}`,
+            familyId,
+            familyEmails: [
+              player.family?.primary_contact_email,
+              player.family?.parent2_email
+            ],
+            foundVolunteers: playerVolunteers.map(v => `${v.name} - ${v.role} (family_id: ${v.family_id})`)
+          });
         }
 
+        // Return player with volunteer data
         return {
           ...player,
-          shirt_size: player.uniform_shirt_size,
-          pants_size: player.uniform_pants_size,
-          volunteers: allVolunteers,
-          primary_guardian_volunteer: primaryGuardianVolunteer,
-          secondary_guardian_volunteer: secondaryGuardianVolunteer
+          volunteers: playerVolunteers,
+          // We'll match volunteers to specific guardians in the UI logic
         };
       });
     } catch (error) {
       console.error('Error enhancing players with volunteer data:', error);
-      // Return players without volunteer data if there's an error
-      return playersData.map(player => ({
-        ...player,
-        shirt_size: player.uniform_shirt_size,
-        pants_size: player.uniform_pants_size,
-        volunteers: [],
-        primary_guardian_volunteer: null,
-        secondary_guardian_volunteer: null
-      }));
+      return playersData || [];
     }
   };
 
-  // NEW: Function to link volunteer to family
-  const linkVolunteerToFamily = async (volunteerId, familyId) => {
-    try {
-      console.log(`Linking volunteer ${volunteerId} to family ${familyId}`);
-      
-      const response = await fetch(`/api/volunteers/${volunteerId}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          family_id: familyId
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to link volunteer to family');
-      }
-
-      const result = await response.json();
-      console.log('Volunteer linked successfully:', result);
-      
-      // Reload players to see the updated volunteer data
-      await loadPlayers();
-      
-      alert('Volunteer successfully linked to family!');
-      return true;
-    } catch (error) {
-      console.error('Error linking volunteer:', error);
-      alert(`Error linking volunteer: ${error.message}`);
-      return false;
+  // Helper function to find volunteer for a specific guardian
+  const findVolunteerForGuardian = (player, guardianType) => {
+    if (!player.volunteers || player.volunteers.length === 0) {
+      return null;
     }
+
+    const volunteers = player.volunteers;
+    
+    if (guardianType === 'primary') {
+      // Try to match by name first
+      const primaryName = player.family?.primary_contact_name;
+      if (primaryName) {
+        const nameMatch = volunteers.find(v => 
+          v.name && v.name.trim().toLowerCase() === primaryName.trim().toLowerCase()
+        );
+        if (nameMatch) return nameMatch;
+      }
+      
+      // Try to match by email
+      const primaryEmail = player.family?.primary_contact_email;
+      if (primaryEmail) {
+        const emailMatch = volunteers.find(v => 
+          v.email && v.email.trim().toLowerCase() === primaryEmail.trim().toLowerCase()
+        );
+        if (emailMatch) return emailMatch;
+      }
+    } 
+    else if (guardianType === 'secondary') {
+      // Try to match by name
+      const secondaryFirstName = player.family?.parent2_first_name;
+      const secondaryLastName = player.family?.parent2_last_name;
+      if (secondaryFirstName) {
+        const secondaryName = `${secondaryFirstName} ${secondaryLastName || ''}`.trim();
+        const nameMatch = volunteers.find(v => {
+          if (!v.name) return false;
+          // Check if volunteer name contains the guardian's first name
+          return v.name.toLowerCase().includes(secondaryFirstName.toLowerCase());
+        });
+        if (nameMatch) return nameMatch;
+      }
+      
+      // Try to match by email
+      const secondaryEmail = player.family?.parent2_email;
+      if (secondaryEmail) {
+        const emailMatch = volunteers.find(v => 
+          v.email && v.email.trim().toLowerCase() === secondaryEmail.trim().toLowerCase()
+        );
+        if (emailMatch) return emailMatch;
+      }
+    }
+    
+    return null;
+  };
+
+  // Helper function to get volunteer role for a guardian
+  const getGuardianVolunteerRole = (player, guardianType) => {
+    const volunteer = findVolunteerForGuardian(player, guardianType);
+    return volunteer?.role || 'None';
+  };
+
+  // Helper function to check if volunteer role is selected/approved
+  const isVolunteerSelected = (player, guardianType) => {
+    const volunteer = findVolunteerForGuardian(player, guardianType);
+    return volunteer?.is_approved || false;
   };
 
   const loadSeasons = async () => {
     try {
-      const response = await seasonsAPI.getAll();
-      setSeasons(response.data || []);
+      const [activeRes, allRes] = await Promise.all([
+        seasonsAPI.getActive().catch(() => ({ data: null })),
+        seasonsAPI.getAll().catch(() => ({ data: [] }))
+      ]);
+
+      const active = activeRes?.data || null;
+      const all = Array.isArray(allRes?.data) ? allRes.data : [];
+      setSeasons(all);
+
+      // Default season filter to ACTIVE season (user can still pick "All Seasons")
+      if (selectedSeason === null) {
+        setSelectedSeason(active?.id || '');
+      }
     } catch (error) {
       console.error('Error loading seasons:', error);
     }
@@ -277,65 +442,124 @@ const Players = () => {
       gender: '',
       registrationPaid: '',
       workbondCheck: '',
+      guardianName: '',
       medicalConditions: ''
     });
     setSearchTerm('');
   };
 
-  // Helper function to get volunteer role for a guardian
-  const getGuardianVolunteerRole = (player, guardianType) => {
-    if (guardianType === 'primary') {
-      return player.primary_guardian_volunteer?.role || 'None';
-    } else {
-      return player.secondary_guardian_volunteer?.role || 'None';
-    }
-  };
+  // Build dropdown options for cleaner filtering (derived from currently loaded players)
+  const divisionOptions = useMemo(() => {
+    const set = new Set();
+    (players || []).forEach((p) => {
+      const name = (p?.division?.name || p?.program_title || '').trim();
+      if (name) set.add(name);
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [players]);
 
-  // Helper function to check if volunteer role is selected/approved
-  const isVolunteerSelected = (player, guardianType) => {
-    if (guardianType === 'primary') {
-      return player.primary_guardian_volunteer?.is_approved || false;
-    } else {
-      return player.secondary_guardian_volunteer?.is_approved || false;
-    }
-  };
+  const teamOptions = useMemo(() => {
+    const set = new Set();
+    (players || []).forEach((p) => {
+      const name = (p?.team?.name || '').trim();
+      if (name) set.add(name);
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [players]);
 
-  const filteredPlayers = players.filter(player => {
-    // Global search
-    const matchesSearch = !searchTerm || 
-      player.first_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      player.last_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      player.family?.primary_contact_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      player.family?.parent2_first_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      player.registration_no?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      player.family?.family_id?.toLowerCase().includes(searchTerm.toLowerCase());
+  // Build a light-weight search index once per load for fast filtering
+  const searchIndex = useMemo(() => {
+    return (players || []).map((p) => {
+      const first = String(p?.first_name || '').toLowerCase();
+      const last = String(p?.last_name || '').toLowerCase();
+      const playerName = `${first} ${last}`.trim();
 
-    // Column filters - FIXED
-    const matchesDivision = !columnFilters.division || 
-      (player.division?.name?.toLowerCase().includes(columnFilters.division.toLowerCase()) ||
-       player.program_title?.toLowerCase().includes(columnFilters.division.toLowerCase()));
-    
-    const matchesTeam = !columnFilters.team || 
-      (player.team?.name?.toLowerCase().includes(columnFilters.team.toLowerCase()));
-    
-    const matchesGender = !columnFilters.gender || 
-      player.gender?.toLowerCase() === columnFilters.gender.toLowerCase();
-    
-    const matchesRegistrationPaid = !columnFilters.registrationPaid || 
-      (columnFilters.registrationPaid === 'paid' && player.payment_received) ||
-      (columnFilters.registrationPaid === 'pending' && !player.payment_received);
-    
-    const matchesWorkbondCheck = !columnFilters.workbondCheck || 
-      (columnFilters.workbondCheck === 'received' && player.family?.work_bond_check_received) ||
-      (columnFilters.workbondCheck === 'not_received' && !player.family?.work_bond_check_received);
-    
-    const matchesMedicalConditions = !columnFilters.medicalConditions || 
-      (columnFilters.medicalConditions === 'has_medical' && player.medical_conditions && player.medical_conditions !== 'None' && player.medical_conditions !== 'none') ||
-      (columnFilters.medicalConditions === 'no_medical' && (!player.medical_conditions || player.medical_conditions === 'None' || player.medical_conditions === 'none'));
+      const guardian1 = String(p?.family?.primary_contact_name || '').toLowerCase();
+      const guardian2 = `${String(p?.family?.parent2_first_name || '').toLowerCase()} ${String(p?.family?.parent2_last_name || '').toLowerCase()}`.trim();
+      const guardian = `${guardian1} ${guardian2}`.trim();
 
-    return matchesSearch && matchesDivision && matchesTeam && matchesGender && 
-           matchesRegistrationPaid && matchesWorkbondCheck && matchesMedicalConditions;
-  });
+      const division = String(p?.division?.name || p?.program_title || '').toLowerCase().trim();
+      const team = String(p?.team?.name || '').toLowerCase().trim();
+      const gender = String(p?.gender || '').toLowerCase().trim();
+      const reg = String(p?.registration_no || '').toLowerCase().trim();
+      const familyId = String(p?.family?.family_id || p?.family_id || '').toLowerCase().trim();
+
+      return { playerName, guardian, division, team, gender, reg, familyId };
+    });
+  }, [players]);
+
+  // Memoized filtering for performance (avoid rebuilding strings on each keypress)
+  const filteredPlayers = useMemo(() => {
+    const nameTerm = String(debouncedSearchTerm || '').trim().toLowerCase();
+    const guardianTerm = String(columnFilters.guardianName || '').trim().toLowerCase();
+
+    const divFilter = String(columnFilters.division || '').trim().toLowerCase();
+    const teamFilter = String(columnFilters.team || '').trim().toLowerCase();
+    const genderFilter = String(columnFilters.gender || '').trim().toLowerCase();
+
+    return (players || []).filter((player, idx) => {
+      const s = searchIndex[idx] || {};
+
+      // Main search: player name only (first/last)
+      const matchesName =
+        !nameTerm ||
+        s.playerName?.includes(nameTerm) ||
+        String(player.first_name || '').toLowerCase().includes(nameTerm) ||
+        String(player.last_name || '').toLowerCase().includes(nameTerm);
+
+      // Guardian name search (in Filters panel)
+      const matchesGuardian =
+        !guardianTerm ||
+        s.guardian?.includes(guardianTerm);
+
+      // Division (dropdown)
+      const matchesDivision = !divFilter || s.division === divFilter;
+
+      // Team (dropdown)
+      const matchesTeam = !teamFilter || s.team === teamFilter;
+
+      // Gender
+      const matchesGender = !genderFilter || s.gender === genderFilter;
+
+      // Registration Paid
+      const matchesRegistrationPaid =
+        !columnFilters.registrationPaid ||
+        (columnFilters.registrationPaid === 'paid' && player.payment_received) ||
+        (columnFilters.registrationPaid === 'pending' && !player.payment_received);
+
+      // Workbond Check
+      const matchesWorkbondCheck =
+        !columnFilters.workbondCheck ||
+        (columnFilters.workbondCheck === 'received' && player.family?.work_bond_check_received) ||
+        (columnFilters.workbondCheck === 'not_received' && !player.family?.work_bond_check_received);
+
+      // Medical Conditions
+      const medical = String(player.medical_conditions || '').trim().toLowerCase();
+      const hasMedical = medical && medical !== 'none';
+      const matchesMedicalConditions =
+        !columnFilters.medicalConditions ||
+        (columnFilters.medicalConditions === 'has_medical' && hasMedical) ||
+        (columnFilters.medicalConditions === 'no_medical' && !hasMedical);
+
+      return (
+        matchesName &&
+        matchesGuardian &&
+        matchesDivision &&
+        matchesTeam &&
+        matchesGender &&
+        matchesRegistrationPaid &&
+        matchesWorkbondCheck &&
+        matchesMedicalConditions
+      );
+    });
+  }, [players, searchIndex, debouncedSearchTerm, columnFilters]);
+
+  const displayedPlayers = useMemo(() => {
+    const start = (page - 1) * PAGE_SIZE;
+    return filteredPlayers.slice(start, start + PAGE_SIZE);
+  }, [filteredPlayers, page]);
+
+  const totalPages = useMemo(() => Math.max(1, Math.ceil(filteredPlayers.length / PAGE_SIZE)), [filteredPlayers.length]);
 
   const activeFilterCount = Object.values(columnFilters).filter(value => value !== '').length + (searchTerm ? 1 : 0);
   
@@ -344,7 +568,7 @@ const Players = () => {
     try {
       console.log('=== DEBUG: VOLUNTEER DATA CHECK ===');
       
-      const volunteersResponse = await fetch('/api/volunteers?include=family');
+      const volunteersResponse = await fetch(`/api/volunteers${selectedSeason ? `?season_id=${selectedSeason}` : ''}`);
       const volunteers = await volunteersResponse.json();
       
       console.log('All volunteers with family data:', volunteers);
@@ -353,7 +577,7 @@ const Players = () => {
       players.forEach(player => {
         const playerVolunteers = volunteers.filter(v => v.family_id === player.family_id);
         console.log(`Player ${player.first_name} ${player.last_name} (Family: ${player.family_id}) has ${playerVolunteers.length} volunteers:`, 
-          playerVolunteers.map(v => `${v.name} - ${v.role}`));
+          playerVolunteers.map(v => `${v.name} - ${v.role} (family_id: ${v.family_id})`));
       });
     } catch (error) {
       console.error('Debug error:', error);
@@ -379,6 +603,40 @@ const Players = () => {
     if (success) {
       setLinkSelections({ volunteerId: '', playerId: '' });
       setShowFamilyLinker(false);
+    }
+  };
+
+  // NEW: Function to link volunteer to family
+  const linkVolunteerToFamily = async (volunteerId, familyId) => {
+    try {
+      console.log(`Linking volunteer ${volunteerId} to family ${familyId}`);
+      
+      const response = await fetch(`/api/volunteers/${volunteerId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          family_id: familyId
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to link volunteer to family');
+      }
+
+      const result = await response.json();
+      console.log('Volunteer linked successfully:', result);
+      
+      // Reload players to see the updated volunteer data
+      await loadPlayers();
+      
+      alert('Volunteer successfully linked to family!');
+      return true;
+    } catch (error) {
+      console.error('Error linking volunteer:', error);
+      alert(`Error linking volunteer: ${error.message}`);
+      return false;
     }
   };
 
@@ -514,15 +772,49 @@ const Players = () => {
       </div>
 
       {unlinkedVolunteers.length > 0 && (
-        <div>
-          <h4 className="font-medium mb-2" style={{ fontSize: '14px', fontWeight: '600' }}>All Unlinked Volunteers:</h4>
-          <div className="bg-gray-50 rounded-md p-3 max-h-40 overflow-y-auto">
-            {unlinkedVolunteers.map(volunteer => (
-              <div key={volunteer.id} className="text-sm py-1 border-b border-gray-200 last:border-b-0">
-                <strong>{volunteer.name}</strong> - {volunteer.role} 
-                {volunteer.email && ` (${volunteer.email})`}
-              </div>
-            ))}
+        <div style={{ marginTop: '12px' }}>
+          <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '8px' }}>
+            Unlinked volunteers in this season: <strong>{unlinkedVolunteers.length}</strong>
+          </div>
+          <div>
+            <label style={{
+              display: 'block',
+              fontSize: '14px',
+              fontWeight: '500',
+              color: '#374151',
+              marginBottom: '8px'
+            }}>
+              Select Volunteer *
+            </label>
+            <select
+              required
+              style={{
+                width: '100%',
+                padding: '10px 12px',
+                border: '1px solid #d1d5db',
+                borderRadius: '8px',
+                fontSize: '14px',
+                color: '#374151',
+                backgroundColor: 'white'
+              }}
+              value={linkSelections.volunteerId}
+              onChange={(e) => setLinkSelections(prev => ({ ...prev, volunteerId: e.target.value }))}
+            >
+              <option value="">Choose a volunteer...</option>
+              {[...unlinkedVolunteers]
+                .sort((a, b) => {
+                  const al = String(a?.name || '').trim().split(/\s+/).pop()?.toLowerCase() || '';
+                  const bl = String(b?.name || '').trim().split(/\s+/).pop()?.toLowerCase() || '';
+                  if (al < bl) return -1;
+                  if (al > bl) return 1;
+                  return String(a?.name || '').localeCompare(String(b?.name || ''));
+                })
+                .map((volunteer) => (
+                  <option key={volunteer.id} value={volunteer.id}>
+                    {volunteer.name} - {volunteer.role}
+                  </option>
+                ))}
+            </select>
           </div>
         </div>
       )}
@@ -611,7 +903,7 @@ const Players = () => {
         <div className="bg-white overflow-hidden shadow rounded-lg">
           <div className="px-4 py-5 sm:p-6">
             <dt className="text-sm font-medium text-gray-500 truncate">Total Players</dt>
-            <dd className="mt-1 text-3xl font-semibold text-gray-900">{players.length}</dd>
+            <dd className="mt-1 text-3xl font-semibold text-gray-900">{playerStats.total}</dd>
           </div>
         </div>
         <div className="bg-white overflow-hidden shadow rounded-lg">
@@ -626,7 +918,7 @@ const Players = () => {
           <div className="px-4 py-5 sm:p-6">
             <dt className="text-sm font-medium text-gray-500 truncate">Paid</dt>
             <dd className="mt-1 text-3xl font-semibold text-gray-900">
-              {players.filter(p => p.payment_received).length}
+              {playerStats.paid}
             </dd>
           </div>
         </div>
@@ -634,7 +926,7 @@ const Players = () => {
           <div className="px-4 py-5 sm:p-6">
             <dt className="text-sm font-medium text-gray-500 truncate">Workbond Check Received</dt>
             <dd className="mt-1 text-3xl font-semibold text-gray-900">
-              {players.filter(p => p.family?.work_bond_check_received).length}
+              {playerStats.workbondCheck}
             </dd>
           </div>
         </div>
@@ -645,11 +937,13 @@ const Players = () => {
         <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center">
           {/* Global Search */}
           <div className="flex-1">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+            <div className="relative flex items-center">
+              <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+                <Search className="text-gray-400 h-4 w-4" />
+              </div>
               <input
                 type="text"
-                placeholder="Search players, parents, registration numbers, or family IDs..."
+                placeholder="Search player name (first or last)..."
                 className="pl-10 pr-4 py-2 border border-gray-300 rounded-md w-full focus:ring-blue-500 focus:border-blue-500"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
@@ -710,28 +1004,46 @@ const Players = () => {
               {/* Division Filter */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Division</label>
-                <input
-                  type="text"
-                  placeholder="Filter by division..."
+                <select
                   className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
                   value={columnFilters.division}
                   onChange={(e) => handleFilterChange('division', e.target.value)}
-                />
+                >
+                  <option value="">All Divisions</option>
+                  {divisionOptions.map((d) => (
+                    <option key={d} value={d}>{d}</option>
+                  ))}
+                </select>
               </div>
 
               {/* Team Filter */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Team</label>
-                <input
-                  type="text"
-                  placeholder="Filter by team..."
+                <select
                   className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
                   value={columnFilters.team}
                   onChange={(e) => handleFilterChange('team', e.target.value)}
-                />
+                >
+                  <option value="">All Teams</option>
+                  {teamOptions.map((t) => (
+                    <option key={t} value={t}>{t}</option>
+                  ))}
+                </select>
               </div>
 
-              {/* Gender Filter */}
+              
+              {/* Guardian Filter */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Guardian Name</label>
+                <input
+                  type="text"
+                  placeholder="Search guardian name..."
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+                  value={columnFilters.guardianName}
+                  onChange={(e) => handleFilterChange('guardianName', e.target.value)}
+                />
+              </div>
+{/* Gender Filter */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Gender</label>
                 <select
@@ -775,7 +1087,7 @@ const Players = () => {
 
               {/* Medical Conditions Filter */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Medical Conditions</label>
+                <label className="block text-sm font-medium text-gray-500 mb-1">Medical Conditions</label>
                 <select
                   className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
                   value={columnFilters.medicalConditions}
@@ -793,7 +1105,53 @@ const Players = () => {
 
       {/* Players Table */}
       <div className="bg-white shadow overflow-hidden rounded-lg">
-        <div className="overflow-x-auto">
+        
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3">
+          <div className="text-sm text-gray-600">
+            Showing <span className="font-medium">{displayedPlayers.length}</span> of{' '}
+            <span className="font-medium">{filteredPlayers.length}</span> players
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setPage(1)}
+              disabled={page <= 1}
+              className="px-3 py-1 border rounded-md text-sm disabled:opacity-50"
+            >
+              First
+            </button>
+            <button
+              type="button"
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page <= 1}
+              className="px-3 py-1 border rounded-md text-sm disabled:opacity-50"
+            >
+              Prev
+            </button>
+            <div className="text-sm text-gray-700 px-2">
+              Page <span className="font-medium">{page}</span> of{' '}
+              <span className="font-medium">{totalPages}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={page >= totalPages}
+              className="px-3 py-1 border rounded-md text-sm disabled:opacity-50"
+            >
+              Next
+            </button>
+            <button
+              type="button"
+              onClick={() => setPage(totalPages)}
+              disabled={page >= totalPages}
+              className="px-3 py-1 border rounded-md text-sm disabled:opacity-50"
+            >
+              Last
+            </button>
+          </div>
+        </div>
+
+<div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
@@ -830,12 +1188,15 @@ const Players = () => {
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {filteredPlayers.map((player) => (
+              {displayedPlayers.map((player) => (
                 <tr key={player.id} className="hover:bg-gray-50">
                   {/* Player Info Column */}
                   <td className="px-4 py-4">
-                    <div className="text-sm font-medium text-gray-900">
-                      {player.first_name} {player.last_name}
+                    <div className="text-sm font-medium text-gray-900 flex items-center gap-2">
+                      <span>{player.first_name} {player.last_name}</span>
+                      {getSiblingInfo(player).hasSiblings ? (
+                        <Users className="h-4 w-4 text-blue-500" title={getSiblingInfo(player).title} />
+                      ) : null}
                     </div>
                     <div className="text-sm text-gray-500">
                       {player.is_new_player ? 'New' : 'Returning'}
@@ -852,16 +1213,27 @@ const Players = () => {
 
                   {/* Team Column */}
                   <td className="px-4 py-4">
-                    {player.team ? (
-                      <div className="flex items-center">
-                        <div 
-                          className={`w-3 h-3 rounded-full mr-2 ${getColorClass(player.team.color)}`}
-                        ></div>
-                        <span className="text-sm text-gray-700">{player.team.name}</span>
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        {player.team ? (
+                          <div className="flex items-center">
+                            <div 
+                              className={`w-3 h-3 rounded-full mr-2 ${getColorClass(player.team.color)}`}
+                            ></div>
+                            <span className="text-sm text-gray-700">{player.team.name}</span>
+                          </div>
+                        ) : (
+                          <span className="text-sm text-gray-400">No Team</span>
+                        )}
                       </div>
-                    ) : (
-                      <span className="text-sm text-gray-400">No Team</span>
-                    )}
+                      <button
+                        type="button"
+                        onClick={() => openTeamEdit(player)}
+                        className="text-xs text-blue-600 hover:text-blue-800 underline whitespace-nowrap"
+                      >
+                        Change
+                      </button>
+                    </div>
                   </td>
 
                   {/* Age/DOB/Gender Column */}
@@ -907,6 +1279,11 @@ const Players = () => {
                         Not Received
                       </span>
                     )}
+                    {player.family?.work_bond_check_status ? (
+                      <div className="mt-1 text-xs text-gray-500 whitespace-pre-line">
+                        {player.family.work_bond_check_status}
+                      </div>
+                    ) : null}
                   </td>
 
                   {/* Medical Conditions Column */}
@@ -923,7 +1300,7 @@ const Players = () => {
                     )}
                   </td>
 
-                  {/* Primary Guardian Column */}
+                  {/* Primary Guardian Column - UPDATED */}
                   <td className="px-4 py-4">
                     {player.family?.primary_contact_name ? (
                       <div className="text-sm">
@@ -942,24 +1319,44 @@ const Players = () => {
                             <span className="text-xs">{player.family.primary_contact_phone}</span>
                           </div>
                         )}
-                        <div className="mt-1">
-                          <span className="text-xs font-medium text-gray-500">Volunteer: </span>
-                          <span className={`text-xs ${
-                            isVolunteerSelected(player, 'primary') 
-                              ? 'text-green-600 font-medium' 
-                              : 'text-blue-600'
-                          }`}>
-                            {getGuardianVolunteerRole(player, 'primary')}
-                            {isVolunteerSelected(player, 'primary') && ' (Selected)'}
-                          </span>
-                        </div>
+                        {/* Only show volunteer role if this person is actually a volunteer */}
+                        {player.volunteers?.some(v => {
+                          const volunteerName = v.name || '';
+                          const guardianName = player.family.primary_contact_name || '';
+                          const volunteerEmail = v.email || '';
+                          const guardianEmail = player.family.primary_contact_email || '';
+                          
+                          // Match by exact name or email
+                          return (volunteerName.trim().toLowerCase() === guardianName.trim().toLowerCase()) ||
+                                 (volunteerEmail.trim().toLowerCase() === guardianEmail.trim().toLowerCase());
+                        }) && (
+                          <div className="mt-1">
+                            <span className="text-xs font-medium text-gray-500">Volunteer: </span>
+                            {player.volunteers
+                              .filter(v => {
+                                const volunteerName = v.name || '';
+                                const guardianName = player.family.primary_contact_name || '';
+                                const volunteerEmail = v.email || '';
+                                const guardianEmail = player.family.primary_contact_email || '';
+                                
+                                return (volunteerName.trim().toLowerCase() === guardianName.trim().toLowerCase()) ||
+                                       (volunteerEmail.trim().toLowerCase() === guardianEmail.trim().toLowerCase());
+                              })
+                              .map((volunteer, idx) => (
+                                <span key={idx} className={`text-xs ${volunteer.is_approved ? 'text-green-600 font-medium' : 'text-blue-600'}`}>
+                                  {volunteer.role}
+                                  {volunteer.is_approved && ' (Selected)'}
+                                </span>
+                              ))}
+                          </div>
+                        )}
                       </div>
                     ) : (
                       <span className="text-sm text-gray-400">Not provided</span>
                     )}
                   </td>
 
-                  {/* Secondary Guardian Column */}
+                  {/* Secondary Guardian Column - UPDATED */}
                   <td className="px-4 py-4">
                     {player.family?.parent2_first_name ? (
                       <div className="text-sm">
@@ -978,17 +1375,37 @@ const Players = () => {
                             <span className="text-xs">{player.family.parent2_phone}</span>
                           </div>
                         )}
-                        <div className="mt-1">
-                          <span className="text-xs font-medium text-gray-500">Volunteer: </span>
-                          <span className={`text-xs ${
-                            isVolunteerSelected(player, 'secondary') 
-                              ? 'text-green-600 font-medium' 
-                              : 'text-blue-600'
-                          }`}>
-                            {getGuardianVolunteerRole(player, 'secondary')}
-                            {isVolunteerSelected(player, 'secondary') && ' (Selected)'}
-                          </span>
-                        </div>
+                        {/* Only show volunteer role if this person is actually a volunteer */}
+                        {player.volunteers?.some(v => {
+                          const volunteerName = v.name || '';
+                          const guardianName = `${player.family.parent2_first_name} ${player.family.parent2_last_name}`.trim();
+                          const volunteerEmail = v.email || '';
+                          const guardianEmail = player.family.parent2_email || '';
+                          
+                          // Match by exact name or email
+                          return (volunteerName.trim().toLowerCase() === guardianName.trim().toLowerCase()) ||
+                                 (volunteerEmail.trim().toLowerCase() === guardianEmail.trim().toLowerCase());
+                        }) && (
+                          <div className="mt-1">
+                            <span className="text-xs font-medium text-gray-500">Volunteer: </span>
+                            {player.volunteers
+                              .filter(v => {
+                                const volunteerName = v.name || '';
+                                const guardianName = `${player.family.parent2_first_name} ${player.family.parent2_last_name}`.trim();
+                                const volunteerEmail = v.email || '';
+                                const guardianEmail = player.family.parent2_email || '';
+                                
+                                return (volunteerName.trim().toLowerCase() === guardianName.trim().toLowerCase()) ||
+                                       (volunteerEmail.trim().toLowerCase() === guardianEmail.trim().toLowerCase());
+                              })
+                              .map((volunteer, idx) => (
+                                <span key={idx} className={`text-xs ${volunteer.is_approved ? 'text-green-600 font-medium' : 'text-blue-600'}`}>
+                                  {volunteer.role}
+                                  {volunteer.is_approved && ' (Selected)'}
+                                </span>
+                              ))}
+                          </div>
+                        )}
                       </div>
                     ) : (
                       <span className="text-sm text-gray-400">Not provided</span>
@@ -1013,6 +1430,71 @@ const Players = () => {
           </div>
         )}
       </div>
+      {/* Team Edit Modal (only team assignment) */}
+      {showTeamEditModal && editingPlayer && (
+        <Modal
+          isOpen={showTeamEditModal}
+          onClose={() => {
+            setShowTeamEditModal(false);
+            setEditingPlayer(null);
+          }}
+          title="Change Player Team"
+        >
+          <div className="space-y-4">
+            <div className="text-sm text-gray-700">
+              <div className="font-medium text-gray-900">
+                {editingPlayer.first_name} {editingPlayer.last_name}
+              </div>
+              <div className="text-gray-600">
+                Division: {editingPlayer.division?.name || editingPlayer.program_title || 'Unknown'}
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Team</label>
+              <select
+                className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+                value={editTeamId}
+                onChange={(e) => setEditTeamId(e.target.value)}
+              >
+                <option value="">No Team</option>
+                {(teams || [])
+                  .filter(t => {
+                    // filter teams by the player's division
+                    const playerDivId = editingPlayer.division_id || editingPlayer.division?.id;
+                    return !playerDivId || t.division_id === playerDivId;
+                  })
+                  .sort((a, b) => String(a.name).localeCompare(String(b.name)))
+                  .map(t => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+              </select>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowTeamEditModal(false);
+                  setEditingPlayer(null);
+                }}
+                className="px-4 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-50"
+                disabled={savingTeam}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveTeamChange}
+                className="px-4 py-2 text-sm text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50"
+                disabled={savingTeam}
+              >
+                {savingTeam ? 'Saving...' : 'Save'}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 };

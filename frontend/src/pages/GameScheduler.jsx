@@ -35,7 +35,12 @@ const GameScheduler = () => {
 
   // Slot templates from Excel
   const slotTemplates = {
-    3: [
+    2: [
+      [1, 2], [2, 1], [1, 2], [2, 1], [1, 2], [2, 1],
+      [1, 2], [2, 1], [1, 2], [2, 1], [1, 2], [2, 1],
+      [1, 2], [2, 1], [1, 2], [2, 1], [1, 2], [2, 1]
+    ],
+  3: [
       [1, 2], [2, 3], [3, 1], [3, 2], [1, 3], [1, 2],
       [3, 1], [1, 2], [2, 3], [2, 1], [3, 2], [1, 3],
       [2, 3], [3, 1], [2, 1], [1, 3], [2, 1], [3, 2]
@@ -91,18 +96,20 @@ const GameScheduler = () => {
         // Set the saved values if they exist
         if (savedSeasonStart) setSeasonStartDate(savedSeasonStart);
         if (savedSeasonWeeks) setSeasonWeeks(parseInt(savedSeasonWeeks));
-        if (savedSelectedSeason) setSelectedSeason(savedSelectedSeason);
+        // We'll pick the ACTIVE season as the default; user can still change via the dropdown
 
-        // Load divisions, teams, seasons from API
-const [divisionsRes, teamsRes, seasonsRes] = await Promise.all([
-  divisionsAPI.getAll(),
-  api.get('/teams/with-details'),
-  seasonsAPI.getAll(),
-]);
+        // Load seasons first so we can default to ACTIVE season
+        const [activeRes, seasonsRes] = await Promise.all([
+          seasonsAPI.getActive().catch(() => ({ data: null })),
+          seasonsAPI.getAll().catch(() => ({ data: [] }))
+        ]);
 
-setDivisions(Array.isArray(divisionsRes.data) ? divisionsRes.data : []);
-setTeams(Array.isArray(teamsRes.data) ? teamsRes.data : []);
-setSeasons(Array.isArray(seasonsRes.data) ? seasonsRes.data : []);
+        const active = activeRes?.data || null;
+        const allSeasons = Array.isArray(seasonsRes.data) ? seasonsRes.data : [];
+        setSeasons(allSeasons);
+
+        const nextSeasonId = active?.id || allSeasons?.[0]?.id || '';
+        setSelectedSeason(nextSeasonId);
 
 
         // Set schedule config - use saved if available, otherwise initialize
@@ -128,6 +135,26 @@ setSeasons(Array.isArray(seasonsRes.data) ? seasonsRes.data : []);
 
     loadAllData();
   }, []);
+
+  // Load divisions + teams for the selected season
+  useEffect(() => {
+    const loadSeasonData = async () => {
+      if (!selectedSeason) return;
+      try {
+        const [divisionsRes, teamsRes] = await Promise.all([
+          divisionsAPI.getAll({ season_id: selectedSeason }),
+          api.get('/teams/with-details', { params: { season_id: selectedSeason } })
+        ]);
+        setDivisions(Array.isArray(divisionsRes.data) ? divisionsRes.data : []);
+        setTeams(Array.isArray(teamsRes.data) ? teamsRes.data : []);
+      } catch (e) {
+        console.error('Error loading season-specific divisions/teams:', e);
+        setDivisions([]);
+        setTeams([]);
+      }
+    };
+    loadSeasonData();
+  }, [selectedSeason]);
 
   // Save ALL configuration whenever anything changes
   useEffect(() => {
@@ -418,7 +445,7 @@ setSeasons(Array.isArray(seasonsRes.data) ? seasonsRes.data : []);
                   EndTime: endTime,
                   Location: 'Sayreville Little League',
                   Field: availableFieldSlot.field,
-                  division: divisionName
+                  Division: divisionName
                 });
 
                 console.log(`    Scheduled: ${homeTeam.name} vs ${awayTeam.name} at ${time} (matchup ${currentMatchupIndex + 1}/${template.length})`);
@@ -445,7 +472,7 @@ setSeasons(Array.isArray(seasonsRes.data) ? seasonsRes.data : []);
 
   const getManagerName = (team) => {
     if (team.manager) {
-      return team.manager.name.split(' ')[0];
+      return team.manager.name.split(' ')[1];
     }
     if (team.volunteers && team.volunteers.length > 0) {
       const manager = team.volunteers.find(v => v.role === 'Manager');
@@ -519,7 +546,7 @@ setSeasons(Array.isArray(seasonsRes.data) ? seasonsRes.data : []);
 
   // Export to CSV
   const exportToCSV = () => {
-    const headers = ['SortOrder', 'RoundNo', 'HomeTeam', 'AwayTeam', 'MatchDate', 'StartTime', 'EndTime', 'Location', 'Field'];
+    const headers = ['SortOrder', 'RoundNo', 'Division', 'HomeTeam', 'AwayTeam', 'MatchDate', 'StartTime', 'EndTime', 'Location', 'Field'];
     const csvContent = [
       headers.join(','),
       ...generatedGames.map(game => 
@@ -821,6 +848,7 @@ setSeasons(Array.isArray(seasonsRes.data) ? seasonsRes.data : []);
                 <tr className="bg-gray-50">
                   <th className="border border-gray-300 px-4 py-2">SortOrder</th>
                   <th className="border border-gray-300 px-4 py-2">RoundNo</th>
+                  <th className="border border-gray-300 px-4 py-2 bg-gray-50">Division</th>
                   <th className="border border-gray-300 px-4 py-2">HomeTeam</th>
                   <th className="border border-gray-300 px-4 py-2">AwayTeam</th>
                   <th className="border border-gray-300 px-4 py-2">MatchDate</th>
@@ -835,6 +863,7 @@ setSeasons(Array.isArray(seasonsRes.data) ? seasonsRes.data : []);
                   <tr key={game.SortOrder} className="hover:bg-gray-50">
                     <td className="border border-gray-300 px-4 py-2 text-center">{game.SortOrder}</td>
                     <td className="border border-gray-300 px-4 py-2 text-center">{game.RoundNo}</td>
+                    <td className="border border-gray-300 px-4 py-2">{game.Division || ''}</td>
                     <td className="border border-gray-300 px-4 py-2">{game.HomeTeam}</td>
                     <td className="border border-gray-300 px-4 py-2">{game.AwayTeam}</td>
                     <td className="border border-gray-300 px-4 py-2">{game.MatchDate}</td>

@@ -4,10 +4,32 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const supabase = require('../config/database');
+const { getPermissionsForRole } = require('../services/rolePermissions');
 const { authMiddleware } = require('../middleware/auth');
 const { ROLES } = require('../config/roles');
 
 const router = express.Router();
+
+async function getScopedDivisionIdsForUser(user) {
+  try {
+    if (!user?.email) return [];
+    // Divisions table stores player_agent_email for assignment in Configuration -> Divisions
+    const { data, error } = await supabase
+      .from('divisions')
+      .select('id')
+      .eq('player_agent_email', user.email);
+
+    if (error) {
+      console.warn('Could not load scoped divisions for user:', error);
+      return [];
+    }
+    return (data || []).map((d) => d.id);
+  } catch (e) {
+    console.warn('Could not load scoped divisions for user:', e);
+    return [];
+  }
+}
+
 
 /**
  * POST /api/auth/login
@@ -66,9 +88,14 @@ router.post('/login', async (req, res) => {
       expiresIn: '8h', // you can adjust this
     });
 
+    const permissions = await getPermissionsForRole(payload.role);
+    const scoped_division_ids = permissions?.__scope__?.divisions === 'assigned'
+      ? await getScopedDivisionIdsForUser(payload)
+      : [];
+
     return res.json({
       token,
-      user: payload,
+      user: { ...payload, permissions, scoped_division_ids },
     });
   } catch (err) {
     console.error('Error in /api/auth/login:', err);
@@ -84,8 +111,13 @@ router.post('/login', async (req, res) => {
 router.get('/me', authMiddleware, async (req, res) => {
   try {
     // req.user is set by authMiddleware
+    const permissions = await getPermissionsForRole(req.user.role);
+    const scoped_division_ids = permissions?.__scope__?.divisions === 'assigned'
+      ? await getScopedDivisionIdsForUser(req.user)
+      : [];
+
     return res.json({
-      user: req.user,
+      user: { ...req.user, permissions, scoped_division_ids },
     });
   } catch (err) {
     console.error('Error in /api/auth/me:', err);

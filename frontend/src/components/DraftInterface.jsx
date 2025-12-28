@@ -2,6 +2,26 @@ import React, { useState, useEffect } from 'react';
 import { Users, Target, CheckCircle, XCircle, Clock, User, AlertCircle } from 'lucide-react';
 import api from '../services/api';
 
+const VOLUNTEER_ASSIGN_ROLES = ['Manager', 'Assistant Coach', 'Team Parent'];
+
+const parseInterestedRoles = (v) => {
+  const raw = String(v?.interested_roles || '').trim();
+  if (!raw) return [];
+  return raw
+    .split(/\r?\n|\s*;\s*|\s*,\s*|\s*\|\s*/g)
+    .map((s) => s.trim())
+    .filter(Boolean);
+};
+
+const volunteerEligibleRoles = (v) => {
+  const roles = parseInterestedRoles(v);
+  return VOLUNTEER_ASSIGN_ROLES.filter((r) =>
+    roles.some((x) => x.toLowerCase() === r.toLowerCase())
+  );
+};
+
+
+
 
 // Helper function to calculate age
 const calculateAge = (birthDate) => {
@@ -20,6 +40,10 @@ const DraftInterface = ({ draftData, divisionId, seasonId, onPickMade }) => {
   const [draftSession, setDraftSession] = useState(null);
   const [currentPick, setCurrentPick] = useState(0);
   const [selectedPlayer, setSelectedPlayer] = useState(null);
+  const [showVolunteerRoleModal, setShowVolunteerRoleModal] = useState(false);
+  const [volunteerAssignmentContext, setVolunteerAssignmentContext] = useState(null);
+  const [selectedVolunteerId, setSelectedVolunteerId] = useState('');
+  const [selectedVolunteerRole, setSelectedVolunteerRole] = useState('');
   const [loading, setLoading] = useState(false);
   const [sessionError, setSessionError] = useState(null);
 
@@ -114,7 +138,21 @@ const DraftInterface = ({ draftData, divisionId, seasonId, onPickMade }) => {
 
 const pick = response.data;
 
-      setCurrentPick(pickNumber);
+      
+      // If drafted player has linked volunteers with interested draft roles, prompt to assign role
+      const draftedPlayer = selectedPlayer;
+      const draftedTeamId = teamId;
+      const candidates = (draftedPlayer?.volunteers || [])
+        .filter((v) => volunteerEligibleRoles(v).length > 0);
+
+      if (candidates.length > 0) {
+        setVolunteerAssignmentContext({ player: draftedPlayer, teamId: draftedTeamId, candidates });
+        setSelectedVolunteerId(String(candidates[0].id || ''));
+        const eligible = volunteerEligibleRoles(candidates[0]);
+        setSelectedVolunteerRole(eligible[0] || '');
+        setShowVolunteerRoleModal(true);
+      }
+setCurrentPick(pickNumber);
       setSelectedPlayer(null);
       
       if (onPickMade) {
@@ -144,6 +182,30 @@ const pick = response.data;
 
   const availablePlayers = safeDraftData.players.filter(player => !isPlayerDrafted(player.id));
   const nextManager = getNextManager();
+
+  const submitVolunteerRoleAssignment = async () => {
+    try {
+      if (!volunteerAssignmentContext?.teamId) return setShowVolunteerRoleModal(false);
+      if (!selectedVolunteerId || !selectedVolunteerRole) return;
+      setLoading(true);
+
+      await api.put(`/volunteers/${selectedVolunteerId}`, {
+        role: selectedVolunteerRole,
+        team_id: volunteerAssignmentContext.teamId,
+        division_id: safeSession.session.division_id,
+        season_id: safeSession.session.season_id,
+      });
+
+      await loadDraftSession();
+      setShowVolunteerRoleModal(false);
+      setVolunteerAssignmentContext(null);
+    } catch (e) {
+      console.error('Error assigning volunteer role:', e);
+      alert('Failed to assign volunteer role. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -343,6 +405,90 @@ const pick = response.data;
           </div>
         </div>
       )}
+      {showVolunteerRoleModal && volunteerAssignmentContext && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">Assign Volunteer Role</h3>
+            <p className="text-sm text-gray-600 mb-4">
+              {volunteerAssignmentContext.player?.first_name} {volunteerAssignmentContext.player?.last_name} has a parent volunteer who expressed interest in a draft role. Choose the assignment for this team.
+            </p>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Volunteer</label>
+                <select
+                  className="w-full border border-gray-300 rounded-md px-3 py-2"
+                  value={selectedVolunteerId}
+                  onChange={(e) => {
+                    const vid = e.target.value;
+                    setSelectedVolunteerId(vid);
+                    const v = (volunteerAssignmentContext.candidates || []).find(
+                      (x) => String(x.id) === String(vid)
+                    );
+                    const eligible = volunteerEligibleRoles(v);
+                    setSelectedVolunteerRole(eligible[0] || '');
+                  }}
+                >
+                  {(volunteerAssignmentContext.candidates || []).map((v) => (
+                    <option key={v.id} value={v.id}>
+                      {v.name} ({volunteerEligibleRoles(v).join(', ')})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Assign as</label>
+                <select
+                  className="w-full border border-gray-300 rounded-md px-3 py-2"
+                  value={selectedVolunteerRole}
+                  onChange={(e) => setSelectedVolunteerRole(e.target.value)}
+                >
+                  {VOLUNTEER_ASSIGN_ROLES.map((r) => (
+                    <option
+                      key={r}
+                      value={r}
+                      disabled={
+                        !volunteerEligibleRoles(
+                          (volunteerAssignmentContext.candidates || []).find(
+                            (x) => String(x.id) === String(selectedVolunteerId)
+                          )
+                        ).includes(r)
+                      }
+                    >
+                      {r}
+                    </option>
+                  ))}
+                </select>
+                <div className="text-xs text-gray-500 mt-1">
+                  Based on the volunteer&apos;s Interested Roles from import.
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-6 flex justify-end gap-2">
+              <button
+                className="px-4 py-2 rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50"
+                onClick={() => {
+                  setShowVolunteerRoleModal(false);
+                  setVolunteerAssignmentContext(null);
+                }}
+                disabled={loading}
+              >
+                Skip
+              </button>
+              <button
+                className="px-4 py-2 rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+                onClick={submitVolunteerRoleAssignment}
+                disabled={loading || !selectedVolunteerId || !selectedVolunteerRole}
+              >
+                {loading ? 'Saving...' : 'Assign Role'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 };

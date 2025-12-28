@@ -94,33 +94,53 @@ const TeamUniforms = () => {
 
   // Calculate comprehensive uniform counts using FILTERED data
   const getAllUniformCounts = () => {
-    const shirtSizes = [
-      'Youth-XS', 'Youth-Small', 'Youth-Medium', 'Youth-Large', 'Youth X-Large',
-      'Adult-Small', 'Adult-Medium', 'Adult-Large', 'Adult X-Large'
-    ];
+    // Only count drafted players (players assigned to a team)
+    const draftedPlayers = (filteredPlayers || []).filter(p => p.team_id);
 
-    const pantsSizes = [
-      'Youth-XS', 'Youth-Small', 'Youth-Medium', 'Youth-Large', 'Youth X-Large',
-      'Adult-Small', 'Adult-Medium', 'Adult-Large', 'Adult X-Large'
-    ];
+    // Build size columns dynamically from the CURRENT season's drafted player data
+    const shirtSizes = Array.from(
+      new Set(draftedPlayers.map(p => p.uniform_shirt_size).filter(Boolean))
+    ).sort();
+
+    const pantsSizes = Array.from(
+      new Set(draftedPlayers.map(p => p.uniform_pants_size).filter(Boolean))
+    ).sort();
 
     // Overall shirt counts by size (using filtered players)
     const overallShirtCounts = shirtSizes.reduce((acc, size) => {
-      acc[size] = filteredPlayers.filter(p => p.uniform_shirt_size === size).length;
+      acc[size] = draftedPlayers.filter(p => p.uniform_shirt_size === size).length;
       return acc;
     }, {});
 
     // Overall pants counts by size (using filtered players)
     const overallPantsCounts = pantsSizes.reduce((acc, size) => {
-      acc[size] = filteredPlayers.filter(p => p.uniform_pants_size === size).length;
+      acc[size] = draftedPlayers.filter(p => p.uniform_pants_size === size).length;
       return acc;
     }, {});
 
     // Shirt counts by color and size for each team (using filtered teams)
-    const teamShirtDetails = filteredTeams.map(team => {
-      const teamPlayersList = filteredPlayers.filter(p => p.team_id === team.id);
+    const teamsWithPlayers = filteredTeams.filter(t => draftedPlayers.some(p => p.team_id === t.id));
+
+    // Custom division display order (division name must match exactly)
+    const divisionOrder = [
+      'T-Ball Division',
+      'Baseball - Coach Pitch Division',
+      'Baseball - Rookies Division',
+      'Baseball - Minors Division',
+      'Baseball - Majors Division',
+      'Softball - Rookies Division (Coach Pitch)',
+      'Softball - Minors Division',
+      'Softball - Majors Division',
+      'Challenger Division'
+    ];
+
+    const divisionRankMap = new Map(divisionOrder.map((name, idx) => [name, idx]));
+    const getDivisionRank = (name) => (divisionRankMap.has(name) ? divisionRankMap.get(name) : 999);
+
+    const teamShirtDetails = teamsWithPlayers.map(team => {
+      const teamPlayersList = draftedPlayers.filter(p => p.team_id === team.id);
       const division = divisions.find(d => d.id === team.division_id);
-      
+
       const shirtCountsBySize = shirtSizes.reduce((acc, size) => {
         acc[size] = teamPlayersList.filter(p => p.uniform_shirt_size === size).length;
         return acc;
@@ -135,11 +155,18 @@ const TeamUniforms = () => {
       };
     });
 
+    // Sort teams by division order, then team name
+    teamShirtDetails.sort((a, b) => {
+      const d = getDivisionRank(a.division) - getDivisionRank(b.division);
+      if (d !== 0) return d;
+      return (a.team || '').localeCompare(b.team || '');
+    });
+
     // Pants counts by size for each team (using filtered teams)
-    const teamPantsDetails = filteredTeams.map(team => {
-      const teamPlayersList = filteredPlayers.filter(p => p.team_id === team.id);
+    const teamPantsDetails = teamsWithPlayers.map(team => {
+      const teamPlayersList = draftedPlayers.filter(p => p.team_id === team.id);
       const division = divisions.find(d => d.id === team.division_id);
-      
+
       const pantsCountsBySize = pantsSizes.reduce((acc, size) => {
         acc[size] = teamPlayersList.filter(p => p.uniform_pants_size === size).length;
         return acc;
@@ -153,10 +180,18 @@ const TeamUniforms = () => {
       };
     });
 
-    // Color distribution across all shirts (using filtered data)
+    // Sort teams by division order, then team name
+    teamPantsDetails.sort((a, b) => {
+      const d = getDivisionRank(a.division) - getDivisionRank(b.division);
+      if (d !== 0) return d;
+      return (a.team || '').localeCompare(b.team || '');
+    });
+
+
+// Color distribution across all shirts (using filtered data)
     const colorDistribution = colors.reduce((acc, color) => {
-      acc[color] = filteredPlayers.filter(p => {
-        const playerTeam = filteredTeams.find(t => t.id === p.team_id);
+      acc[color] = draftedPlayers.filter(p => {
+        const playerTeam = teamsWithPlayers.find(t => t.id === p.team_id);
         return playerTeam?.color === color;
       }).length;
       return acc;

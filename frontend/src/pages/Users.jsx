@@ -36,6 +36,20 @@ const Users = () => {
   });
   const [creating, setCreating] = useState(false);
 
+  // Password reset (Admin only)
+  const [resetModalOpen, setResetModalOpen] = useState(false);
+  const [resetStep, setResetStep] = useState(1); // 1=new password, 2=enter code
+  const [resetTarget, setResetTarget] = useState(null);
+  const [resetPassword, setResetPassword] = useState('');
+  const [resetConfirmPassword, setResetConfirmPassword] = useState('');
+  const [resetCode, setResetCode] = useState('');
+  const [resetWorking, setResetWorking] = useState(false);
+  const [roleModalOpen, setRoleModalOpen] = useState(false);
+  const [roleTarget, setRoleTarget] = useState(null);
+  const [roleValue, setRoleValue] = useState('');
+  const [roleWorking, setRoleWorking] = useState(false);
+
+
   const loadUsers = async () => {
     try {
       setLoading(true);
@@ -117,6 +131,121 @@ const Users = () => {
   };
 
   const isSelf = (id) => currentUser && currentUser.id === id;
+
+  const canEditPasswords = currentUser?.role === 'Administrator';
+  const canManageRoles = currentUser?.role === 'Administrator';
+
+  
+  const openRoleEdit = (user) => {
+    setError(null);
+    setRoleTarget(user);
+    setRoleValue(user?.role || 'President');
+    setRoleModalOpen(true);
+  };
+
+  const closeRoleModal = () => {
+    setRoleModalOpen(false);
+    setRoleTarget(null);
+    setRoleValue('');
+    setRoleWorking(false);
+  };
+
+  const handleSaveRole = async () => {
+    if (!roleTarget) return;
+
+    if (isSelf(roleTarget.id)) {
+      setError('You cannot change your own role.');
+      return;
+    }
+
+    try {
+      setRoleWorking(true);
+      setError(null);
+
+      await usersAPI.updateRole(roleTarget.id, roleValue);
+      await loadUsers();
+      closeRoleModal();
+    } catch (err) {
+      console.error('Error updating role:', err);
+      const msg = err.response?.data?.error || err.message || 'Failed to update role';
+      setError(msg);
+      setRoleWorking(false);
+    }
+  };
+
+const openResetPassword = (u) => {
+    setError(null);
+    setResetTarget(u);
+    setResetPassword('');
+    setResetConfirmPassword('');
+    setResetCode('');
+    setResetStep(1);
+    setResetModalOpen(true);
+  };
+
+  const closeResetPassword = () => {
+    setResetModalOpen(false);
+    setResetTarget(null);
+    setResetPassword('');
+    setResetConfirmPassword('');
+    setResetCode('');
+    setResetStep(1);
+  };
+
+  const handleRequestResetCode = async () => {
+    if (!resetTarget) return;
+
+    if (!resetPassword || !resetConfirmPassword) {
+      setError('Please enter the new password and confirm it.');
+      return;
+    }
+    if (resetPassword !== resetConfirmPassword) {
+      setError('Passwords do not match.');
+      return;
+    }
+    if (resetPassword.length < 8) {
+      setError('Password must be at least 8 characters.');
+      return;
+    }
+
+    try {
+      setResetWorking(true);
+      setError(null);
+      await usersAPI.requestPasswordReset(resetTarget.id);
+      setResetStep(2);
+    } catch (err) {
+      console.error('Error requesting reset code:', err);
+      const msg = err.response?.data?.error || err.message || 'Failed to send verification code';
+      setError(msg);
+    } finally {
+      setResetWorking(false);
+    }
+  };
+
+  const handleConfirmPasswordReset = async () => {
+    if (!resetTarget) return;
+    if (!resetCode) {
+      setError('Please enter the verification code from your email.');
+      return;
+    }
+
+    try {
+      setResetWorking(true);
+      setError(null);
+      await usersAPI.confirmPasswordReset(resetTarget.id, {
+        code: resetCode,
+        new_password: resetPassword,
+      });
+      closeResetPassword();
+    } catch (err) {
+      console.error('Error confirming password reset:', err);
+      const msg = err.response?.data?.error || err.message || 'Failed to update password';
+      setError(msg);
+    } finally {
+      setResetWorking(false);
+    }
+  };
+
 
   return (
     <div className="min-h-screen bg-gray-50 py-6">
@@ -354,6 +483,28 @@ const Users = () => {
                               : '—'}
                           </td>
                           <td className="px-3 py-2 whitespace-nowrap text-right text-sm">
+                            <div className="inline-flex items-center gap-2 justify-end">
+                              {canManageRoles && (
+                                <button
+                                  onClick={() => openRoleEdit(u)}
+                                  className="inline-flex items-center px-2 py-1 border border-gray-200 rounded-md text-xs font-medium text-gray-700 hover:bg-gray-50"
+                                  title="Edit role"
+                                >
+                                  <Shield className="h-3 w-3 mr-1" />
+                                  Role
+                                </button>
+                              )}
+                              {canEditPasswords && (
+                                <button
+                                  onClick={() => openResetPassword(u)}
+                                  className="inline-flex items-center px-2 py-1 border border-gray-200 rounded-md text-xs font-medium text-gray-700 hover:bg-gray-50"
+                                  title="Reset password"
+                                >
+                                  <Lock className="h-3 w-3 mr-1" />
+                                  Reset Password
+                                </button>
+                              )}
+
                             <button
                               disabled={isSelf(u.id)}
                               onClick={() => handleDeleteUser(u.id)}
@@ -367,7 +518,10 @@ const Users = () => {
                               <Trash2 className="h-3 w-3 mr-1" />
                               Delete
                             </button>
-                          </td>
+                          
+
+                            </div>
+</td>
                         </tr>
                       ))}
                     </tbody>
@@ -377,6 +531,199 @@ const Users = () => {
             </div>
           </div>
         </div>
+
+      {/* Reset Password Modal (Administrator only) */}
+      {resetModalOpen && resetTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="bg-white w-full max-w-lg rounded-lg shadow-lg">
+            <div className="px-5 py-4 border-b border-gray-200 flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-semibold text-gray-900">
+                  Reset Password
+                </h3>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  {resetTarget.name} ({resetTarget.email})
+                </p>
+              </div>
+              <button
+                onClick={closeResetPassword}
+                className="text-gray-400 hover:text-gray-600"
+                aria-label="Close"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="px-5 py-4 space-y-4">
+              {!canEditPasswords ? (
+                <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-md p-3">
+                  Only Administrators can reset passwords.
+                </div>
+              ) : (
+                <>
+                  {resetStep === 1 && (
+                    <>
+                      <div className="text-xs text-gray-600 bg-gray-50 border border-gray-200 rounded-md p-3">
+                        Step 1: Enter the new password. We will email a 6-digit verification code to <span className="font-medium">{currentUser?.email}</span>.
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">
+                          New Password
+                        </label>
+                        <input
+                          type="password"
+                          value={resetPassword}
+                          onChange={(e) => setResetPassword(e.target.value)}
+                          className="block w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 text-sm"
+                          placeholder="At least 8 characters"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">
+                          Confirm New Password
+                        </label>
+                        <input
+                          type="password"
+                          value={resetConfirmPassword}
+                          onChange={(e) => setResetConfirmPassword(e.target.value)}
+                          className="block w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 text-sm"
+                          placeholder="Repeat new password"
+                        />
+                      </div>
+                    </>
+                  )}
+
+                  {resetStep === 2 && (
+                    <>
+                      <div className="text-xs text-gray-600 bg-gray-50 border border-gray-200 rounded-md p-3">
+                        Step 2: Enter the 6-digit verification code we emailed to <span className="font-medium">{currentUser?.email}</span>.
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">
+                          Verification Code
+                        </label>
+                        <input
+                          type="text"
+                          value={resetCode}
+                          onChange={(e) => setResetCode(e.target.value)}
+                          className="block w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 text-sm"
+                          placeholder="123456"
+                        />
+                      </div>
+                    </>
+                  )}
+                </>
+              )}
+            </div>
+
+            <div className="px-5 py-4 border-t border-gray-200 flex items-center justify-end gap-2">
+              <button
+                onClick={closeResetPassword}
+                className="px-3 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-50"
+                disabled={resetWorking}
+              >
+                Cancel
+              </button>
+
+              {canEditPasswords && resetStep === 1 && (
+                <button
+                  onClick={handleRequestResetCode}
+                  className="px-3 py-2 text-sm rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60"
+                  disabled={resetWorking}
+                >
+                  {resetWorking ? 'Sending code...' : 'Send Verification Code'}
+                </button>
+              )}
+
+              {canEditPasswords && resetStep === 2 && (
+                <button
+                  onClick={handleConfirmPasswordReset}
+                  className="px-3 py-2 text-sm rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60"
+                  disabled={resetWorking}
+                >
+                  {resetWorking ? 'Saving...' : 'Confirm & Update Password'}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+
+      {/* Edit Role Modal (Administrator only) */}
+      {roleModalOpen && roleTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="bg-white w-full max-w-lg rounded-lg shadow-lg">
+            <div className="px-5 py-4 border-b border-gray-200 flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-semibold text-gray-900">
+                  Edit User Role
+                </h3>
+                <p className="text-xs text-gray-500 mt-1">
+                  {roleTarget.name} ({roleTarget.email})
+                </p>
+              </div>
+              <button
+                onClick={closeRoleModal}
+                className="text-gray-500 hover:text-gray-700"
+                title="Close"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="px-5 py-4 space-y-4">
+              {isSelf(roleTarget.id) ? (
+                <div className="text-sm text-red-600">
+                  You cannot change your own role.
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Role
+                  </label>
+                  <select
+                    value={roleValue}
+                    onChange={(e) => setRoleValue(e.target.value)}
+                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-blue-500 focus:border-blue-500"
+                  >
+                    {ALL_ROLES.map((r) => (
+                      <option key={r} value={r}>
+                        {r}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-gray-500 mt-2">
+                    Role changes take effect immediately.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div className="px-5 py-4 border-t border-gray-200 flex items-center justify-end gap-2">
+              <button
+                onClick={closeRoleModal}
+                className="px-3 py-2 text-sm rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50"
+                disabled={roleWorking}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveRole}
+                className="px-3 py-2 text-sm rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60"
+                disabled={roleWorking || isSelf(roleTarget.id)}
+              >
+                {roleWorking ? 'Saving...' : 'Save Role'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+
       </div>
     </div>
   );

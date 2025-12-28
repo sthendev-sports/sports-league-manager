@@ -21,7 +21,8 @@ const PrintableDraftSheet = ({ divisionName, seasonName, players, onClose }) => 
 
   const getVolunteerRoles = (player) => {
     if (!player.volunteers || player.volunteers.length === 0) return '';
-    return player.volunteers.map(v => v.role).join(', ');
+    //return player.volunteers.map(v => v.role).join(', ');
+	 return player.volunteers.map(v => v.derived_role || v.role || 'Volunteer').join(', ');
   };
 
   const getSiblingGroups = (players) => {

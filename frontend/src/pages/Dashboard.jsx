@@ -2,6 +2,32 @@ import React, { useState, useEffect } from 'react';
 import { RefreshCw, AlertCircle, Edit2, Save, X } from 'lucide-react';
 import { seasonsAPI, dashboardAPI } from '../services/api';
 
+const DIVISION_ORDER = [
+  "T-Ball Division",
+  "Baseball - Coach Pitch Division",
+  "Baseball - Rookies Division",
+  "Baseball - Minors Division",
+  "Baseball - Majors Division",
+  "Softball - Rookies Division (Coach Pitch)",
+  "Softball - Minors Division",
+  "Softball - Majors Division",
+  "Softball - Junior Division",
+  "Challenger Division",
+];
+
+const divisionOrderIndex = (name) => {
+  const idx = DIVISION_ORDER.indexOf(name);
+  return idx === -1 ? Number.MAX_SAFE_INTEGER : idx;
+};
+
+const sortDivisionObjects = (a, b) => {
+  const ai = divisionOrderIndex(a?.name);
+  const bi = divisionOrderIndex(b?.name);
+  if (ai !== bi) return ai - bi;
+  return String(a?.name || "").localeCompare(String(b?.name || ""));
+};
+
+
 const Dashboard = () => {
   const [stats, setStats] = useState({
     totalRegistered: 0,
@@ -22,31 +48,50 @@ const Dashboard = () => {
   
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [seasons, setSeasons] = useState([]);
+  const [selectedSeasonId, setSelectedSeasonId] = useState('');
   const [currentSeason, setCurrentSeason] = useState(null);
   const [editingDivision, setEditingDivision] = useState(null);
   const [editValue, setEditValue] = useState('');
 
   useEffect(() => {
     loadDashboardData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const loadDashboardData = async () => {
+  useEffect(() => {
+    if (selectedSeasonId) {
+      loadDashboardData(selectedSeasonId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSeasonId]);
+
+  const loadDashboardData = async (seasonIdOverride) => {
   try {
     setLoading(true);
     setError(null);
 
-    // Get active season first
-    const seasonResponse = await seasonsAPI.getActive();
-    const activeSeason = seasonResponse.data;
+    // Load seasons list + active season (used for default filter)
+    const [activeRes, allRes] = await Promise.all([
+      seasonsAPI.getActive().catch(() => ({ data: null })),
+      seasonsAPI.getAll().catch(() => ({ data: [] }))
+    ]);
 
-    if (!activeSeason) {
-      throw new Error('No active season found');
-    }
+    const activeSeason = activeRes?.data || null;
+    const all = Array.isArray(allRes?.data) ? allRes.data : [];
+    setSeasons(all);
 
-    setCurrentSeason(activeSeason);
+    const resolvedSeasonId = seasonIdOverride || selectedSeasonId || activeSeason?.id || all?.[0]?.id;
+    if (!resolvedSeasonId) throw new Error('No season found');
 
-    // Load dashboard statistics via shared API client
-    const dashboardData = await dashboardAPI.getStatistics(activeSeason.id);
+    // Set initial dropdown default once
+    if (!selectedSeasonId) setSelectedSeasonId(resolvedSeasonId);
+
+    const seasonObj = all.find(s => s.id === resolvedSeasonId) || activeSeason || null;
+    setCurrentSeason(seasonObj);
+
+    // Load dashboard statistics for the selected season
+    const dashboardData = await dashboardAPI.getStatistics(resolvedSeasonId);
     setStats(dashboardData);
   } catch (error) {
     console.error('Error loading dashboard data:', error);
@@ -175,15 +220,33 @@ const Dashboard = () => {
   return (
     <div className="space-y-6">
       {/* Header with refresh button */}
-      <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-semibold text-gray-900">League Dashboard</h1>
-        <button
-          onClick={loadDashboardData}
-          className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
-        >
-          <RefreshCw className="h-4 w-4 mr-2" />
-          Refresh
-        </button>
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold text-gray-900">League Dashboard</h1>
+          {currentSeason?.name && (
+            <p className="text-sm text-gray-600 mt-1">Showing: <span className="font-medium">{currentSeason.name}</span></p>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2">
+          <select
+            className="border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-blue-500 focus:border-blue-500"
+            value={selectedSeasonId}
+            onChange={(e) => setSelectedSeasonId(e.target.value)}
+          >
+            {seasons.map(season => (
+              <option key={season.id} value={season.id}>{season.name}</option>
+            ))}
+          </select>
+
+          <button
+            onClick={() => loadDashboardData(selectedSeasonId)}
+            className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+          >
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Refresh
+          </button>
+        </div>
       </div>
 
       {/* Registration Totals - Stacked and Compact */}
@@ -231,7 +294,7 @@ const Dashboard = () => {
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
-                    {stats.divisions.map((division) => {
+                    {stats.divisions.slice().sort(sortDivisionObjects).map((division) => {
                       const trendStyles = getTrendStyles(division.trend);
                       return (
                         <tr key={division.name} className="hover:bg-gray-50">
@@ -341,7 +404,7 @@ const Dashboard = () => {
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
-                    {stats.volunteerByDivision.map((division) => (
+                    {stats.volunteerByDivision.slice().sort(sortDivisionObjects).map((division) => (
                       <tr key={division.name} className="hover:bg-gray-50">
                         <td className="px-2 py-2 text-sm font-medium text-gray-900 whitespace-nowrap">{division.name}</td>
                         <td className="px-2 py-2 text-sm text-blue-600 text-center whitespace-nowrap font-medium">{division.teamManagers}</td>

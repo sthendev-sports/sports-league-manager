@@ -259,143 +259,8 @@ const Teams = () => {
     </div>
   );
 
-  return (
-    <div className="min-h-screen bg-gray-50 py-6">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        {/* Header */}
-        <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between">
-          <div className="mb-4 sm:mb-0">
-            <h1 className="text-2xl font-bold text-gray-900 flex items-center">
-              <Users className="h-6 w-6 mr-2 text-blue-600" />
-              Team Management
-            </h1>
-            <p className="mt-1 text-sm text-gray-500">
-              View and manage teams, rosters, and volunteers across seasons and divisions.
-            </p>
-          </div>
-          
-          <div className="flex space-x-3">
-            <button
-              onClick={handleAddTeamClick}
-              className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700"
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              Add Team
-            </button>
-          </div>
-        </div>
 
-        {/* Filters */}
-        <div className="bg-white shadow rounded-lg mb-6 p-4 sm:p-6">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            {/* Season Filter */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Season
-              </label>
-              <select
-                value={selectedSeason}
-                onChange={handleSeasonChange}
-                className="block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md"
-              >
-                <option value="">All Seasons</option>
-                {seasons.map(season => (
-                  <option key={season.id} value={season.id}>
-                    {season.name || `Season ${season.year}`}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Division Filter */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Division
-              </label>
-              <select
-                value={selectedDivision}
-                onChange={handleDivisionChange}
-                className="block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md"
-              >
-                <option value="">All Divisions</option>
-                {getFilteredDivisions().map(division => (
-                  <option key={division.id} value={division.id}>
-                    {division.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Summary */}
-            <div className="flex items-center">
-              <div className="w-full bg-blue-50 border border-blue-100 rounded-lg p-3">
-                <div className="flex items-center">
-                  <div className="p-2 rounded-full bg-blue-100 mr-3">
-                    <Shield className="h-5 w-5 text-blue-600" />
-                  </div>
-                  <div>
-                    <p className="text-xs font-medium text-blue-800 uppercase tracking-wide">
-                      Current View Summary
-                    </p>
-                    <p className="text-sm text-blue-900">
-                      {teams.length} teams,{' '}
-                      {teams.reduce((sum, team) => sum + (team.player_count || 0), 0)} players
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Error */}
-        {error && (
-          <div className="mb-4 bg-red-50 border border-red-200 rounded-lg p-4 flex">
-            <AlertCircle className="h-5 w-5 text-red-500 mr-3 mt-0.5" />
-            <div className="flex-1 text-sm text-red-700">
-              <p className="font-semibold">Error loading teams</p>
-              <p>{error}</p>
-              <button
-                onClick={loadData}
-                className="mt-2 inline-flex items-center px-3 py-1 border border-red-300 rounded-md text-xs font-medium text-red-700 bg-red-50 hover:bg-red-100"
-              >
-                Retry
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Teams list */}
-        <div className="space-y-4">
-          {loading ? (
-            <div className="bg-white shadow rounded-lg p-6 flex items-center justify-center">
-              <div className="flex items-center text-gray-500">
-                <svg className="animate-spin h-5 w-5 mr-3 text-blue-600" viewBox="0 0 24 24">
-                  <circle
-                    className="opacity-25"
-                    cx="12"
-                    cy="12"
-                    r="10"
-                    stroke="currentColor"
-                    strokeWidth="4"
-                  ></circle>
-                  <path
-                    className="opacity-75"
-                    fill="currentColor"
-                    d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
-                  ></path>
-                </svg>
-                <span>Loading teams...</span>
-              </div>
-            </div>
-          ) : teams.length === 0 ? (
-            <div className="bg-white shadow rounded-lg p-6 text-center">
-              <p className="text-sm text-gray-500">
-                No teams found for the selected filters. Try adjusting your season or division.
-              </p>
-            </div>
-          ) : (
-            teams.map((team) => (
+  const renderTeamCard = (team) => (
               <div key={team.id} className="bg-white shadow rounded-lg overflow-hidden">
                 <div className="px-4 sm:px-6 py-4 border-b border-gray-100 flex items-center justify-between">
                   <div>
@@ -448,6 +313,51 @@ const Teams = () => {
                   <div className="px-4 sm:px-6 py-4 bg-gray-50">
                     {/* Roster */}
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                      {/* Volunteers */}
+                      <div>
+                        <h4 className="text-lg font-medium text-gray-900 mb-4">Volunteers ({team.volunteers?.length || 0})</h4>
+                        {team.volunteers && team.volunteers.length > 0 ? (
+                          <div className="space-y-3">
+                            {team.volunteers.map(volunteer => (
+                              <div key={volunteer.id} className="bg-white border border-gray-200 rounded-lg p-3">
+                                <div className="flex items-start justify-between">
+                                  <div>
+                                    <p className="font-semibold text-gray-900">{volunteer.name}</p>
+                                    <p className={`text-xs ${getRoleTextColor(volunteer.role)} font-medium`}>
+                                      {volunteer.role || 'Parent'}
+                                    </p>
+                                  </div>
+                                  <span
+                                    className={`px-2 py-0.5 text-[11px] rounded-full ${getRoleBadgeColor(volunteer.role)}`}
+                                  >
+                                    {volunteer.role || 'Parent'}
+                                  </span>
+                                </div>
+                                <div className="mt-2 text-xs space-y-1">
+                                  {volunteer.email && (
+                                    <a
+                                      href={`mailto:${volunteer.email}`}
+                                      className="inline-flex items-center text-blue-600 hover:text-blue-800"
+                                    >
+                                      <Mail className="h-3 w-3 mr-1" />
+                                      <span className="truncate">{volunteer.email}</span>
+                                    </a>
+                                  )}
+                                  {volunteer.phone && (
+                                    <div className="flex items-center text-gray-700">
+                                      <Phone className="h-3 w-3 mr-1" />
+                                      <span>{volunteer.phone}</span>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-sm text-gray-500">No volunteers assigned.</p>
+                        )}
+                      </div>
+
                       {/* Players detailed information */}
                       <div className="lg:col-span-2">
                         <h4 className="text-lg font-medium text-gray-900 mb-4">Players ({team.player_count || 0})</h4>
@@ -588,58 +498,244 @@ const Teams = () => {
                           <p className="text-sm text-gray-500">No players assigned to this team.</p>
                         )}
                       </div>
-
-                      {/* Volunteers */}
-                      <div>
-                        <h4 className="text-lg font-medium text-gray-900 mb-4">Volunteers ({team.volunteers?.length || 0})</h4>
-                        {team.volunteers && team.volunteers.length > 0 ? (
-                          <div className="space-y-3">
-                            {team.volunteers.map(volunteer => (
-                              <div key={volunteer.id} className="bg-white border border-gray-200 rounded-lg p-3">
-                                <div className="flex items-start justify-between">
-                                  <div>
-                                    <p className="font-semibold text-gray-900">{volunteer.name}</p>
-                                    <p className={`text-xs ${getRoleTextColor(volunteer.role)} font-medium`}>
-                                      {volunteer.role || 'Parent'}
-                                    </p>
-                                  </div>
-                                  <span
-                                    className={`px-2 py-0.5 text-[11px] rounded-full ${getRoleBadgeColor(volunteer.role)}`}
-                                  >
-                                    {volunteer.role || 'Parent'}
-                                  </span>
-                                </div>
-                                <div className="mt-2 text-xs space-y-1">
-                                  {volunteer.email && (
-                                    <a
-                                      href={`mailto:${volunteer.email}`}
-                                      className="inline-flex items-center text-blue-600 hover:text-blue-800"
-                                    >
-                                      <Mail className="h-3 w-3 mr-1" />
-                                      <span className="truncate">{volunteer.email}</span>
-                                    </a>
-                                  )}
-                                  {volunteer.phone && (
-                                    <div className="flex items-center text-gray-700">
-                                      <Phone className="h-3 w-3 mr-1" />
-                                      <span>{volunteer.phone}</span>
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        ) : (
-                          <p className="text-sm text-gray-500">
-                            No volunteers assigned to this team. Volunteers will appear here after the draft.
-                          </p>
-                        )}
-                      </div>
                     </div>
                   </div>
                 )}
               </div>
-            ))
+  );
+
+  const teamHasPlayers = (team) => {
+    if (Array.isArray(team.players)) return team.players.length > 0;
+    const cnt =
+      typeof team.player_count === 'number'
+        ? team.player_count
+        : parseInt(team.player_count || '0', 10);
+    return Number.isFinite(cnt) && cnt > 0;
+  };
+
+  const { rosteredGroups, nonRosteredTeams } = React.useMemo(() => {
+    const map = new Map();
+    const nonRostered = [];
+
+    const getDivisionLabel = (team) =>
+      team.division?.name || getDivisionName(team.division_id) || 'No Division';
+
+    teams.forEach((team) => {
+      const divisionName = getDivisionLabel(team);
+      const key = divisionName;
+
+      if (!map.has(key)) {
+        map.set(key, { divisionName, rostered: [] });
+      }
+
+      if (teamHasPlayers(team)) {
+        map.get(key).rostered.push(team);
+      } else {
+        nonRostered.push({ team, divisionName });
+      }
+    });
+
+    const groups = Array.from(map.values());
+
+    // Sort divisions and teams alphabetically (case-insensitive)
+    groups.sort((a, b) =>
+      a.divisionName.localeCompare(b.divisionName, undefined, { sensitivity: 'base', numeric: true })
+    );
+
+    groups.forEach((g) => {
+      g.rostered.sort((a, b) =>
+        (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base', numeric: true })
+      );
+    });
+
+    nonRostered.sort((a, b) => {
+      const nameCmp = (a.team?.name || '').localeCompare(b.team?.name || '', undefined, {
+        sensitivity: 'base',
+        numeric: true,
+      });
+      if (nameCmp !== 0) return nameCmp;
+      return (a.divisionName || '').localeCompare(b.divisionName || '', undefined, {
+        sensitivity: 'base',
+        numeric: true,
+      });
+    });
+
+    return {
+      rosteredGroups: groups,
+      nonRosteredTeams: nonRostered,
+    };
+  }, [teams, divisions]);
+
+  return (
+    <div className="min-h-screen bg-gray-50 py-6">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        {/* Header */}
+        <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between">
+          <div className="mb-4 sm:mb-0">
+            <h1 className="text-2xl font-bold text-gray-900 flex items-center">
+              <Users className="h-6 w-6 mr-2 text-blue-600" />
+              Team Management
+            </h1>
+            <p className="mt-1 text-sm text-gray-500">
+              View and manage teams, rosters, and volunteers across seasons and divisions.
+            </p>
+          </div>
+          
+          <div className="flex space-x-3">
+            <button
+              onClick={handleAddTeamClick}
+              className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700"
+            >
+              <Plus className="h-4 w-4 mr-2" />
+              Add Team
+            </button>
+          </div>
+        </div>
+
+        {/* Filters */}
+        <div className="bg-white shadow rounded-lg mb-6 p-4 sm:p-6">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {/* Season Filter */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Season
+              </label>
+              <select
+                value={selectedSeason}
+                onChange={handleSeasonChange}
+                className="block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md"
+              >
+                <option value="">All Seasons</option>
+                {seasons.map(season => (
+                  <option key={season.id} value={season.id}>
+                    {season.name || `Season ${season.year}`}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Division Filter */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Division
+              </label>
+              <select
+                value={selectedDivision}
+                onChange={handleDivisionChange}
+                className="block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md"
+              >
+                <option value="">All Divisions</option>
+                {getFilteredDivisions().map(division => (
+                  <option key={division.id} value={division.id}>
+                    {division.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Summary */}
+            <div className="flex items-center">
+              <div className="w-full bg-blue-50 border border-blue-100 rounded-lg p-3">
+                <div className="flex items-center">
+                  <div className="p-2 rounded-full bg-blue-100 mr-3">
+                    <Shield className="h-5 w-5 text-blue-600" />
+                  </div>
+                  <div>
+                    <p className="text-xs font-medium text-blue-800 uppercase tracking-wide">
+                      Current View Summary
+                    </p>
+                    <p className="text-sm text-blue-900">
+                      {teams.length} teams,{' '}
+                      {teams.reduce((sum, team) => sum + (team.player_count || 0), 0)} players
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Error */}
+        {error && (
+          <div className="mb-4 bg-red-50 border border-red-200 rounded-lg p-4 flex">
+            <AlertCircle className="h-5 w-5 text-red-500 mr-3 mt-0.5" />
+            <div className="flex-1 text-sm text-red-700">
+              <p className="font-semibold">Error loading teams</p>
+              <p>{error}</p>
+              <button
+                onClick={loadData}
+                className="mt-2 inline-flex items-center px-3 py-1 border border-red-300 rounded-md text-xs font-medium text-red-700 bg-red-50 hover:bg-red-100"
+              >
+                Retry
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Teams list */}
+        <div className="space-y-4">
+          {loading ? (
+            <div className="bg-white shadow rounded-lg p-6 flex items-center justify-center">
+              <div className="flex items-center text-gray-500">
+                <svg className="animate-spin h-5 w-5 mr-3 text-blue-600" viewBox="0 0 24 24">
+                  <circle
+                    className="opacity-25"
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                  ></circle>
+                  <path
+                    className="opacity-75"
+                    fill="currentColor"
+                    d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
+                  ></path>
+                </svg>
+                <span>Loading teams...</span>
+              </div>
+            </div>
+          ) : teams.length === 0 ? (
+            <div className="bg-white shadow rounded-lg p-6 text-center">
+              <p className="text-sm text-gray-500">
+                No teams found for the selected filters. Try adjusting your season or division.
+              </p>
+            </div>
+          ) : (
+            <>
+              {rosteredGroups.map((group) => (
+                <div key={group.divisionName} className="space-y-4">
+                <div className="px-1">
+                  <h2 className="text-base font-semibold text-gray-900">{group.divisionName}</h2>
+                  <p className="text-xs text-gray-500">
+                    Rostered teams: {group.rostered.length}
+                  </p>
+                </div>
+
+                {group.rostered.length > 0 ? (
+                  group.rostered.map((team) => renderTeamCard(team))
+                ) : (
+                  <div className="bg-white shadow rounded-lg p-6 text-center">
+                    <p className="text-sm text-gray-500">No rostered teams in this division.</p>
+                  </div>
+                )}
+                </div>
+              ))}
+
+              {nonRosteredTeams.length > 0 && (
+                <div className="mt-10 space-y-3">
+                  <div className="px-1">
+                    <h2 className="text-lg font-semibold text-gray-900">Non-rostered teams</h2>
+                    <p className="text-sm text-gray-500">
+                      Teams with no players (shown at the bottom so rostered teams are easier to scan).
+                    </p>
+                  </div>
+
+                  {nonRosteredTeams.map(({ team }) => renderTeamCard(team))}
+                </div>
+              )}
+
+            </>
           )}
         </div>
       </div>

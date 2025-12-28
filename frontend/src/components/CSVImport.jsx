@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Upload, X, CheckCircle, AlertCircle, FileText } from 'lucide-react';
+import { parseCSVData } from '../services/api';
 
 const CSVImport = ({ onImport, importType, seasons }) => {
   const [isOpen, setIsOpen] = useState(false);
@@ -26,27 +27,19 @@ const CSVImport = ({ onImport, importType, seasons }) => {
     const reader = new FileReader();
     reader.onload = (e) => {
       const csvText = e.target.result;
-      const lines = csvText.split('\n').filter(line => line.trim());
-      
-      if (lines.length === 0) {
-        alert('CSV file is empty');
+
+      // Use the same CSV parser used by the import path so preview matches what will be imported
+      const parsed = parseCSVData(csvText);
+
+      if (!parsed || parsed.length === 0) {
+        alert('CSV file is empty or could not be parsed');
         return;
       }
-      
-      const headers = lines[0].split(',').map(h => h.trim());
-      const preview = lines.slice(1, 6).map(line => {
-        const values = line.split(',').map(v => v.trim());
-        const row = {};
-        headers.forEach((header, index) => {
-          row[header] = values[index] || '';
-        });
-        return row;
-      });
-      setPreviewData(preview);
+
+      setPreviewData(parsed.slice(0, 5));
     };
     reader.readAsText(file);
   };
-
   const handleImport = async () => {
     if (!file || !selectedSeason) {
       alert('Please select both a file and a season');

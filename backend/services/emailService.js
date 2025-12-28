@@ -1,15 +1,11 @@
 // backend/services/emailService.js
 
 const supabase = require('../config/database');
-const { transporter } = require('../config/email');
+const { sendMail } = require('../config/email');
 
 const DEFAULT_FROM =
   process.env.EMAIL_FROM || process.env.EMAIL_USER || 'no-reply@example.com';
 
-/**
- * Load the single global email settings row.
- * If none exists, returns sensible defaults.
- */
 async function getEmailSettings() {
   const { data, error } = await supabase
     .from('email_settings')
@@ -38,9 +34,6 @@ async function getEmailSettings() {
   };
 }
 
-/**
- * Update or create email settings.
- */
 async function saveEmailSettings({ test_mode, test_email, from_email }) {
   const current = await getEmailSettings();
 
@@ -51,7 +44,6 @@ async function saveEmailSettings({ test_mode, test_email, from_email }) {
   };
 
   if (current.id) {
-    // Update existing row
     const { data, error } = await supabase
       .from('email_settings')
       .update({
@@ -69,7 +61,6 @@ async function saveEmailSettings({ test_mode, test_email, from_email }) {
     return data;
   }
 
-  // Insert new
   const { data, error } = await supabase
     .from('email_settings')
     .insert([{ ...payload }])
@@ -84,15 +75,6 @@ async function saveEmailSettings({ test_mode, test_email, from_email }) {
   return data;
 }
 
-/**
- * Send an email, respecting test mode.
- *
- * @param {Object} options
- * @param {string|string[]} options.to - Intended recipient(s)
- * @param {string} options.subject
- * @param {string} [options.text]
- * @param {string} [options.html]
- */
 async function sendEmail({ to, subject, text, html }) {
   const settings = await getEmailSettings();
 
@@ -127,10 +109,16 @@ async function sendEmail({ to, subject, text, html }) {
   };
 
   try {
-    const info = await transporter.sendMail(mailOptions);
-    console.log(
-      `[Email] Sent message to ${finalTo} (messageId=${info.messageId})`
-    );
+    // ✅ Use config/email.js implementation
+    const info = await sendMail({
+      to: mailOptions.to,
+      subject: mailOptions.subject,
+      html: mailOptions.html,
+      text: mailOptions.text,
+      replyTo: mailOptions.replyTo,
+    });
+
+    console.log(`[Email] Sent message to ${finalTo}`);
     return info;
   } catch (err) {
     console.error('[Email] Error sending message:', err);

@@ -52,7 +52,7 @@ const Configuration = () => {
 
   useEffect(() => {
     loadData();
-  }, [selectedSeason]);
+  }, []);
 
   const loadData = async () => {
     try {
@@ -81,18 +81,21 @@ const Configuration = () => {
         setBoardMembers(boardMembersData);
       }
       
-      // Set first season as default if none selected
+      // Default the configuration season filter to the ACTIVE season (fallback: first season)
       if (!selectedSeason && seasonsData.length > 0) {
-        setSelectedSeason(seasonsData[0].id);
-      }
-      
-    } catch (error) {
+        const active = seasonsData.find(s => s.is_active);
+        setSelectedSeason((active?.id) || seasonsData[0].id);
+      }} catch (error) {
       console.error('Error loading configuration data:', error);
       setError('Failed to load data: ' + error.message);
     } finally {
       setLoading(false);
     }
   };
+
+  // Season-scoped views for teams/divisions tabs
+  const filteredDivisions = selectedSeason ? divisions.filter(d => d.season_id === selectedSeason) : divisions;
+  const filteredTeams = selectedSeason ? teams.filter(t => t.season_id === selectedSeason) : teams;
 
   // Clear season data function
 const handleClearSeasonData = async (seasonId) => {
@@ -111,7 +114,7 @@ const handleClearSeasonData = async (seasonId) => {
     setLoading(true);
     console.log(`Starting data clear for season: ${season.name} (${seasonId})`);
     
-    const response = await fetch(`/api/seasons/${seasonId}/clear-data`, {
+    const response = await fetch(`/api/season-export/${seasonId}/clear-data`, {
       method: 'DELETE'
     });
 
@@ -136,6 +139,7 @@ const handleClearSeasonData = async (seasonId) => {
 };
 
  // Export season data function - DYNAMIC FIELD VERSION
+// Export season data function - TABBED VERSION
 const handleExportSeason = async (seasonId) => {
   const season = seasons.find(s => s.id === seasonId);
   if (!season) return;
@@ -144,7 +148,7 @@ const handleExportSeason = async (seasonId) => {
     setLoading(true);
     console.log(`Starting dynamic export for season: ${season.name} (${seasonId})`);
     
-	const response = await fetch(`/api/season-export/${seasonId}/export`);
+    const response = await fetch(`/api/season-export/${seasonId}/export`);
     
     if (!response.ok) {
       const errorText = await response.text();
@@ -154,152 +158,229 @@ const handleExportSeason = async (seasonId) => {
 
     const data = await response.json();
     console.log('Dynamic export data received:', data);
-    console.log('Available player fields:', data.debug?.playerFields);
     
-    // Create comprehensive CSV content
-    let csvContent = `COMPREHENSIVE SEASON EXPORT: ${season.name} (${season.year})\n`;
-    csvContent += `Exported on: ${new Date().toLocaleString()}\n`;
-    csvContent += `Total Records: ${data.divisions?.length || 0} divisions, ${data.teams?.length || 0} teams, ${data.players?.length || 0} players\n\n`;
+    // Create timestamp for filename
+    const timestamp = new Date().toISOString().split('T')[0];
     
-    // 1. DIVISIONS SECTION - with ALL available fields
-    csvContent += '=== DIVISIONS ===\n';
-    if (data.divisions && data.divisions.length > 0) {
-      // Get all available division fields
-      const divisionFields = Object.keys(data.divisions[0]);
-      csvContent += divisionFields.join(',') + '\n';
+    // Create a zip file with multiple CSV tabs
+    const createTabbedCSV = () => {
+      let csvContent = '';
       
-      data.divisions.forEach(division => {
-        const row = divisionFields.map(field => {
-          const value = division[field];
-          // Handle null/undefined and escape quotes for CSV
-          return value !== null && value !== undefined ? `"${String(value).replace(/"/g, '""')}"` : '""';
-        });
-        csvContent += row.join(',') + '\n';
-      });
-    } else {
-      csvContent += 'No divisions found\n';
-    }
-    csvContent += '\n';
-    
-    // 2. TEAMS SECTION - with ALL available fields
-    csvContent += '=== TEAMS ===\n';
-    if (data.teams && data.teams.length > 0) {
-      // Get all available team fields
-      const teamFields = Object.keys(data.teams[0]);
-      // Add division name to team fields
-      const enhancedTeamFields = [...teamFields, 'division_name'];
-      csvContent += enhancedTeamFields.join(',') + '\n';
+      // 1. SEASON INFO TAB
+      csvContent += '=== SEASON INFO ===\n';
+      csvContent += `Season: ${season.name}\n`;
+      csvContent += `Year: ${season.year}\n`;
+      csvContent += `Export Date: ${new Date().toLocaleString()}\n`;
+      csvContent += `Active: ${season.is_active ? 'Yes' : 'No'}\n\n`;
       
-      data.teams.forEach(team => {
-        const divisionName = data.divisions?.find(d => d.id === team.division_id)?.name || 'No Division';
-        const row = enhancedTeamFields.map(field => {
-          let value;
-          if (field === 'division_name') {
-            value = divisionName;
-          } else {
-            value = team[field];
-          }
-          return value !== null && value !== undefined ? `"${String(value).replace(/"/g, '""')}"` : '""';
-        });
-        csvContent += row.join(',') + '\n';
-      });
-    } else {
-      csvContent += 'No teams found\n';
-    }
-    csvContent += '\n';
-    
-    // 3. PLAYERS SECTION - with ALL available fields plus calculated fields
-    csvContent += '=== PLAYERS ===\n';
-    if (data.players && data.players.length > 0) {
-      // Get all available player fields
-      const playerFields = Object.keys(data.players[0]);
-      // Add team and division names
-      const enhancedPlayerFields = [...playerFields, 'team_name', 'division_name'];
-      csvContent += enhancedPlayerFields.join(',') + '\n';
-      
-      data.players.forEach(player => {
-        const teamName = data.teams?.find(t => t.id === player.team_id)?.name || 'Unassigned';
-        const divisionName = data.divisions?.find(d => d.id === player.division_id)?.name || 'No Division';
+      // 2. DIVISIONS TAB
+      csvContent += '=== DIVISIONS ===\n';
+      if (data.divisions && data.divisions.length > 0) {
+        const divisionFields = Object.keys(data.divisions[0]);
+        csvContent += divisionFields.join(',') + '\n';
         
-        const row = enhancedPlayerFields.map(field => {
-          let value;
-          if (field === 'team_name') {
-            value = teamName;
-          } else if (field === 'division_name') {
-            value = divisionName;
-          } else {
-            value = player[field];
-          }
-          return value !== null && value !== undefined ? `"${String(value).replace(/"/g, '""')}"` : '""';
+        data.divisions.forEach(division => {
+          const row = divisionFields.map(field => {
+            const value = division[field];
+            return value !== null && value !== undefined ? `"${String(value).replace(/"/g, '""')}"` : '""';
+          });
+          csvContent += row.join(',') + '\n';
         });
-        csvContent += row.join(',') + '\n';
-      });
-    } else {
-      csvContent += 'No players found\n';
-    }
-    csvContent += '\n';
-    
-    // 4. FAMILIES SECTION - with ALL available fields
-    csvContent += '=== FAMILIES ===\n';
-    if (data.families && data.families.length > 0) {
-      const familyFields = Object.keys(data.families[0]);
-      csvContent += familyFields.join(',') + '\n';
+      } else {
+        csvContent += 'No divisions found\n';
+      }
+      csvContent += '\n';
       
-      data.families.forEach(family => {
-        const row = familyFields.map(field => {
-          const value = family[field];
-          return value !== null && value !== undefined ? `"${String(value).replace(/"/g, '""')}"` : '""';
-        });
-        csvContent += row.join(',') + '\n';
-      });
-    } else {
-      csvContent += 'No families found\n';
-    }
-    csvContent += '\n';
-    
-    // 5. VOLUNTEERS SECTION - with ALL available fields
-    csvContent += '=== VOLUNTEERS ===\n';
-    if (data.volunteers && data.volunteers.length > 0) {
-      const volunteerFields = Object.keys(data.volunteers[0]);
-      const enhancedVolunteerFields = [...volunteerFields, 'team_name', 'division_name'];
-      csvContent += enhancedVolunteerFields.join(',') + '\n';
-      
-      data.volunteers.forEach(volunteer => {
-        const teamName = data.teams?.find(t => t.id === volunteer.team_id)?.name || 'Unassigned';
-        const divisionName = data.divisions?.find(d => d.id === volunteer.division_id)?.name || 'No Division';
+      // 3. TEAMS TAB
+      csvContent += '=== TEAMS ===\n';
+      if (data.teams && data.teams.length > 0) {
+        const teamFields = Object.keys(data.teams[0]);
+        const enhancedTeamFields = [...teamFields, 'division_name'];
+        csvContent += enhancedTeamFields.join(',') + '\n';
         
-        const row = enhancedVolunteerFields.map(field => {
-          let value;
-          if (field === 'team_name') {
-            value = teamName;
-          } else if (field === 'division_name') {
-            value = divisionName;
-          } else {
-            value = volunteer[field];
-          }
-          return value !== null && value !== undefined ? `"${String(value).replace(/"/g, '""')}"` : '""';
+        data.teams.forEach(team => {
+          const divisionName = data.divisions?.find(d => d.id === team.division_id)?.name || 'No Division';
+          const row = enhancedTeamFields.map(field => {
+            let value;
+            if (field === 'division_name') {
+              value = divisionName;
+            } else {
+              value = team[field];
+            }
+            return value !== null && value !== undefined ? `"${String(value).replace(/"/g, '""')}"` : '""';
+          });
+          csvContent += row.join(',') + '\n';
         });
-        csvContent += row.join(',') + '\n';
-      });
-    } else {
-      csvContent += 'No volunteers found\n';
-    }
+      } else {
+        csvContent += 'No teams found\n';
+      }
+      csvContent += '\n';
+      
+      // 4. PLAYERS TAB
+      csvContent += '=== PLAYERS ===\n';
+      if (data.players && data.players.length > 0) {
+        const playerFields = Object.keys(data.players[0]);
+        const enhancedPlayerFields = [...playerFields, 'team_name', 'division_name'];
+        csvContent += enhancedPlayerFields.join(',') + '\n';
+        
+        data.players.forEach(player => {
+          const teamName = data.teams?.find(t => t.id === player.team_id)?.name || 'Unassigned';
+          const divisionName = data.divisions?.find(d => d.id === player.division_id)?.name || 'No Division';
+          
+          const row = enhancedPlayerFields.map(field => {
+            let value;
+            if (field === 'team_name') {
+              value = teamName;
+            } else if (field === 'division_name') {
+              value = divisionName;
+            } else {
+              value = player[field];
+            }
+            return value !== null && value !== undefined ? `"${String(value).replace(/"/g, '""')}"` : '""';
+          });
+          csvContent += row.join(',') + '\n';
+        });
+      } else {
+        csvContent += 'No players found\n';
+      }
+      csvContent += '\n';
+      
+      // 5. FAMILIES TAB
+      csvContent += '=== FAMILIES ===\n';
+      if (data.families && data.families.length > 0) {
+        const familyFields = Object.keys(data.families[0]);
+        csvContent += familyFields.join(',') + '\n';
+        
+        data.families.forEach(family => {
+          const row = familyFields.map(field => {
+            const value = family[field];
+            return value !== null && value !== undefined ? `"${String(value).replace(/"/g, '""')}"` : '""';
+          });
+          csvContent += row.join(',') + '\n';
+        });
+      } else {
+        csvContent += 'No families found\n';
+      }
+      csvContent += '\n';
+      
+      // 6. VOLUNTEERS TAB
+      csvContent += '=== VOLUNTEERS ===\n';
+      if (data.volunteers && data.volunteers.length > 0) {
+        const volunteerFields = Object.keys(data.volunteers[0]);
+        const enhancedVolunteerFields = [...volunteerFields, 'team_name', 'division_name'];
+        csvContent += enhancedVolunteerFields.join(',') + '\n';
+        
+        data.volunteers.forEach(volunteer => {
+          const teamName = data.teams?.find(t => t.id === volunteer.team_id)?.name || 'Unassigned';
+          const divisionName = data.divisions?.find(d => d.id === volunteer.division_id)?.name || 'No Division';
+          
+          const row = enhancedVolunteerFields.map(field => {
+            let value;
+            if (field === 'team_name') {
+              value = teamName;
+            } else if (field === 'division_name') {
+              value = divisionName;
+            } else {
+              value = volunteer[field];
+            }
+            return value !== null && value !== undefined ? `"${String(value).replace(/"/g, '""')}"` : '""';
+          });
+          csvContent += row.join(',') + '\n';
+        });
+      } else {
+        csvContent += 'No volunteers found\n';
+      }
+      csvContent += '\n';
 
+      // 7. WORKBOND REQUIREMENTS TAB
+      csvContent += '=== WORKBOND REQUIREMENTS ===\n';
+      if (data.workbond_requirements && data.workbond_requirements.length > 0) {
+        const reqFields = Object.keys(data.workbond_requirements[0]);
+        const enhancedReqFields = [...reqFields, 'division_name'];
+        csvContent += enhancedReqFields.join(',') + '\n';
+        
+        data.workbond_requirements.forEach(req => {
+          const divisionName = data.divisions?.find(d => d.id === req.division_id)?.name || 'No Division';
+          const row = enhancedReqFields.map(field => {
+            let value;
+            if (field === 'division_name') {
+              value = divisionName;
+            } else {
+              value = req[field];
+            }
+            return value !== null && value !== undefined ? `"${String(value).replace(/"/g, '""')}"` : '""';
+          });
+          csvContent += row.join(',') + '\n';
+        });
+      } else {
+        csvContent += 'No workbond requirements found\n';
+      }
+      csvContent += '\n';
+
+      // 8. WORKBOND SUMMARY TAB (Families tab)
+      csvContent += '=== WORKBOND SUMMARY (FAMILIES) ===\n';
+      if (data.workbond_summary && data.workbond_summary.length > 0) {
+        const headers = ['Family ID', 'Family Name', 'Emails', 'Required', 'Completed', 'Remaining', 'Status', 'Exempt Reason'];
+        csvContent += headers.join(',') + '\n';
+        
+        data.workbond_summary.forEach((r) => {
+          const emails = Array.isArray(r.emails) ? r.emails.filter(Boolean).join(' | ') : (r.emails || '');
+          const row = [
+            r.family_id || '',
+            r.family_name || '',
+            emails,
+            r.required ?? '',
+            r.completed ?? '',
+            r.remaining ?? '',
+            r.status || '',
+            r.exempt_reason || ''
+          ].map(v => `"${String(v).replace(/"/g, '""')}"`);
+          csvContent += row.join(',') + '\n';
+        });
+      } else {
+        csvContent += 'No workbond summary rows found\n';
+      }
+      csvContent += '\n';
+
+      // 9. WORKBOND SHIFTS TAB (Shift Log)
+      csvContent += '=== WORKBOND SHIFTS (SHIFT LOG) ===\n';
+      if (data.workbond_shifts && data.workbond_shifts.length > 0) {
+        const shiftFields = Object.keys(data.workbond_shifts[0]);
+        csvContent += shiftFields.join(',') + '\n';
+        
+        data.workbond_shifts.forEach((s) => {
+          const row = shiftFields.map((field) => {
+            const value = s[field];
+            return value !== null && value !== undefined ? `"${String(value).replace(/"/g, '""')}"` : '""';
+          });
+          csvContent += row.join(',') + '\n';
+        });
+      } else {
+        csvContent += 'No workbond shifts found\n';
+      }
+      csvContent += '\n';
+
+      return csvContent;
+    };
+
+    // Generate the tabbed CSV
+    const csvContent = createTabbedCSV();
+    
     // Create and download CSV file
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     const url = URL.createObjectURL(blob);
     link.setAttribute('href', url);
-    link.setAttribute('download', `COMPLETE_export_${season.name.replace(/\s+/g, '_')}_${season.year}_${new Date().toISOString().split('T')[0]}.csv`);
+    link.setAttribute('download', `COMPREHENSIVE_EXPORT_${season.name.replace(/\s+/g, '_')}_${season.year}_${timestamp}.csv`);
     link.style.visibility = 'hidden';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
     
-    console.log('Dynamic export completed successfully');
+    console.log('Tabbed export completed successfully');
     
-    // Show debug info to user
-    alert(`Export completed!\n\nAvailable fields found:\n- Players: ${data.debug?.playerFields?.join(', ') || 'None'}\n- Divisions: ${data.debug?.divisionFields?.join(', ') || 'None'}\n- Teams: ${data.debug?.teamFields?.join(', ') || 'None'}`);
+    // Show summary to user
+    alert(`Export completed!\n\nExported data includes:\n• Season Info\n• ${data.divisions?.length || 0} divisions\n• ${data.teams?.length || 0} teams\n• ${data.players?.length || 0} players\n• ${data.families?.length || 0} families\n• ${data.volunteers?.length || 0} volunteers\n• ${data.workbond_summary?.length || 0} workbond summaries\n• ${data.workbond_shifts?.length || 0} workbond shifts\n\nAll data organized in tabs within the CSV file.`);
     
   } catch (error) {
     console.error('Error exporting season:', error);
@@ -385,20 +466,25 @@ const handleExportSeason = async (seasonId) => {
   const handleSeasonSubmit = async (e) => {
     if (e) e.preventDefault();
     try {
+      const isEditing = Boolean(editingSeason?.id);
+
+      // When editing a season, we update it in-place.
+      // Only include copy_from_season when creating a brand-new season.
       const seasonData = {
         name: seasonForm.name,
-        year: seasonForm.year,
-        is_active: seasonForm.is_active,
-        copy_from_season: seasonForm.copy_from_season || null
+        year: Number(seasonForm.year),
+        is_active: Boolean(seasonForm.is_active),
+        ...(isEditing ? {} : { copy_from_season: seasonForm.copy_from_season || null })
       };
 
-      console.log('Creating season with data:', seasonData);
+      console.log(isEditing ? 'Updating season with data:' : 'Creating season with data:', seasonData);
 
-      const response = await fetch('/api/seasons', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+      const url = isEditing ? `/api/seasons/${editingSeason.id}` : '/api/seasons';
+      const method = isEditing ? 'PUT' : 'POST';
+
+      const response = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(seasonData)
       });
 
@@ -406,7 +492,7 @@ const handleExportSeason = async (seasonId) => {
         const errorText = await response.text();
         throw new Error(`HTTP ${response.status}: ${errorText}`);
       }
-      
+
       await loadData();
       resetSeasonForm();
     } catch (error) {
@@ -792,7 +878,7 @@ const handleExportSeason = async (seasonId) => {
       {/* Tabs */}
       <div className="mb-6 border-b border-gray-200">
         <nav className="-mb-px flex space-x-8">
-          {['seasons', 'teams', 'divisions', 'settings'].map((tab) => (
+          {['seasons', 'teams', 'divisions'].map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -805,7 +891,6 @@ const handleExportSeason = async (seasonId) => {
               {tab === 'seasons' && <Calendar className="w-4 h-4 inline mr-2" />}
               {tab === 'teams' && <Users className="w-4 h-4 inline mr-2" />}
               {tab === 'divisions' && <Shield className="w-4 h-4 inline mr-2" />}
-              {tab === 'settings' && <Settings className="w-4 h-4 inline mr-2" />}
               {tab}
             </button>
           ))}
@@ -953,7 +1038,7 @@ const handleExportSeason = async (seasonId) => {
               onChange={(e) => setTeamForm({ ...teamForm, division_id: e.target.value })}
             >
               <option value="">Select a division</option>
-              {divisions.map(division => (
+              {filteredDivisions.map(division => (
                 <option key={division.id} value={division.id}>
                   {division.name}
                 </option>
@@ -1420,7 +1505,7 @@ const handleExportSeason = async (seasonId) => {
 
           {/* Teams Grid */}
           <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
-            {teams.map((team) => (
+            {filteredTeams.map((team) => (
               <div key={team.id} className="bg-white overflow-hidden shadow rounded-lg border border-gray-200">
                 <div className={`h-2 ${getColorClass(team.color)}`}></div>
                 <div className="p-6">
@@ -1516,7 +1601,7 @@ const handleExportSeason = async (seasonId) => {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {divisions.map((division) => (
+                {filteredDivisions.map((division) => (
                   <tr key={division.id}>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-sm font-medium text-gray-900">{division.name}</div>
@@ -1587,7 +1672,7 @@ const handleExportSeason = async (seasonId) => {
       )}
 
       {/* Settings Tab */}
-      {activeTab === 'settings' && (
+      {/*{activeTab === 'settings' && (
         <div className="bg-white shadow rounded-lg p-6">
           <h2 className="text-lg font-medium text-gray-900 mb-6">System Settings</h2>
           <div className="space-y-6">
@@ -1613,7 +1698,7 @@ const handleExportSeason = async (seasonId) => {
             </div>
           </div>
         </div>
-      )}
+      )}*/}
     </div>
   );
 };

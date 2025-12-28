@@ -26,12 +26,15 @@ const paymentDataRoutes = require('./routes/paymentData');
 const volunteerRoutes = require('./routes/volunteers');
 const volunteerImportRoutes = require('./routes/volunteerImport'); // NEW
 const boardMemberRoutes = require('./routes/boardMembers');
-const draftRoutes = require('./routes/draft');
+//const draftRoutes = require('./routes/draft');
 const seasonExportRoutes = require('./routes/season-export');
 const gamesRoutes = require('./routes/games');
 const dashboardRoutes = require('./routes/dashboard');
 const workbondRoutes = require('./routes/workbond');
+const publicCheckWorkbondRoutes = require('./routes/publicCheckWorkbond');
 // const workbondImportRoutes = require('./routes/import-shifts');
+//app.use('/api/draft-new', require('./routes/draft-new'));
+app.use('/api/draft', require('./routes/draft-new')); // NEW - use the new code
 
 // Use routes - IMPORTANT: configuration before teams
 app.use('/api/auth', authRoutes);
@@ -47,11 +50,13 @@ app.use('/api/payment-data', paymentDataRoutes);
 app.use('/api/volunteers', volunteerRoutes);
 app.use('/api/volunteer-import', volunteerImportRoutes); // NEW route base
 app.use('/api/board-members', boardMemberRoutes);
-app.use('/api/draft', draftRoutes);
+//app.use('/api/draft', draftRoutes);
 app.use('/api/season-export', seasonExportRoutes);
 app.use('/api/games', gamesRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/workbond', workbondRoutes);
+app.use('/api/public/checkworkbond', publicCheckWorkbondRoutes);
+app.use('/api/public/workbond-status', publicCheckWorkbondRoutes); // backward compat
 // app.use('/api/workbond', workbondImportRoutes); // enable later if needed
 
 // Basic health check

@@ -23,7 +23,6 @@ import EmailSettings from './pages/EmailSettings';
 
 import { AuthProvider } from './context/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
-import CheckWorkbond from './pages/CheckWorkbond';
 
 function App() {
   return (
@@ -33,54 +32,53 @@ function App() {
           <Layout>
             <ErrorBoundary>
               <Routes>
-                {/* Public routes: Layout component will hide navigation for these */}
-                <Route path="/checkworkbond" element={<CheckWorkbond />} />
+                {/* Public route: login */}
                 <Route path="/login" element={<Login />} />
 
                 {/* Protected routes (any logged-in user) */}
                 <Route
                   path="/"
-                  element={<ProtectedRoute element={<Dashboard />} />}
+                  element={<ProtectedRoute element={<Dashboard />} resource="Dashboard" />}
                 />
                 <Route
                   path="/players"
-                  element={<ProtectedRoute element={<Players />} />}
+                  element={<ProtectedRoute element={<Players />} resource="Players" />}
                 />
                 <Route
                   path="/teams"
-                  element={<ProtectedRoute element={<Teams />} />}
+                  element={<ProtectedRoute element={<Teams />} resource="Teams" />}
                 />
                 <Route
                   path="/draft"
-                  element={<ProtectedRoute element={<Draft />} />}
+                  element={<ProtectedRoute element={<Draft />} resource="Draft" />}
                 />
                 <Route
                   path="/seasons"
-                  element={<ProtectedRoute element={<Seasons />} />}
+                  element={<ProtectedRoute element={<Seasons />} resource="Configuration" />}
                 />
                 <Route
                   path="/mailing-list"
-                  element={<ProtectedRoute element={<MailingList />} />}
+                  element={<ProtectedRoute element={<MailingList />} resource="Mailing List" />}
                 />
                 <Route
                   path="/configuration"
-                  element={<ProtectedRoute element={<Configuration />} />}
+                  element={<ProtectedRoute element={<Configuration />} resource="Configuration" />}
                 />
                 <Route
                   path="/volunteers"
-                  element={<ProtectedRoute element={<Volunteers />} />}
+                  element={<ProtectedRoute element={<Volunteers />} resource="Volunteers" />}
                 />
                 <Route
                   path="/team-uniforms"
-                  element={<ProtectedRoute element={<TeamUniforms />} />}
+                  element={<ProtectedRoute element={<TeamUniforms />} resource="Team Uniforms" />}
                 />
                 <Route
                   path="/games"
-                  element={<ProtectedRoute element={<GameScheduler />} />}
+                  element={<ProtectedRoute element={<GameScheduler />} resource="Game Scheduler" />}
                 />
                 <Route
                   path="/boardmembers"
-                  element={<ProtectedRoute element={<BoardMembers />} />}
+                  element={<ProtectedRoute element={<BoardMembers />} resource="Board Members" />}
                 />
 
                 {/* Workbond management: restricted roles */}
@@ -89,6 +87,7 @@ function App() {
                   element={
                     <ProtectedRoute
                       element={<WorkbondManagement />}
+                      resource="Workbond Management"
                       requiredRoles={[
                         'Administrator',
                         'President',
@@ -104,6 +103,7 @@ function App() {
                   element={
                     <ProtectedRoute
                       element={<Users />}
+                      resource="Users"
                       requiredRoles={['Administrator', 'President']}
                     />
                   }

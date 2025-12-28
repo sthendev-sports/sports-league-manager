@@ -178,6 +178,18 @@ router.post('/import', async (req, res) => {
     const errors = [];
     const processedVolunteers = [];
 
+    // Cache family matches so we don't query Supabase repeatedly for the same email/phone
+    const familyMatchCache = new Map();
+    const getCachedFamilyId = async ({ email, phone }) => {
+      const e = String(email || '').trim().toLowerCase();
+      const p = normalizePhone(phone);
+      const key = `${e}|${p}`;
+      if (familyMatchCache.has(key)) return familyMatchCache.get(key);
+      const fid = await findMatchingFamilyId({ email: e, phone: p });
+      familyMatchCache.set(key, fid);
+      return fid;
+    };
+
     // Load existing volunteers for this season for matching
     console.log('Loading existing volunteers for season:', season_id);
     const { data: existingVolunteers, error: existingError } = await supabase
@@ -314,11 +326,12 @@ router.post('/import', async (req, res) => {
 
           // PRIMARY assigned role (for now still stored in "role")
           // Derived as first role from CSV string.
-          role: extractPrimaryRole(rawInterestedRoles),
+          role: 'Parent', // keep system default; import role goes to interested_roles
+        
 
           // Raw interested roles exactly as provided in CSV
           // e.g. "Manager, Assistant Coach, Team Parent"
-          interested_roles: rawInterestedRoles,
+          interested_roles: rawInterestedRoles || null,
 
           division_id: divisionId,
           season_id: season_id,
@@ -334,7 +347,7 @@ router.post('/import', async (req, res) => {
           shifts_completed: 0,
           shifts_required: 0,
           can_pickup: false,
-          family_id: null,
+          family_id: await getCachedFamilyId({ email: volunteerData['volunteer email address'], phone: volunteerData['volunteer cellphone'] }),
           player_id: null,
         };
 
@@ -604,6 +617,53 @@ async function updateExistingVolunteer(existingVolunteer, newVolunteerData) {
   }
 
   return updatedVolunteer;
+}
+
+module.exports = router;
+// Normalize phone numbers for matching (digits only)
+function normalizePhone(phone) {
+  return String(phone || '').replace(/\D/g, '');
+}
+// Try to find a matching family by email/phone.
+// Returns family UUID (families.id) or null.
+async function findMatchingFamilyId({ email, phone }) {
+  const emailNorm = String(email || '').trim().toLowerCase();
+  const phoneNorm = normalizePhone(phone);
+
+  // 1) Exact email match (primary or parent2)
+  if (emailNorm) {
+    const { data: famByEmail, error } = await supabase
+      .from('families')
+      .select('id')
+      .or(`primary_contact_email.eq.${emailNorm},parent2_email.eq.${emailNorm}`)
+      .limit(1);
+
+    if (!error && famByEmail && famByEmail.length > 0) {
+      return famByEmail[0].id;
+    }
+  }
+
+  // 2) Phone match (normalize and compare in JS)
+  // Supabase can't easily normalize with SQL, so we do a coarse fetch by last 4 digits
+  if (phoneNorm && phoneNorm.length >= 4) {
+    const last4 = phoneNorm.slice(-4);
+    const { data: famCandidates, error } = await supabase
+      .from('families')
+      .select('id, primary_contact_phone, parent2_phone')
+      .or(`primary_contact_phone.ilike.%${last4}%,parent2_phone.ilike.%${last4}%`)
+      .limit(50);
+
+    if (!error && famCandidates && famCandidates.length > 0) {
+      for (const fam of famCandidates) {
+        const p1 = normalizePhone(fam.primary_contact_phone);
+        const p2 = normalizePhone(fam.parent2_phone);
+        if (p1 && p1 == phoneNorm) return fam.id;
+        if (p2 && p2 == phoneNorm) return fam.id;
+      }
+    }
+  }
+
+  return null;
 }
 
 module.exports = router;

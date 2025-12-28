@@ -341,6 +341,43 @@ router.post('/import', jsonParser, async (req, res) => {
     if (!season_id) {
       return res.status(400).json({ error: 'Season ID is required' });
     }
+
+    // --- NEW: resolve division_id from program_title during import ---
+    // We load divisions for this season once, then match by name.
+    const { data: seasonDivisions, error: seasonDivisionsError } = await supabase
+      .from('divisions')
+      .select('id, name')
+      .eq('season_id', season_id);
+
+    if (seasonDivisionsError) {
+      console.error('Error loading divisions for season:', seasonDivisionsError);
+      throw seasonDivisionsError;
+    }
+
+    const divisionNameToId = new Map();
+    (seasonDivisions || []).forEach((d) => {
+      const name = String(d?.name || '').trim();
+      if (d?.id && name) divisionNameToId.set(name.toLowerCase(), d.id);
+    });
+
+    // Match strategy:
+    // 1) exact case-insensitive name match
+    // 2) contains match (handles program_title like "Softball - Rookies Division (Coach Pitch)")
+    const resolveDivisionId = (programTitle) => {
+      const pt = String(programTitle || '').trim();
+      if (!pt) return null;
+
+      const exact = divisionNameToId.get(pt.toLowerCase());
+      if (exact) return exact;
+
+      // contains match
+      const lower = pt.toLowerCase();
+      for (const [divNameLower, divId] of divisionNameToId.entries()) {
+        if (lower.includes(divNameLower)) return divId;
+      }
+
+      return null;
+    };
     
     // Get existing players for this season to check for duplicates
     console.log('Checking for existing players in season:', season_id);
@@ -399,9 +436,17 @@ router.post('/import', jsonParser, async (req, res) => {
               console.log(`Found existing player: ${playerData.first_name} ${playerData.last_name}, updating record`);
               
               // Update existing player
-              const updatedPlayer = await updateExistingPlayer(existingPlayer, playerData);
+              const updatedPlayer = await updateExistingPlayer(existingPlayer, playerData, resolveDivisionId);
               updatedPlayers.push(updatedPlayer);
-              processedPlayers.push(updatedPlayer);
+
+              // NEW: Also merge guardian/contact fields onto the existing family (if present)
+              try {
+                if (existingPlayer.family_id) {
+                  await familyMatching.mergeFamilyDetails(existingPlayer.family_id, playerData);
+                }
+              } catch (e) {
+                console.warn('Family merge (existing player) failed:', e?.message || e);
+              }
               
             } else {
               // New player - create family association
@@ -414,6 +459,15 @@ router.post('/import', jsonParser, async (req, res) => {
                 family = await createNewFamily(playerData, familyId);
                 isNewFamily = true;
                 createdFamilies.add(family.id);
+              }
+
+              // NEW: Ensure guardian/contact details are merged onto the family record
+              try {
+                if (family?.id) {
+                  await familyMatching.mergeFamilyDetails(family.id, playerData);
+                }
+              } catch (e) {
+                console.warn('Family merge (new player) failed:', e?.message || e);
               }
 
               // Add player to family group
@@ -438,6 +492,7 @@ router.post('/import', jsonParser, async (req, res) => {
               const playerRecord = {
                 family_id: family.id,
                 season_id: season_id,
+                division_id: resolveDivisionId(playerData.program_title),
                 registration_no: playerData.registration_no,
                 first_name: playerData.first_name,
                 last_name: playerData.last_name,
@@ -517,7 +572,7 @@ router.post('/import', jsonParser, async (req, res) => {
     }
 
     const response = { 
-      message: `${allProcessedPlayers.length + updatedPlayers.length} players processed successfully (${newPlayers.length} new, ${updatedPlayers.length} updated)`, 
+      message: `${allProcessedPlayers.length + updatedPlayers.length} players processed successfully (${allProcessedPlayers.length} new, ${updatedPlayers.length} updated)`, 
       data: {
         newPlayers: allProcessedPlayers,
         updatedPlayers: updatedPlayers
@@ -531,7 +586,7 @@ router.post('/import', jsonParser, async (req, res) => {
     }
 
     console.log('=== PLAYER IMPORT COMPLETE (SMART MERGE) ===');
-    console.log(`Summary: ${newPlayers.length} new players, ${updatedPlayers.length} updated players`);
+    console.log(`Summary: ${allProcessedPlayers.length} new players, ${updatedPlayers.length} updated players`);
     res.status(201).json(response);
   } catch (error) {
     console.error('=== PLAYER IMPORT ERROR ===');
@@ -584,7 +639,7 @@ function findExistingPlayer(existingPlayers, playerData, seasonId) {
 }
 
 // NEW: Helper function to update existing player
-async function updateExistingPlayer(existingPlayer, newPlayerData) {
+async function updateExistingPlayer(existingPlayer, newPlayerData, resolveDivisionId) {
   const updates = {};
   
   // Only update fields that have new data and are different from existing data
@@ -617,6 +672,15 @@ async function updateExistingPlayer(existingPlayer, newPlayerData) {
   
   if (newPlayerData.program_title && newPlayerData.program_title !== existingPlayer.program_title) {
     updates.program_title = newPlayerData.program_title;
+  }
+
+  // NEW: keep players.division_id in sync with program_title (when possible)
+  // Only set when we can confidently resolve an id for this season.
+  if (typeof resolveDivisionId === 'function') {
+    const resolvedDivisionId = resolveDivisionId(newPlayerData.program_title || existingPlayer.program_title);
+    if (resolvedDivisionId && String(resolvedDivisionId) !== String(existingPlayer.division_id || '')) {
+      updates.division_id = resolvedDivisionId;
+    }
   }
   
   // Update boolean fields if they've changed

@@ -170,6 +170,67 @@ class FamilyMatchingService {
       await this.updateFamilyShiftRequirements(volunteer.family_id, seasonId);
     }
   }
+
+  // NEW: Merge incoming guardian/contact data onto an existing family record.
+  // - Never overwrites existing fields with empty values
+  // - Allows updates when the source system changes a phone/email/name
+  async mergeFamilyDetails(familyId, playerData) {
+    if (!familyId) return null;
+
+    const updates = {};
+
+    const p1First = (playerData.parent1_firstname || '').toString().trim();
+    const p1Last = (playerData.parent1_lastname || '').toString().trim();
+    const p1Name = `${p1First} ${p1Last}`.trim();
+    const p1Email = (playerData.parent1_email || '').toString().trim().toLowerCase();
+    const p1Phone = (playerData.parent1_phone1 || '').toString().trim();
+
+    const p2First = (playerData.parent2_firstname || '').toString().trim();
+    const p2Last = (playerData.parent2_lastname || '').toString().trim();
+    const p2Email = (playerData.parent2_email || '').toString().trim().toLowerCase();
+    const p2Phone = (playerData.parent2_phone1 || '').toString().trim();
+
+    // Only set fields when we actually have values
+    if (p1Name) updates.primary_contact_name = p1Name;
+    if (p1Email) updates.primary_contact_email = p1Email;
+    if (p1Phone) updates.primary_contact_phone = p1Phone;
+
+    if (p2First) updates.parent2_first_name = p2First;
+    if (p2Last) updates.parent2_last_name = p2Last;
+    if (p2Email) updates.parent2_email = p2Email;
+    if (p2Phone) updates.parent2_phone = p2Phone;
+
+    // Address fields (optional)
+    const addr1 = (playerData.address_line_1 || '').toString().trim();
+    const addr2 = (playerData.address_line_2 || '').toString().trim();
+    const city = (playerData.city || '').toString().trim();
+    const state = (playerData.state || '').toString().trim();
+    const zip = (playerData.zip_code || '').toString().trim();
+
+    if (addr1) updates.address_line_1 = addr1;
+    if (addr2) updates.address_line_2 = addr2;
+    if (city) updates.city = city;
+    if (state) updates.state = state;
+    if (zip) updates.zip_code = zip;
+
+    // If there are no updates, skip
+    if (Object.keys(updates).length === 0) return null;
+
+    const { data, error } = await supabase
+      .from('families')
+      .update(updates)
+      .eq('id', familyId)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error merging family details:', error);
+      // Don't throw - importing players should still proceed
+      return null;
+    }
+
+    return data;
+  }
 }
 
 module.exports = new FamilyMatchingService();

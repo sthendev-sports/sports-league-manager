@@ -12,11 +12,19 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 //app.use(cors());
 app.use(
   cors({
-    origin: [
-      "http://localhost:5173", // local Vite frontend
-      process.env.FRONTEND_URL // Vercel frontend
-    ],
-    credentials: true
+    origin: (origin, callback) => {
+      const allowedOrigins = [
+        'http://localhost:5173',
+        process.env.FRONTEND_URL,
+      ].filter(Boolean);
+
+      // Allow non-browser requests (like curl/postman) that may have no Origin header
+      if (!origin) return callback(null, true);
+
+      if (allowedOrigins.includes(origin)) return callback(null, true);
+      return callback(new Error(`CORS blocked for origin: ${origin}`));
+    },
+    credentials: true,
   })
 );
 app.use(express.json());

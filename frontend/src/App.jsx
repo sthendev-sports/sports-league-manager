@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 
@@ -26,6 +26,12 @@ import ProtectedRoute from './components/ProtectedRoute';
 import CheckWorkbond from './pages/CheckWorkbond';
 
 function App() {
+  // Wake up the Render backend (free tier may spin down when idle).
+  // Uses a simple GET so the first user action (like Login POST) doesn't fail during cold start.
+  useEffect(() => {
+    fetch('/api/health').catch(() => {});
+  }, []);
+
   return (
     <Router>
       <AuthProvider>

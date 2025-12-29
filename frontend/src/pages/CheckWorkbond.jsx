@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-//import DOMPurify from 'dompurify';
+import DOMPurify from 'dompurify';
 
 // Move ALL helper functions OUTSIDE the component
 function looksLikeJwt(token) {

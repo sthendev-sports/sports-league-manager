@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
 
-const API = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+const API = import.meta.env.VITE_API_URL || ''; // empty => use same-origin /api (Vercel rewrite or Vite proxy)
 
 function toIntOrNull(v) {
   if (v === '' || v === null || v === undefined) return null;

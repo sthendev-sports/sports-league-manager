@@ -22,7 +22,7 @@ const PrintableDraftSheet = ({ divisionName, seasonName, players, onClose }) => 
   const getVolunteerRoles = (player) => {
     if (!player.volunteers || player.volunteers.length === 0) return '';
     //return player.volunteers.map(v => v.role).join(', ');
-	 return player.volunteers.map(v => v.derived_role || v.role || 'Volunteer').join(', ');
+    return player.volunteers.map(v => v.derived_role || v.role || 'Volunteer').join(', ');
   };
 
   const getSiblingGroups = (players) => {
@@ -102,12 +102,13 @@ const PrintableDraftSheet = ({ divisionName, seasonName, players, onClose }) => 
                         }
                         /* Optimized column widths */
                         .col-number { width: 4%; }
-                        .col-name { width: 18%; }
-                        .col-travel { width: 6%; }
-                        .col-status { width: 10%; }
+                        .col-name { width: 16%; }
+                        .col-gender { width: 5%; }
+                        .col-travel { width: 5%; }
+                        .col-status { width: 9%; }
                         .col-age { width: 5%; }
                         .col-birthday { width: 10%; }
-                        .col-volunteers { width: 17%; }
+                        .col-volunteers { width: 16%; }
                         .col-notes { width: 30%; }
                       </style>
                     </head>
@@ -122,6 +123,7 @@ const PrintableDraftSheet = ({ divisionName, seasonName, players, onClose }) => 
                           <tr>
                             <th class="col-number">#</th>
                             <th class="col-name">Player Name</th>
+                            <th class="col-gender">Gender</th>
                             <th class="col-travel">Travel</th>
                             <th class="col-status">New/Return</th>
                             <th class="col-age">Age</th>
@@ -138,6 +140,7 @@ const PrintableDraftSheet = ({ divisionName, seasonName, players, onClose }) => 
                                 ${player.first_name} ${player.last_name}
                                 ${player.hasSiblings ? '<span class="sibling-icon">👥</span>' : ''}
                               </td>
+                              <td class="col-gender" style="text-align: center;">${player.gender ? player.gender.charAt(0).toUpperCase() : ''}</td>
                               <td class="col-travel" style="text-align: center;">${player.is_travel_player ? '✓' : ''}</td>
                               <td class="col-status">${player.is_new_player ? 'New' : 'Returning'}</td>
                               <td class="col-age" style="text-align: center;">${calculateAge(player.birth_date)}</td>
@@ -184,12 +187,13 @@ const PrintableDraftSheet = ({ divisionName, seasonName, players, onClose }) => 
               <thead>
                 <tr className="bg-gray-100">
                   <th className="border border-gray-300 p-1 text-left w-12">#</th>
-                  <th className="border border-gray-300 p-1 text-left w-40">Player Name</th>
+                  <th className="border border-gray-300 p-1 text-left w-36">Player Name</th>
+                  <th className="border border-gray-300 p-1 text-left w-12">Gender</th>
                   <th className="border border-gray-300 p-1 text-left w-16">Travel</th>
                   <th className="border border-gray-300 p-1 text-left w-24">New/Return</th>
                   <th className="border border-gray-300 p-1 text-left w-12">Age</th>
                   <th className="border border-gray-300 p-1 text-left w-24">Birthday</th>
-                  <th className="border border-gray-300 p-1 text-left w-40">Parent Volunteers</th>
+                  <th className="border border-gray-300 p-1 text-left w-36">Parent Volunteers</th>
                   <th className="border border-gray-300 p-1 text-left w-48">Notes</th>
                 </tr>
               </thead>
@@ -212,6 +216,9 @@ const PrintableDraftSheet = ({ divisionName, seasonName, players, onClose }) => 
                           </span>
                         )}
                       </div>
+                    </td>
+                    <td className="border border-gray-300 p-1 text-center">
+                      {player.gender ? player.gender.charAt(0).toUpperCase() : ''}
                     </td>
                     <td className="border border-gray-300 p-1 text-center">{player.is_travel_player ? '✓' : ''}</td>
                     <td className="border border-gray-300 p-1">{player.is_new_player ? 'New' : 'Returning'}</td>

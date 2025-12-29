@@ -124,10 +124,6 @@ const Login = () => {
             </button>
           </div>
         </form>
-
-        <p className="mt-4 text-xs text-gray-400 text-center">
-          Use the email & password you created in Supabase (users table).
-        </p>
       </div>
     </div>
   );

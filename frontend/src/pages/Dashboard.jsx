@@ -108,7 +108,8 @@ const Dashboard = () => {
     previous: stats.divisions.reduce((sum, division) => sum + division.previous, 0),
     newPlayers: stats.divisions.reduce((sum, division) => sum + division.newPlayers, 0),
     returningPlayers: stats.divisions.reduce((sum, division) => sum + division.returningPlayers, 0),
-    teams: stats.divisions.reduce((sum, division) => sum + division.teams, 0)
+    teams: stats.divisions.reduce((sum, division) => sum + division.teams, 0),
+    withdrawnPlayers: stats.divisions.reduce((sum, division) => sum + (division.withdrawnPlayers || 0), 0)
   };
 
   // Calculate totals for volunteer breakdown
@@ -286,6 +287,7 @@ const Dashboard = () => {
                     <tr>
                       <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Division</th>
                       <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Current</th>
+                      <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Withdrawn</th>
                       <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Previous</th>
                       <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Trend</th>
                       <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">New</th>
@@ -299,7 +301,18 @@ const Dashboard = () => {
                       return (
                         <tr key={division.name} className="hover:bg-gray-50">
                           <td className="px-2 py-2 text-sm font-medium text-gray-900 whitespace-nowrap">{division.name}</td>
-                          <td className="px-2 py-2 text-sm text-gray-900 text-center whitespace-nowrap">{division.current}</td>
+                          <td className="px-2 py-2 text-sm text-gray-900 text-center whitespace-nowrap font-bold">
+                            {division.current}
+                          </td>
+                          <td className="px-2 py-2 text-sm text-center whitespace-nowrap">
+                            {division.withdrawnPlayers > 0 ? (
+                              <span className="inline-flex items-center px-2 py-1 text-xs font-medium rounded-full bg-red-100 text-red-800">
+                                {division.withdrawnPlayers}
+                              </span>
+                            ) : (
+                              <span className="text-gray-400">0</span>
+                            )}
+                          </td>
                           <td className="px-2 py-2 text-sm text-center whitespace-nowrap">
                             {editingDivision === division.name ? (
                               <div className="flex items-center justify-center space-x-1">
@@ -354,7 +367,18 @@ const Dashboard = () => {
                     {/* Total Row */}
                     <tr className="bg-gray-50 font-semibold border-t-2 border-gray-300">
                       <td className="px-2 py-2 text-sm text-gray-900 whitespace-nowrap">Total</td>
-                      <td className="px-2 py-2 text-sm text-gray-900 text-center whitespace-nowrap">{divisionTotals.current}</td>
+                      <td className="px-2 py-2 text-sm text-gray-900 text-center whitespace-nowrap">
+                        {divisionTotals.current}
+                      </td>
+                      <td className="px-2 py-2 text-sm text-center whitespace-nowrap">
+                        {divisionTotals.withdrawnPlayers > 0 ? (
+                          <span className="inline-flex items-center px-2 py-1 text-xs font-medium rounded-full bg-red-100 text-red-800">
+                            {divisionTotals.withdrawnPlayers}
+                          </span>
+                        ) : (
+                          <span className="text-gray-400">0</span>
+                        )}
+                      </td>
                       <td className="px-2 py-2 text-sm text-gray-500 text-center whitespace-nowrap">{divisionTotals.previous}</td>
                       <td className="px-2 py-2 text-sm text-center whitespace-nowrap">
                         <div className={`inline-flex items-center px-1 py-0.5 rounded text-xs font-medium ${

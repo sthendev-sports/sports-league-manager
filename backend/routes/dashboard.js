@@ -102,11 +102,12 @@ async function getPreviousSeason(currentYear) {
 }
 
 // Get registration statistics
+// Get registration statistics
 async function getRegistrationStatistics(currentSeasonId, previousSeasonId) {
-  // Current season players
+  // Current season players - ADD status field
   const { data: currentPlayers, error: currentError } = await supabase
     .from('players')
-    .select('id, is_new_player, team_id, payment_received')
+    .select('id, is_new_player, team_id, payment_received, status') // ADD status here
     .eq('season_id', currentSeasonId);
 
   if (currentError) throw currentError;
@@ -134,13 +135,13 @@ async function getRegistrationStatistics(currentSeasonId, previousSeasonId) {
   const newPlayers = currentPlayers.filter(p => p.is_new_player).length;
   const returningPlayers = currentPlayers.filter(p => !p.is_new_player).length;
   const pendingRegistrations = currentPlayers.filter(p => !p.payment_received).length;
+  const withdrawnPlayers = currentPlayers.filter(p => p.status === 'withdrawn').length; // NEW: count withdrawn players
 
   return {
     totalRegistered: currentPlayers.length,
     pendingRegistrations: pendingRegistrations,
-    totalWithPending: currentPlayers.length, // Same as total since pending are included
-    playersNotReturning: previousSeasonId ? 
-      Math.max(0, previousPlayers.length - returningPlayers) : 0,
+    totalWithPending: currentPlayers.length,
+    playersNotReturning: withdrawnPlayers, // CHANGED: Now counts withdrawn players from current season
     newPlayers: newPlayers,
     returningPlayers: returningPlayers,
     totalTeams: teams.length
@@ -148,11 +149,14 @@ async function getRegistrationStatistics(currentSeasonId, previousSeasonId) {
 }
 
 // Get division statistics with trends - using program_title
+// In dashboard.js, update the getDivisionStatistics function:
+
+// Get division statistics with trends - using program_title
 async function getDivisionStatistics(currentSeasonId, previousSeasonId) {
-  // Get players with their program_title for current season
+  // Get players with their program_title for current season - ADD status field
   const { data: currentPlayers, error: currentError } = await supabase
     .from('players')
-    .select('id, is_new_player, program_title, team_id')
+    .select('id, is_new_player, program_title, team_id, status') // ADD status here
     .eq('season_id', currentSeasonId);
 
   if (currentError) throw currentError;
@@ -185,10 +189,18 @@ async function getDivisionStatistics(currentSeasonId, previousSeasonId) {
       currentDivisionMap[divisionName] = {
         players: [],
         newPlayers: 0,
-        returningPlayers: 0
+        returningPlayers: 0,
+        withdrawnPlayers: 0 // ADD: track withdrawn players
       };
     }
     currentDivisionMap[divisionName].players.push(player);
+    
+    // Count withdrawn players
+    if (player.status === 'withdrawn') {
+      currentDivisionMap[divisionName].withdrawnPlayers++;
+    }
+    
+    // Count new vs returning players
     if (player.is_new_player) {
       currentDivisionMap[divisionName].newPlayers++;
     } else {
@@ -208,8 +220,6 @@ async function getDivisionStatistics(currentSeasonId, previousSeasonId) {
 
   // Count teams per division based on program_title
   const teamsPerDivision = {};
-  // Since teams don't have program_title, we'll estimate teams per division
-  // by counting unique team_ids per division in players table
   currentPlayers.forEach(player => {
     if (player.team_id && player.program_title) {
       const divisionName = player.program_title;
@@ -237,17 +247,23 @@ async function getDivisionStatistics(currentSeasonId, previousSeasonId) {
     const currentCount = currentData.players.length;
     const previousCount = previousData.length;
     
-    const trend = currentCount > previousCount ? 'up' : 
-                 currentCount < previousCount ? 'down' : 'neutral';
+    // Calculate active current count (excluding withdrawn)
+    const activeCurrentCount = currentCount - currentData.withdrawnPlayers;
+    
+    // Calculate trend based on active players (not withdrawn)
+    const trend = activeCurrentCount > previousCount ? 'up' : 
+                 activeCurrentCount < previousCount ? 'down' : 'neutral';
 
     divisionStats.push({
       name: divisionName,
-      current: currentCount,
+      current: activeCurrentCount, // CHANGED: Show active count (excluding withdrawn)
       previous: previousCount,
       trend: trend,
       newPlayers: currentData.newPlayers,
       returningPlayers: currentData.returningPlayers,
-      teams: teamsPerDivisionCount[divisionName] || 0
+      teams: teamsPerDivisionCount[divisionName] || 0,
+      withdrawnPlayers: currentData.withdrawnPlayers, // ADD: withdrawn count
+      totalRegistered: currentCount // ADD: total including withdrawn
     });
   });
 
@@ -262,7 +278,9 @@ async function getDivisionStatistics(currentSeasonId, previousSeasonId) {
         trend: 'down',
         newPlayers: 0,
         returningPlayers: 0,
-        teams: 0
+        teams: 0,
+        withdrawnPlayers: 0, // ADD: withdrawn count
+        totalRegistered: 0 // ADD: total including withdrawn
       });
     }
   });

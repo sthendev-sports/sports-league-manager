@@ -1,5 +1,5 @@
 import React, {useState, useEffect, useRef, useMemo, useDeferredValue } from 'react';
-import { Plus, Search, Users, RefreshCw, Mail, Phone, Filter, ChevronDown, ChevronUp, Link } from 'lucide-react';
+import { Plus, Search, Users, RefreshCw, Mail, Phone, Filter, ChevronDown, ChevronUp, Link, X, Check } from 'lucide-react';
 import { playersAPI, seasonsAPI, importAPI, parseCSV, teamsAPI } from '../services/api';
 import CSVImport from '../components/CSVImport';
 import CSVTemplate from '../components/CSVTemplate';
@@ -15,6 +15,11 @@ const Players = () => {
   const [editingPlayer, setEditingPlayer] = useState(null);
   const [editTeamId, setEditTeamId] = useState('');
   const [savingTeam, setSavingTeam] = useState(false);
+  // ADD: Status edit modal
+  const [showStatusEditModal, setShowStatusEditModal] = useState(false);
+  const [editStatus, setEditStatus] = useState('');
+  const [savingStatus, setSavingStatus] = useState(false);
+  
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
@@ -29,7 +34,8 @@ const Players = () => {
     registrationPaid: '',
     workbondCheck: '',
     guardianName: '',
-    medicalConditions: ''
+    medicalConditions: '',
+    status: '' // ADD: Status filter
   });
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 50;
@@ -78,14 +84,18 @@ const Players = () => {
     let paid = 0;
     let unpaid = 0;
     let workbondCheck = 0;
+    let activePlayers = 0;
+    let withdrawnPlayers = 0;
 
     for (const p of players) {
       if (p.payment_received) paid += 1;
       else unpaid += 1;
       if (p.family?.work_bond_check_received) workbondCheck += 1;
+      if (p.status === 'active') activePlayers += 1;
+      if (p.status === 'withdrawn') withdrawnPlayers += 1;
     }
 
-    return { total, paid, unpaid, workbondCheck };
+    return { total, paid, unpaid, workbondCheck, activePlayers, withdrawnPlayers };
   }, [players]);
 
   useEffect(() => {
@@ -158,6 +168,13 @@ const Players = () => {
     setShowTeamEditModal(true);
   };
 
+  // ADD: Open the "Change Status" modal for a player
+  const openStatusEdit = (player) => {
+    setEditingPlayer(player);
+    setEditStatus(player?.status || 'active');
+    setShowStatusEditModal(true);
+  };
+
   // Save only the team change for the selected player
   const handleSaveTeamChange = async () => {
     if (!editingPlayer) return;
@@ -180,6 +197,28 @@ const Players = () => {
       alert('Failed to update player team. Check the console for details.');
     } finally {
       setSavingTeam(false);
+    }
+  };
+
+  // ADD: Save only the status change for the selected player
+  const handleSaveStatusChange = async () => {
+    if (!editingPlayer) return;
+
+    try {
+      setSavingStatus(true);
+
+      await playersAPI.update(editingPlayer.id, { status: editStatus });
+
+      setShowStatusEditModal(false);
+      setEditingPlayer(null);
+
+      // reload players so the UI updates immediately
+      await loadPlayers();
+    } catch (err) {
+      console.error('Error updating player status:', err);
+      alert('Failed to update player status. Check the console for details.');
+    } finally {
+      setSavingStatus(false);
     }
   };
 
@@ -428,6 +467,32 @@ const Players = () => {
     return colorMap[color] || 'bg-gray-500';
   };
 
+  // ADD: Helper function to get status badge styles
+  const getStatusBadge = (status) => {
+    switch (status) {
+      case 'active':
+        return {
+          className: 'bg-green-100 text-green-800',
+          label: 'Active'
+        };
+      case 'withdrawn':
+        return {
+          className: 'bg-red-100 text-red-800',
+          label: 'Withdrawn'
+        };
+      case 'inactive':
+        return {
+          className: 'bg-gray-100 text-gray-800',
+          label: 'Inactive'
+        };
+      default:
+        return {
+          className: 'bg-gray-100 text-gray-800',
+          label: status || 'Active'
+        };
+    }
+  };
+
   const handleFilterChange = (column, value) => {
     setColumnFilters(prev => ({
       ...prev,
@@ -443,7 +508,8 @@ const Players = () => {
       registrationPaid: '',
       workbondCheck: '',
       guardianName: '',
-      medicalConditions: ''
+      medicalConditions: '',
+      status: ''
     });
     setSearchTerm('');
   };
@@ -467,6 +533,16 @@ const Players = () => {
     return Array.from(set).sort((a, b) => a.localeCompare(b));
   }, [players]);
 
+  // ADD: Status options
+  const statusOptions = useMemo(() => {
+    const set = new Set();
+    (players || []).forEach((p) => {
+      const status = p?.status || 'active';
+      set.add(status);
+    });
+    return Array.from(set).sort();
+  }, [players]);
+
   // Build a light-weight search index once per load for fast filtering
   const searchIndex = useMemo(() => {
     return (players || []).map((p) => {
@@ -483,8 +559,9 @@ const Players = () => {
       const gender = String(p?.gender || '').toLowerCase().trim();
       const reg = String(p?.registration_no || '').toLowerCase().trim();
       const familyId = String(p?.family?.family_id || p?.family_id || '').toLowerCase().trim();
+      const status = String(p?.status || 'active').toLowerCase().trim(); // ADD: status to search index
 
-      return { playerName, guardian, division, team, gender, reg, familyId };
+      return { playerName, guardian, division, team, gender, reg, familyId, status };
     });
   }, [players]);
 
@@ -496,6 +573,7 @@ const Players = () => {
     const divFilter = String(columnFilters.division || '').trim().toLowerCase();
     const teamFilter = String(columnFilters.team || '').trim().toLowerCase();
     const genderFilter = String(columnFilters.gender || '').trim().toLowerCase();
+    const statusFilter = String(columnFilters.status || '').trim().toLowerCase(); // ADD: status filter
 
     return (players || []).filter((player, idx) => {
       const s = searchIndex[idx] || {};
@@ -520,6 +598,9 @@ const Players = () => {
 
       // Gender
       const matchesGender = !genderFilter || s.gender === genderFilter;
+
+      // Status (ADD: new filter)
+      const matchesStatus = !statusFilter || s.status === statusFilter;
 
       // Registration Paid
       const matchesRegistrationPaid =
@@ -547,6 +628,7 @@ const Players = () => {
         matchesDivision &&
         matchesTeam &&
         matchesGender &&
+        matchesStatus &&
         matchesRegistrationPaid &&
         matchesWorkbondCheck &&
         matchesMedicalConditions
@@ -796,7 +878,7 @@ const Players = () => {
                 fontSize: '14px',
                 color: '#374151',
                 backgroundColor: 'white'
-              }}
+            }}
               value={linkSelections.volunteerId}
               onChange={(e) => setLinkSelections(prev => ({ ...prev, volunteerId: e.target.value }))}
             >
@@ -908,17 +990,17 @@ const Players = () => {
         </div>
         <div className="bg-white overflow-hidden shadow rounded-lg">
           <div className="px-4 py-5 sm:p-6">
-            <dt className="text-sm font-medium text-gray-500 truncate">With Teams</dt>
+            <dt className="text-sm font-medium text-gray-500 truncate">Active Players</dt>
             <dd className="mt-1 text-3xl font-semibold text-gray-900">
-              {players.filter(p => p.team_id).length}
+              {playerStats.activePlayers}
             </dd>
           </div>
         </div>
         <div className="bg-white overflow-hidden shadow rounded-lg">
           <div className="px-4 py-5 sm:p-6">
-            <dt className="text-sm font-medium text-gray-500 truncate">Paid</dt>
+            <dt className="text-sm font-medium text-gray-500 truncate">Withdrawn Players</dt>
             <dd className="mt-1 text-3xl font-semibold text-gray-900">
-              {playerStats.paid}
+              {playerStats.withdrawnPlayers}
             </dd>
           </div>
         </div>
@@ -1057,6 +1139,21 @@ const Players = () => {
                 </select>
               </div>
 
+              {/* ADD: Status Filter */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                <select
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+                  value={columnFilters.status}
+                  onChange={(e) => handleFilterChange('status', e.target.value)}
+                >
+                  <option value="">All Statuses</option>
+                  <option value="active">Active</option>
+                  <option value="withdrawn">Withdrawn</option>
+                  <option value="inactive">Inactive</option>
+                </select>
+              </div>
+
               {/* Registration Paid Filter */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Registration Paid</label>
@@ -1165,6 +1262,9 @@ const Players = () => {
                   Team
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Status
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Age/DOB/Gender
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -1229,6 +1329,24 @@ const Players = () => {
                       <button
                         type="button"
                         onClick={() => openTeamEdit(player)}
+                        className="text-xs text-blue-600 hover:text-blue-800 underline whitespace-nowrap"
+                      >
+                        Change
+                      </button>
+                    </div>
+                  </td>
+
+                  {/* ADD: Status Column */}
+                  <td className="px-4 py-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <span className={`inline-flex items-center px-2 py-1 text-xs rounded-full font-medium ${getStatusBadge(player.status).className}`}>
+                          {getStatusBadge(player.status).label}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => openStatusEdit(player)}
                         className="text-xs text-blue-600 hover:text-blue-800 underline whitespace-nowrap"
                       >
                         Change
@@ -1490,6 +1608,69 @@ const Players = () => {
                 disabled={savingTeam}
               >
                 {savingTeam ? 'Saving...' : 'Save'}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* ADD: Status Edit Modal */}
+      {showStatusEditModal && editingPlayer && (
+        <Modal
+          isOpen={showStatusEditModal}
+          onClose={() => {
+            setShowStatusEditModal(false);
+            setEditingPlayer(null);
+          }}
+          title="Change Player Status"
+        >
+          <div className="space-y-4">
+            <div className="text-sm text-gray-700">
+              <div className="font-medium text-gray-900">
+                {editingPlayer.first_name} {editingPlayer.last_name}
+              </div>
+              <div className="text-gray-600">
+                Division: {editingPlayer.division?.name || editingPlayer.program_title || 'Unknown'}
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+              <select
+                className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+                value={editStatus}
+                onChange={(e) => setEditStatus(e.target.value)}
+              >
+                <option value="active">Active</option>
+                <option value="withdrawn">Withdrawn</option>
+                <option value="inactive">Inactive</option>
+              </select>
+              <p className="text-xs text-gray-500 mt-1">
+                • Active: Player is currently participating<br/>
+                • Withdrawn: Player dropped out during the season<br/>
+                • Inactive: Player is not active for other reasons
+              </p>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowStatusEditModal(false);
+                  setEditingPlayer(null);
+                }}
+                className="px-4 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-50"
+                disabled={savingStatus}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveStatusChange}
+                className="px-4 py-2 text-sm text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50"
+                disabled={savingStatus}
+              >
+                {savingStatus ? 'Saving...' : 'Save'}
               </button>
             </div>
           </div>

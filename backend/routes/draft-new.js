@@ -59,67 +59,83 @@ router.get('/data', async (req, res) => {
   console.log(`Season: ${seasonId}, Division: ${divisionId}`);
 
   try {
-    // 1) Get players for this season/division
-   const { data: players, error: playersErr } = await supabase
-  .from('players')
-  .select(`
-    *,
-    volunteers:volunteers (
-      id,
-      name,
-      role,
-      email,
-      phone,
-      family_id,
-      interested_roles
-    )
-  `)
-  .eq('season_id', seasonId)
-  .eq('division_id', divisionId)
-  .order('last_name', { ascending: true });  // Optional: add ordering
+    // 1) Get players for this season/division - EXCLUDE WITHDRAWN PLAYERS
+    const { data: players, error: playersErr } = await supabase
+      .from('players')
+      .select(`
+        *,
+        volunteers:volunteers (
+          id,
+          name,
+          role,
+          email,
+          phone,
+          family_id,
+          interested_roles
+        )
+      `)
+      .eq('season_id', seasonId)
+      .eq('division_id', divisionId)
+      // EXCLUDE WITHDRAWN PLAYERS FROM DRAFT
+      .neq('status', 'withdrawn')
+      .order('last_name', { ascending: true });
 
     if (playersErr) {
       console.error('Players error:', playersErr);
       return res.status(500).json({ error: 'Failed to load players', details: playersErr.message });
     }
 
-    console.log(`Players found: ${players?.length || 0}`);
-	
-	// After getting players, add this:
-console.log('\n=== COMPREHENSIVE PLAYER DATA DEBUG ===');
-console.log(`Total players: ${players?.length || 0}`);
+    console.log(`Active players found (excluding withdrawn): ${players?.length || 0}`);
+    
+    // Also get withdrawn players count for logging
+    const { data: withdrawnPlayers, error: withdrawnErr } = await supabase
+      .from('players')
+      .select('id, first_name, last_name, status')
+      .eq('season_id', seasonId)
+      .eq('division_id', divisionId)
+      .eq('status', 'withdrawn');
 
-if (players && players.length > 0) {
-  // Check first 3 players
-  for (let i = 0; i < Math.min(3, players.length); i++) {
-    const player = players[i];
-    console.log(`\n--- Player ${i + 1}: ${player.first_name} ${player.last_name} ---`);
-    
-    // Check all the fields we need
-    const importantFields = [
-      'birth_date', 
-      'is_travel_player', 
-      'is_new_player', 
-      'is_returning',
-      'gender'
-    ];
-    
-    importantFields.forEach(field => {
-      console.log(`${field}:`, player[field], `(type: ${typeof player[field]})`);
-    });
-    
-    // Check volunteers
-    console.log('Volunteers count:', player.volunteers?.length || 0);
-    if (player.volunteers && player.volunteers.length > 0) {
-      console.log('First volunteer:', player.volunteers[0]);
+    if (!withdrawnErr && withdrawnPlayers && withdrawnPlayers.length > 0) {
+      console.log(`Excluded ${withdrawnPlayers.length} withdrawn players from draft list`);
+      console.log('Withdrawn players:', withdrawnPlayers.map(p => `${p.first_name} ${p.last_name}`).join(', '));
     }
-    
-    // Show ALL fields for this player
-    console.log('All fields:', Object.keys(player));
-  }
-}
 
-    // 2) Get unique family IDs from players
+    // After getting players, add this:
+    console.log('\n=== COMPREHENSIVE PLAYER DATA DEBUG ===');
+    console.log(`Total active players: ${players?.length || 0}`);
+
+    if (players && players.length > 0) {
+      // Check first 3 players
+      for (let i = 0; i < Math.min(3, players.length); i++) {
+        const player = players[i];
+        console.log(`\n--- Player ${i + 1}: ${player.first_name} ${player.last_name} ---`);
+        
+        // Check all the fields we need
+        const importantFields = [
+          'birth_date', 
+          'is_travel_player', 
+          'is_new_player', 
+          'is_returning',
+          'gender',
+          'status' // Add status check
+        ];
+        
+        importantFields.forEach(field => {
+          console.log(`${field}:`, player[field], `(type: ${typeof player[field]})`);
+        });
+        
+        // Check volunteers
+        console.log('Volunteers count:', player.volunteers?.length || 0);
+        if (player.volunteers && player.volunteers.length > 0) {
+          console.log('First volunteer:', player.volunteers[0]);
+        }
+        
+        // Show ALL fields for this player
+        console.log('All fields:', Object.keys(player));
+      }
+    }
+
+    // 2) Get unique family IDs from active players only
     const familyIds = [];
     const familyIdSet = new Set();
     
@@ -130,7 +146,7 @@ if (players && players.length > 0) {
       }
     }
 
-    console.log(`Unique family IDs: ${familyIds.length}`);
+    console.log(`Unique family IDs from active players: ${familyIds.length}`);
     if (familyIds.length > 0) {
       console.log('Sample family IDs:', familyIds.slice(0, 5));
     }
@@ -223,12 +239,8 @@ if (players && players.length > 0) {
       }
 
       return {
-        //id: p.id,
-        //first_name: p.first_name,
-        //last_name: p.last_name,
-        //family_id: p.family_id,
-         ...p,
-		// Create full_name from first_name + last_name
+        ...p,
+        // Create full_name from first_name + last_name
         name: `${p.first_name} ${p.last_name}`,
         volunteers: expanded,
       };
@@ -253,7 +265,8 @@ if (players && players.length > 0) {
       .single();
 
     console.log('\n=== SUMMARY ===');
-    console.log(`Total players: ${players?.length || 0}`);
+    console.log(`Total active players (excluding withdrawn): ${players?.length || 0}`);
+    console.log(`Withdrawn players excluded: ${withdrawnPlayers?.length || 0}`);
     console.log(`Players with volunteers: ${playersWithVolunteersCount}`);
     console.log(`Total volunteer entries: ${totalVolunteerEntries}`);
     console.log('=== END ===\n');
@@ -265,6 +278,7 @@ if (players && players.length > 0) {
       volunteers: volunteers || [],
       summary: {
         totalPlayers: players?.length || 0,
+        withdrawnPlayers: withdrawnPlayers?.length || 0,
         playersWithVolunteers: playersWithVolunteersCount,
         totalVolunteerEntries: totalVolunteerEntries,
       }

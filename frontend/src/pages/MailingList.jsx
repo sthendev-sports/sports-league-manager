@@ -141,7 +141,19 @@ export default function MailingList() {
         // Guard against stale responses (rare but can happen on fast switching)
         if (requestKey !== `${selectedSeasonId}`) return;
 
-        setPlayers(Array.isArray(playersRes.data) ? playersRes.data : []);
+        // Filter out withdrawn players from the mailing list
+        const allPlayers = Array.isArray(playersRes.data) ? playersRes.data : [];
+        const activePlayers = allPlayers.filter(player => 
+          String(player.status || '').toLowerCase() !== 'withdrawn'
+        );
+        
+        // Log withdrawn count for debugging
+        const withdrawnCount = allPlayers.length - activePlayers.length;
+        if (withdrawnCount > 0) {
+          console.log(`Excluded ${withdrawnCount} withdrawn players from mailing list`);
+        }
+
+        setPlayers(activePlayers);
         setVolunteers(Array.isArray(volunteersRes.data) ? volunteersRes.data : []);
         setWorkbondSummary(Array.isArray(workbondRes.data) ? workbondRes.data : []);
       } catch (e) {
@@ -185,6 +197,9 @@ export default function MailingList() {
     };
 
     for (const p of players) {
+      // Skip withdrawn players (already filtered, but double-check)
+      if (String(p.status || '').toLowerCase() === 'withdrawn') continue;
+      
       // Display division uses program_title first (your schema)
       const divName =
         (p?.program_title || '').trim() ||
@@ -230,6 +245,9 @@ export default function MailingList() {
     };
 
     for (const p of players) {
+      // Skip withdrawn players
+      if (String(p.status || '').toLowerCase() === 'withdrawn') continue;
+      
       const title = p?.program_title; // source of truth for division text
       if (!title) continue;
       add(p?.family_id, title);
@@ -262,6 +280,9 @@ export default function MailingList() {
   const familyGuardiansById = useMemo(() => {
     const map = new Map();
     for (const p of players) {
+      // Skip withdrawn players
+      if (String(p.status || '').toLowerCase() === 'withdrawn') continue;
+      
       const fam = p?.family;
       const fid = String(fam?.id || p?.family_id || '');
       if (!fid) continue;
@@ -290,13 +311,16 @@ export default function MailingList() {
   const volunteerRolesByFamily = useMemo(() => {
     const map = new Map();
     for (const v of volunteers) {
-      if (!v?.family_id) continue;
-      const fid = String(v.family_id);
-      if (!map.has(fid)) map.set(fid, []);
-      map.get(fid).push(v);
+      // Skip volunteers associated with families that only have withdrawn players
+      // We'll check this by seeing if the family is in filteredFamilyIds
+      const familyId = String(v.family_id || '');
+      if (!filteredFamilyIds.has(familyId)) continue;
+      
+      if (!map.has(familyId)) map.set(familyId, []);
+      map.get(familyId).push(v);
     }
     return map;
-  }, [volunteers]);
+  }, [volunteers, filteredFamilyIds]);
 
   // -------------------- TAB 1: GUARDIANS --------------------
   const guardianRows = useMemo(() => {
@@ -304,6 +328,9 @@ export default function MailingList() {
     const seen = new Set();
 
     for (const p of players) {
+      // Double-check: skip withdrawn players
+      if (String(p.status || '').toLowerCase() === 'withdrawn') continue;
+      
       const fam = p.family;
       if (!fam?.id) continue;
       const famId = String(fam.id);
@@ -398,7 +425,11 @@ export default function MailingList() {
     const rows = (volunteers || [])
       .filter((v) => {
         if (!v?.family_id) return false;
-        if (!filteredFamilyIds.has(String(v.family_id))) return false;
+        
+        // Skip volunteers from families with only withdrawn players
+        const familyId = String(v.family_id);
+        if (!filteredFamilyIds.has(familyId)) return false;
+        
         if (!['Manager', 'Assistant Coach', 'Team Parent'].includes(v.role)) return false;
         if (selectedVolunteerRole !== 'All Roles' && v.role !== selectedVolunteerRole) return false;
         // If division filter is set, match volunteer.division_id OR team.division? (not always present)
@@ -543,6 +574,9 @@ export default function MailingList() {
           <h1 className="text-2xl font-semibold text-gray-900">Mailing Lists</h1>
           <p className="text-gray-600 mt-1">
             Filter by season/division and copy or export emails for communications.
+            <span className="text-sm text-gray-500 ml-2">
+              Note: Withdrawn players and their families are excluded.
+            </span>
           </p>
         </div>
 

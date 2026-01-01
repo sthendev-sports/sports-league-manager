@@ -43,55 +43,80 @@ const Dashboard = () => {
       assistantCoaches: 0,
       teamParents: 0
     },
-    volunteerByDivision: [] // New field for volunteer breakdown by division
+    volunteerByDivision: []
   });
   
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [seasons, setSeasons] = useState([]);
   const [selectedSeasonId, setSelectedSeasonId] = useState('');
+  const [selectedCompareSeasonId, setSelectedCompareSeasonId] = useState('');
   const [currentSeason, setCurrentSeason] = useState(null);
   const [editingDivision, setEditingDivision] = useState(null);
   const [editValue, setEditValue] = useState('');
 
+  // Load seasons on component mount
   useEffect(() => {
-    loadDashboardData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const loadSeasons = async () => {
+      try {
+        const [activeRes, allRes] = await Promise.all([
+          seasonsAPI.getActive().catch(() => ({ data: null })),
+          seasonsAPI.getAll().catch(() => ({ data: [] }))
+        ]);
+
+        const activeSeason = activeRes?.data || null;
+        const all = Array.isArray(allRes?.data) ? allRes.data : [];
+        setSeasons(all);
+
+        // Set default season
+        const defaultSeasonId = activeSeason?.id || all?.[0]?.id;
+        if (defaultSeasonId) {
+          setSelectedSeasonId(defaultSeasonId);
+        }
+      } catch (error) {
+        console.error('Error loading seasons:', error);
+        setError('Failed to load seasons data');
+      }
+    };
+
+    loadSeasons();
   }, []);
 
+  // Load dashboard data whenever season or comparison changes
   useEffect(() => {
     if (selectedSeasonId) {
-      loadDashboardData(selectedSeasonId);
+      loadDashboardData();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedSeasonId]);
+  }, [selectedSeasonId, selectedCompareSeasonId]);
 
-  const loadDashboardData = async (seasonIdOverride) => {
+const loadDashboardData = async () => {
   try {
     setLoading(true);
     setError(null);
 
-    // Load seasons list + active season (used for default filter)
-    const [activeRes, allRes] = await Promise.all([
-      seasonsAPI.getActive().catch(() => ({ data: null })),
-      seasonsAPI.getAll().catch(() => ({ data: [] }))
-    ]);
+    console.log('Loading dashboard with:', {
+      currentSeasonId: selectedSeasonId,
+      compareSeasonId: selectedCompareSeasonId || 'none'
+    });
 
-    const activeSeason = activeRes?.data || null;
-    const all = Array.isArray(allRes?.data) ? allRes.data : [];
-    setSeasons(all);
-
-    const resolvedSeasonId = seasonIdOverride || selectedSeasonId || activeSeason?.id || all?.[0]?.id;
-    if (!resolvedSeasonId) throw new Error('No season found');
-
-    // Set initial dropdown default once
-    if (!selectedSeasonId) setSelectedSeasonId(resolvedSeasonId);
-
-    const seasonObj = all.find(s => s.id === resolvedSeasonId) || activeSeason || null;
+    // Get current season object
+    const seasonObj = seasons.find(s => s.id === selectedSeasonId);
+    if (!seasonObj) {
+      throw new Error('Current season not found');
+    }
     setCurrentSeason(seasonObj);
 
-    // Load dashboard statistics for the selected season
-    const dashboardData = await dashboardAPI.getStatistics(resolvedSeasonId);
+    // DEBUG: Log the actual API call
+    console.log('Making API call to:', `/api/dashboard/statistics?season_id=${selectedSeasonId}&compare_season_id=${selectedCompareSeasonId || ''}`);
+    
+    // Load dashboard statistics with comparison season
+    const dashboardData = await dashboardAPI.getStatistics(
+      selectedSeasonId, 
+      selectedCompareSeasonId || ''
+    );
+    
+    console.log('Full API response:', dashboardData);
+    console.log('Dashboard data loaded for comparison season:', dashboardData.previousSeason?.name || 'none');
     setStats(dashboardData);
   } catch (error) {
     console.error('Error loading dashboard data:', error);
@@ -100,7 +125,6 @@ const Dashboard = () => {
     setLoading(false);
   }
 };
-
 
   // Calculate totals for division breakdown
   const divisionTotals = {
@@ -183,7 +207,25 @@ const Dashboard = () => {
     }
   };
 
-  if (loading) {
+  // Get comparison column header name
+  const getComparisonColumnHeader = () => {
+    if (selectedCompareSeasonId) {
+      const compareSeason = seasons.find(s => s.id === selectedCompareSeasonId);
+      return compareSeason?.name || 'Previous';
+    }
+    return 'Previous';
+  };
+
+  // Get comparison season name for display
+  const getComparisonSeasonName = () => {
+    if (selectedCompareSeasonId) {
+      const compareSeason = seasons.find(s => s.id === selectedCompareSeasonId);
+      return compareSeason?.name || 'Previous Season';
+    }
+    return 'Previous Season (Auto)';
+  };
+
+  if (loading && !stats.divisions.length) {
     return (
       <div className="flex justify-center items-center h-64">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
@@ -227,22 +269,43 @@ const Dashboard = () => {
           {currentSeason?.name && (
             <p className="text-sm text-gray-600 mt-1">Showing: <span className="font-medium">{currentSeason.name}</span></p>
           )}
+          <p className="text-sm text-gray-600 mt-1">Comparing to: <span className="font-medium">{getComparisonSeasonName()}</span></p>
         </div>
 
-        <div className="flex items-center gap-2">
-          <select
-            className="border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-blue-500 focus:border-blue-500"
-            value={selectedSeasonId}
-            onChange={(e) => setSelectedSeasonId(e.target.value)}
-          >
-            {seasons.map(season => (
-              <option key={season.id} value={season.id}>{season.name}</option>
-            ))}
-          </select>
-
+        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2">
+          <div className="flex flex-col sm:flex-row gap-2">
+            <div className="flex flex-col">
+              <label className="text-xs text-gray-500 mb-1">Current Season</label>
+              <select
+                className="border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-blue-500 focus:border-blue-500"
+                value={selectedSeasonId}
+                onChange={(e) => setSelectedSeasonId(e.target.value)}
+              >
+                {seasons.map(season => (
+                  <option key={season.id} value={season.id}>{season.name}</option>
+                ))}
+              </select>
+            </div>
+            
+            {/* Compare To Dropdown */}
+            <div className="flex flex-col">
+              <label className="text-xs text-gray-500 mb-1">Compare To</label>
+              <select
+                className="border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-blue-500 focus:border-blue-500 min-w-[200px]"
+                value={selectedCompareSeasonId}
+                onChange={(e) => setSelectedCompareSeasonId(e.target.value)}
+              >
+                <option value="">-- Auto (Previous Year) --</option>
+                {seasons.filter(season => season.id !== selectedSeasonId).map(season => (
+                  <option key={season.id} value={season.id}>{season.name}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          
           <button
-            onClick={() => loadDashboardData(selectedSeasonId)}
-            className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+            onClick={loadDashboardData}
+            className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 mt-6 sm:mt-0"
           >
             <RefreshCw className="h-4 w-4 mr-2" />
             Refresh
@@ -288,7 +351,9 @@ const Dashboard = () => {
                       <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Division</th>
                       <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Current</th>
                       <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Withdrawn</th>
-                      <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Previous</th>
+                      <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap" title={getComparisonSeasonName()}>
+                        {getComparisonColumnHeader()}
+                      </th>
                       <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Trend</th>
                       <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">New</th>
                       <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Returning</th>

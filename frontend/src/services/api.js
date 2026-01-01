@@ -29,10 +29,15 @@ api.interceptors.request.use(
 );
 
 const dashboardAPI = {
-  getStatistics: async (seasonId) => {
-    const response = await api.get('/dashboard/statistics', {
-      params: { season_id: seasonId },
-    });
+  getStatistics: async (seasonId, compareSeasonId = '') => {
+    const params = { season_id: seasonId };
+    
+    // Only add compare_season_id if it's provided
+    if (compareSeasonId && compareSeasonId !== '') {
+      params.compare_season_id = compareSeasonId;
+    }
+    
+    const response = await api.get('/dashboard/statistics', { params });
     return response.data;
   },
 };

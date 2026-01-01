@@ -5,13 +5,13 @@ const supabase = require('../config/database');
 // Get comprehensive dashboard statistics
 router.get('/statistics', async (req, res) => {
   try {
-    const { season_id } = req.query;
+    const { season_id, compare_season_id } = req.query;
     
     if (!season_id) {
       return res.status(400).json({ error: 'Season ID is required' });
     }
 
-    console.log('Loading dashboard statistics for season:', season_id);
+    console.log('Loading dashboard statistics for season:', season_id, 'compare to:', compare_season_id);
 
     // Get current season data
     const currentSeason = await getCurrentSeason(season_id);
@@ -19,8 +19,21 @@ router.get('/statistics', async (req, res) => {
       return res.status(404).json({ error: 'Season not found' });
     }
 
-    // Get previous season data for comparison
-    const previousSeason = await getPreviousSeason(currentSeason.year);
+    // Get comparison season data
+    let comparisonSeason = null;
+    if (compare_season_id && compare_season_id !== '' && compare_season_id !== 'none') {
+      console.log('Using provided comparison season ID:', compare_season_id);
+      comparisonSeason = await getSeasonById(compare_season_id);
+      if (!comparisonSeason) {
+        console.log('Provided comparison season not found, will use previous year');
+        comparisonSeason = await getPreviousSeason(currentSeason.year);
+      }
+    } else {
+      console.log('No comparison season provided, using previous year');
+      comparisonSeason = await getPreviousSeason(currentSeason.year);
+    }
+    
+    console.log('Comparison season determined as:', comparisonSeason?.name || 'none');
     
     // Load all data in parallel for better performance
     const [
@@ -30,11 +43,11 @@ router.get('/statistics', async (req, res) => {
       workBondStats,
       volunteerByDivision
     ] = await Promise.all([
-      getRegistrationStatistics(season_id, previousSeason?.id),
-      getDivisionStatistics(season_id, previousSeason?.id),
+      getRegistrationStatistics(season_id, comparisonSeason?.id),
+      getDivisionStatistics(season_id, comparisonSeason?.id),
       getVolunteerStatistics(season_id),
       getWorkBondStatistics(season_id),
-      getVolunteerByDivision(season_id) // NEW: Get volunteer breakdown by division
+      getVolunteerByDivision(season_id) // FIXED: Changed seasonId to season_id
     ]);
 
     const dashboardData = {
@@ -59,12 +72,12 @@ router.get('/statistics', async (req, res) => {
       totalVolunteers: volunteerStats.totalVolunteers,
       volunteerBreakdown: volunteerStats.breakdown,
       
-      // NEW: Volunteer breakdown by division
+      // Volunteer breakdown by division
       volunteerByDivision: volunteerByDivision,
       
       // Season Info
       currentSeason: currentSeason,
-      previousSeason: previousSeason
+      previousSeason: comparisonSeason
     };
 
     console.log('Dashboard statistics loaded successfully');
@@ -87,7 +100,25 @@ async function getCurrentSeason(seasonId) {
   return data;
 }
 
-// Helper function to get previous season
+// Helper function to get any season by ID
+async function getSeasonById(seasonId) {
+  const { data, error } = await supabase
+    .from('seasons')
+    .select('*')
+    .eq('id', seasonId)
+    .single();
+
+  if (error) {
+    if (error.code === 'PGRST116') {
+      console.log(`Season with ID ${seasonId} not found`);
+      return null;
+    }
+    throw error;
+  }
+  return data;
+}
+
+// Helper function to get previous season (fallback)
 async function getPreviousSeason(currentYear) {
   const { data, error } = await supabase
     .from('seasons')
@@ -95,33 +126,32 @@ async function getPreviousSeason(currentYear) {
     .eq('year', currentYear - 1)
     .single();
 
-  if (error && error.code !== 'PGRST116') { // PGRST116 is "not found"
+  if (error && error.code !== 'PGRST116') {
     throw error;
   }
   return data || null;
 }
 
 // Get registration statistics
-// Get registration statistics
-async function getRegistrationStatistics(currentSeasonId, previousSeasonId) {
-  // Current season players - ADD status field
+async function getRegistrationStatistics(currentSeasonId, comparisonSeasonId) {
+  // Current season players
   const { data: currentPlayers, error: currentError } = await supabase
     .from('players')
-    .select('id, is_new_player, team_id, payment_received, status') // ADD status here
+    .select('id, is_new_player, team_id, payment_received, status')
     .eq('season_id', currentSeasonId);
 
   if (currentError) throw currentError;
 
-  // Previous season players for comparison
-  let previousPlayers = [];
-  if (previousSeasonId) {
-    const { data: prevData, error: prevError } = await supabase
+  // Comparison season players
+  let comparisonPlayers = [];
+  if (comparisonSeasonId) {
+    const { data: compData, error: compError } = await supabase
       .from('players')
       .select('id')
-      .eq('season_id', previousSeasonId);
+      .eq('season_id', comparisonSeasonId);
 
-    if (prevError) throw prevError;
-    previousPlayers = prevData || [];
+    if (compError) throw compError;
+    comparisonPlayers = compData || [];
   }
 
   // Current season teams
@@ -135,13 +165,13 @@ async function getRegistrationStatistics(currentSeasonId, previousSeasonId) {
   const newPlayers = currentPlayers.filter(p => p.is_new_player).length;
   const returningPlayers = currentPlayers.filter(p => !p.is_new_player).length;
   const pendingRegistrations = currentPlayers.filter(p => !p.payment_received).length;
-  const withdrawnPlayers = currentPlayers.filter(p => p.status === 'withdrawn').length; // NEW: count withdrawn players
+  const withdrawnPlayers = currentPlayers.filter(p => p.status === 'withdrawn').length;
 
   return {
     totalRegistered: currentPlayers.length,
     pendingRegistrations: pendingRegistrations,
     totalWithPending: currentPlayers.length,
-    playersNotReturning: withdrawnPlayers, // CHANGED: Now counts withdrawn players from current season
+    playersNotReturning: withdrawnPlayers,
     newPlayers: newPlayers,
     returningPlayers: returningPlayers,
     totalTeams: teams.length
@@ -149,37 +179,32 @@ async function getRegistrationStatistics(currentSeasonId, previousSeasonId) {
 }
 
 // Get division statistics with trends - using program_title
-// In dashboard.js, update the getDivisionStatistics function:
-
-// Get division statistics with trends - using program_title
-async function getDivisionStatistics(currentSeasonId, previousSeasonId) {
-  // Get players with their program_title for current season - ADD status field
+async function getDivisionStatistics(currentSeasonId, comparisonSeasonId) {
+  console.log('Fetching division stats: current season', currentSeasonId, 'comparison season', comparisonSeasonId);
+  
+  // Get players with their program_title for current season
   const { data: currentPlayers, error: currentError } = await supabase
     .from('players')
-    .select('id, is_new_player, program_title, team_id, status') // ADD status here
+    .select('id, is_new_player, program_title, team_id, status')
     .eq('season_id', currentSeasonId);
 
   if (currentError) throw currentError;
 
-  // Get players with program_title for previous season
-  let previousPlayers = [];
-  if (previousSeasonId) {
-    const { data: prevData, error: prevError } = await supabase
+  // Get players with program_title for comparison season
+  let comparisonPlayers = [];
+  if (comparisonSeasonId) {
+    console.log('Fetching comparison players for season:', comparisonSeasonId);
+    const { data: compData, error: compError } = await supabase
       .from('players')
-      .select('id, program_title')
-      .eq('season_id', previousSeasonId);
+      .select('id, is_new_player, program_title, team_id, status')
+      .eq('season_id', comparisonSeasonId);
 
-    if (prevError) throw prevError;
-    previousPlayers = prevData || [];
+    if (compError) throw compError;
+    comparisonPlayers = compData || [];
+    console.log('Found', comparisonPlayers.length, 'comparison players');
+  } else {
+    console.log('No comparison season ID provided');
   }
-
-  // Get teams count per division for current season
-  const { data: divisionTeams, error: teamsError } = await supabase
-    .from('teams')
-    .select('division_id, division:divisions (name)')
-    .eq('season_id', currentSeasonId);
-
-  if (teamsError) throw teamsError;
 
   // Group current players by program_title (division)
   const currentDivisionMap = {};
@@ -190,7 +215,7 @@ async function getDivisionStatistics(currentSeasonId, previousSeasonId) {
         players: [],
         newPlayers: 0,
         returningPlayers: 0,
-        withdrawnPlayers: 0 // ADD: track withdrawn players
+        withdrawnPlayers: 0
       };
     }
     currentDivisionMap[divisionName].players.push(player);
@@ -208,32 +233,66 @@ async function getDivisionStatistics(currentSeasonId, previousSeasonId) {
     }
   });
 
-  // Group previous players by program_title (division)
-  const previousDivisionMap = {};
-  previousPlayers.forEach(player => {
+  // Group comparison players by program_title (division)
+  const comparisonDivisionMap = {};
+  comparisonPlayers.forEach(player => {
     const divisionName = player.program_title || 'Unassigned';
-    if (!previousDivisionMap[divisionName]) {
-      previousDivisionMap[divisionName] = [];
+    if (!comparisonDivisionMap[divisionName]) {
+      comparisonDivisionMap[divisionName] = {
+        players: [],
+        newPlayers: 0,
+        returningPlayers: 0,
+        withdrawnPlayers: 0
+      };
     }
-    previousDivisionMap[divisionName].push(player);
+    comparisonDivisionMap[divisionName].players.push(player);
+    
+    // Count withdrawn players for comparison season too
+    if (player.status === 'withdrawn') {
+      comparisonDivisionMap[divisionName].withdrawnPlayers++;
+    }
+    
+    // Count new vs returning players for comparison season
+    if (player.is_new_player) {
+      comparisonDivisionMap[divisionName].newPlayers++;
+    } else {
+      comparisonDivisionMap[divisionName].returningPlayers++;
+    }
   });
 
-  // Count teams per division based on program_title
-  const teamsPerDivision = {};
+  // Count teams per division based on program_title for current season
+  const currentTeamsPerDivision = {};
   currentPlayers.forEach(player => {
     if (player.team_id && player.program_title) {
       const divisionName = player.program_title;
-      if (!teamsPerDivision[divisionName]) {
-        teamsPerDivision[divisionName] = new Set();
+      if (!currentTeamsPerDivision[divisionName]) {
+        currentTeamsPerDivision[divisionName] = new Set();
       }
-      teamsPerDivision[divisionName].add(player.team_id);
+      currentTeamsPerDivision[divisionName].add(player.team_id);
+    }
+  });
+
+  // Count teams per division based on program_title for comparison season
+  const comparisonTeamsPerDivision = {};
+  comparisonPlayers.forEach(player => {
+    if (player.team_id && player.program_title) {
+      const divisionName = player.program_title;
+      if (!comparisonTeamsPerDivision[divisionName]) {
+        comparisonTeamsPerDivision[divisionName] = new Set();
+      }
+      comparisonTeamsPerDivision[divisionName].add(player.team_id);
     }
   });
 
   // Convert sets to counts
-  const teamsPerDivisionCount = {};
-  Object.keys(teamsPerDivision).forEach(divisionName => {
-    teamsPerDivisionCount[divisionName] = teamsPerDivision[divisionName].size;
+  const currentTeamsPerDivisionCount = {};
+  Object.keys(currentTeamsPerDivision).forEach(divisionName => {
+    currentTeamsPerDivisionCount[divisionName] = currentTeamsPerDivision[divisionName].size;
+  });
+
+  const comparisonTeamsPerDivisionCount = {};
+  Object.keys(comparisonTeamsPerDivision).forEach(divisionName => {
+    comparisonTeamsPerDivisionCount[divisionName] = comparisonTeamsPerDivision[divisionName].size;
   });
 
   // Create division stats array
@@ -242,45 +301,54 @@ async function getDivisionStatistics(currentSeasonId, previousSeasonId) {
   // Add divisions with current players
   Object.keys(currentDivisionMap).forEach(divisionName => {
     const currentData = currentDivisionMap[divisionName];
-    const previousData = previousDivisionMap[divisionName] || [];
+    const comparisonData = comparisonDivisionMap[divisionName] || {
+      players: [],
+      newPlayers: 0,
+      returningPlayers: 0,
+      withdrawnPlayers: 0
+    };
     
     const currentCount = currentData.players.length;
-    const previousCount = previousData.length;
+    const comparisonCount = comparisonData.players.length;
     
-    // Calculate active current count (excluding withdrawn)
+    // Calculate active counts (excluding withdrawn) for BOTH seasons
     const activeCurrentCount = currentCount - currentData.withdrawnPlayers;
+    const activeComparisonCount = comparisonCount - comparisonData.withdrawnPlayers;
     
     // Calculate trend based on active players (not withdrawn)
-    const trend = activeCurrentCount > previousCount ? 'up' : 
-                 activeCurrentCount < previousCount ? 'down' : 'neutral';
+    const trend = activeCurrentCount > activeComparisonCount ? 'up' : 
+                 activeCurrentCount < activeComparisonCount ? 'down' : 'neutral';
 
     divisionStats.push({
       name: divisionName,
-      current: activeCurrentCount, // CHANGED: Show active count (excluding withdrawn)
-      previous: previousCount,
+      current: activeCurrentCount, // Current season: active players (excluding withdrawn)
+      previous: activeComparisonCount, // Comparison season: ALSO active players (excluding withdrawn)
       trend: trend,
       newPlayers: currentData.newPlayers,
       returningPlayers: currentData.returningPlayers,
-      teams: teamsPerDivisionCount[divisionName] || 0,
-      withdrawnPlayers: currentData.withdrawnPlayers, // ADD: withdrawn count
-      totalRegistered: currentCount // ADD: total including withdrawn
+      teams: currentTeamsPerDivisionCount[divisionName] || 0,
+      withdrawnPlayers: currentData.withdrawnPlayers,
+      totalRegistered: currentCount
     });
   });
 
-  // Add divisions that only existed in previous season (with 0 current players)
-  Object.keys(previousDivisionMap).forEach(divisionName => {
+  // Add divisions that only existed in comparison season (with 0 current players)
+  Object.keys(comparisonDivisionMap).forEach(divisionName => {
     if (!currentDivisionMap[divisionName]) {
-      const previousCount = previousDivisionMap[divisionName].length;
+      const comparisonData = comparisonDivisionMap[divisionName];
+      const comparisonCount = comparisonData.players.length;
+      const activeComparisonCount = comparisonCount - comparisonData.withdrawnPlayers;
+      
       divisionStats.push({
         name: divisionName,
         current: 0,
-        previous: previousCount,
+        previous: activeComparisonCount, // Comparison season: active players (excluding withdrawn)
         trend: 'down',
         newPlayers: 0,
         returningPlayers: 0,
         teams: 0,
-        withdrawnPlayers: 0, // ADD: withdrawn count
-        totalRegistered: 0 // ADD: total including withdrawn
+        withdrawnPlayers: 0,
+        totalRegistered: 0
       });
     }
   });
@@ -288,6 +356,7 @@ async function getDivisionStatistics(currentSeasonId, previousSeasonId) {
   // Sort divisions by current count (descending)
   divisionStats.sort((a, b) => b.current - a.current);
 
+  console.log('Division stats generated with', divisionStats.length, 'entries');
   return divisionStats;
 }
 
@@ -313,7 +382,7 @@ async function getVolunteerStatistics(seasonId) {
   };
 }
 
-// NEW: Get volunteer breakdown by division
+// Get volunteer breakdown by division
 async function getVolunteerByDivision(seasonId) {
   try {
     console.log('Loading volunteer breakdown by division for season:', seasonId);
@@ -332,7 +401,7 @@ async function getVolunteerByDivision(seasonId) {
 
     if (error) {
       console.error('Error fetching volunteers:', error);
-      return []; // Return empty array instead of throwing
+      return [];
     }
 
     console.log(`Found ${volunteers?.length || 0} volunteers`);
@@ -340,7 +409,6 @@ async function getVolunteerByDivision(seasonId) {
     // Group volunteers by division and role
     const divisionMap = {};
     
-    // Initialize with all divisions from your spreadsheet to ensure they appear
     const defaultDivisions = [
       'T-Ball Division',
       'Baseball - Coach Pitch Division', 
@@ -354,7 +422,6 @@ async function getVolunteerByDivision(seasonId) {
       'Softball - Junior Division'
     ];
 
-    // Initialize all divisions with zero counts
     defaultDivisions.forEach(divisionName => {
       divisionMap[divisionName] = {
         name: divisionName,
@@ -365,11 +432,9 @@ async function getVolunteerByDivision(seasonId) {
       };
     });
 
-    // Count volunteers by division and role
     volunteers.forEach(volunteer => {
       const divisionName = volunteer.division?.name || 'Unassigned';
       
-      // If this division isn't in our map yet, add it
       if (!divisionMap[divisionName]) {
         divisionMap[divisionName] = {
           name: divisionName,
@@ -380,7 +445,6 @@ async function getVolunteerByDivision(seasonId) {
         };
       }
 
-      // Count by role
       if (volunteer.role === 'Manager') {
         divisionMap[divisionName].teamManagers++;
       } else if (volunteer.role === 'Assistant Coach' || volunteer.role === 'Coach') {
@@ -389,11 +453,9 @@ async function getVolunteerByDivision(seasonId) {
         divisionMap[divisionName].teamParents++;
       }
       
-      // Update division total
       divisionMap[divisionName].divisionTotal++;
     });
 
-    // Convert to array and sort by division name
     const result = Object.values(divisionMap).sort((a, b) => {
       const divisionOrder = {
         'T-Ball Division': 1,
@@ -418,7 +480,7 @@ async function getVolunteerByDivision(seasonId) {
 
   } catch (error) {
     console.error('Error in getVolunteerByDivision:', error);
-    return []; // Return empty array on error
+    return [];
   }
 }
 

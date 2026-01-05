@@ -339,6 +339,7 @@ router.post('/import', async (req, res) => {
           notes: `Imported from volunteer signup. Original team: ${
             volunteerData['team name'] || 'Unallocated'
           }`,
+          training_completed: false, // Default to false for imports
 
           // Defaults required by schema
           background_check_completed: false,
@@ -582,6 +583,15 @@ async function updateExistingVolunteer(existingVolunteer, newVolunteerData) {
     hasChanges = true;
   }
 
+  // Training Completed
+  if (
+    newVolunteerData.training_completed !== undefined &&
+    newVolunteerData.training_completed !== existingVolunteer.training_completed
+  ) {
+    updates.training_completed = newVolunteerData.training_completed;
+    hasChanges = true;
+  }
+
   // NEW R1: keep interested_roles in sync with CSV
   if (
     newVolunteerData.interested_roles &&
@@ -619,11 +629,11 @@ async function updateExistingVolunteer(existingVolunteer, newVolunteerData) {
   return updatedVolunteer;
 }
 
-module.exports = router;
 // Normalize phone numbers for matching (digits only)
 function normalizePhone(phone) {
   return String(phone || '').replace(/\D/g, '');
 }
+
 // Try to find a matching family by email/phone.
 // Returns family UUID (families.id) or null.
 async function findMatchingFamilyId({ email, phone }) {

@@ -4,7 +4,7 @@ function getLastName(name = '') {
   const parts = String(name).trim().split(/\s+/).filter(Boolean);
   return (parts[parts.length - 1] || '').toLowerCase();
 }
-import { Users, Plus, Search, Download, Upload, Filter, Mail, Phone, Edit, Trash2, Save, AlertCircle, CheckCircle } from 'lucide-react';
+import { Users, Plus, Search, Download, Upload, Filter, Mail, Phone, Edit, Trash2, Save, AlertCircle, CheckCircle, XCircle } from 'lucide-react';
 import CSVImport from '../components/CSVImport';
 import CSVTemplate from '../components/CSVTemplate';
 import VolunteerReports from '../components/VolunteerReports';
@@ -19,6 +19,7 @@ const Volunteers = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedDivision, setSelectedDivision] = useState('');
   const [selectedSeason, setSelectedSeason] = useState('');
+  const [trainingFilter, setTrainingFilter] = useState('');
   const [error, setError] = useState(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingVolunteer, setEditingVolunteer] = useState(null);
@@ -31,7 +32,8 @@ const Volunteers = () => {
     division_id: '',
     season_id: '',
     team_id: '',
-    notes: ''
+    notes: '',
+    training_completed: false
   });
   // Add import results state
   const [importResults, setImportResults] = useState(null);
@@ -310,7 +312,8 @@ const Volunteers = () => {
       division_id: '',
       season_id: seasons[0]?.id || '',
       team_id: '',
-      notes: ''
+      notes: '',
+      training_completed: false
     });
     setEditingVolunteer(null);
     setShowAddForm(false);
@@ -322,7 +325,8 @@ const Volunteers = () => {
       ...volunteer,
       division_id: volunteer.division_id || '',
       season_id: volunteer.season_id || seasons[0]?.id || '',
-      team_id: volunteer.team_id || ''
+      team_id: volunteer.team_id || '',
+      training_completed: volunteer.training_completed || false
     });
     setShowAddForm(true);
   };
@@ -354,7 +358,8 @@ const Volunteers = () => {
         division_id: divisions[0]?.id,
         season_id: seasons[0]?.id,
         team_id: teams[0]?.id,
-        notes: "Test volunteer from debug"
+        notes: "Test volunteer from debug",
+        training_completed: false
       };
 
       console.log('Testing API with:', testData);
@@ -382,7 +387,7 @@ const Volunteers = () => {
     }
   };
 
-  // ✅ UPDATED: search includes interested_roles
+  // ✅ UPDATED: search includes interested_roles and training filter
   const filteredVolunteers = volunteers.filter(volunteer => {
     const term = searchTerm.toLowerCase();
 
@@ -392,7 +397,11 @@ const Volunteers = () => {
       volunteer.role?.toLowerCase().includes(term) ||
       volunteer.interested_roles?.toLowerCase().includes(term);
 
-    return matchesSearch;
+    const matchesTraining = !trainingFilter ||
+      (trainingFilter === 'completed' && volunteer.training_completed) ||
+      (trainingFilter === 'pending' && !volunteer.training_completed);
+
+    return matchesSearch && matchesTraining;
   });
 
   const roleColors = {
@@ -764,6 +773,41 @@ const Volunteers = () => {
           placeholder="Additional notes about this volunteer..."
         />
       </div>
+
+      <div>
+        <div style={{ display: 'flex', alignItems: 'center' }}>
+          <input
+            type="checkbox"
+            id="training_completed"
+            checked={editingVolunteer ? editingVolunteer.training_completed : newVolunteer.training_completed}
+            onChange={(e) => editingVolunteer
+              ? setEditingVolunteer(prev => ({ ...prev, training_completed: e.target.checked }))
+              : setNewVolunteer(prev => ({ ...prev, training_completed: e.target.checked }))
+            }
+            style={{
+              height: '16px',
+              width: '16px',
+              color: '#2563eb',
+              borderColor: '#d1d5db',
+              borderRadius: '4px',
+              marginRight: '8px'
+            }}
+          />
+          <label
+            htmlFor="training_completed"
+            style={{
+              fontSize: '14px',
+              fontWeight: '500',
+              color: '#374151'
+            }}
+          >
+            Training Completed
+          </label>
+        </div>
+        <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px', marginLeft: '24px' }}>
+          Check this box when the volunteer has completed all required training
+        </p>
+      </div>
     </form>
   );
 
@@ -945,7 +989,7 @@ const Volunteers = () => {
         <>
           {/* Filters */}
           <div className="bg-white shadow rounded-lg p-4 mb-6">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Search</label>
                 <div className="relative">
@@ -989,6 +1033,19 @@ const Volunteers = () => {
                   ))}
                 </select>
               </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Training Status</label>
+                <select
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+                  value={trainingFilter}
+                  onChange={(e) => setTrainingFilter(e.target.value)}
+                >
+                  <option value="">All</option>
+                  <option value="completed">Completed</option>
+                  <option value="pending">Pending</option>
+                </select>
+              </div>
             </div>
           </div>
 
@@ -1015,6 +1072,9 @@ const Volunteers = () => {
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Season
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Training Status
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Actions
@@ -1065,6 +1125,21 @@ const Volunteers = () => {
                       <td className="px-6 py-4 text-sm text-gray-900">
                         {volunteer.season?.name || 'N/A'}
                       </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center">
+                          {volunteer.training_completed ? (
+                            <div className="flex items-center text-green-600">
+                              <CheckCircle className="h-4 w-4 mr-1" />
+                              <span className="text-sm">Completed</span>
+                            </div>
+                          ) : (
+                            <div className="flex items-center text-red-600">
+                              <XCircle className="h-4 w-4 mr-1" />
+                              <span className="text-sm">Pending</span>
+                            </div>
+                          )}
+                        </div>
+                      </td>
                       <td className="px-6 py-4 text-sm font-medium">
                         <button
                           onClick={() => handleEditVolunteer(volunteer)}
@@ -1092,7 +1167,7 @@ const Volunteers = () => {
                 <Users className="mx-auto h-12 w-12 text-gray-400" />
                 <h3 className="mt-2 text-sm font-medium text-gray-900">No volunteers found</h3>
                 <p className="mt-1 text-sm text-gray-500">
-                  {searchTerm || selectedDivision || selectedSeason
+                  {searchTerm || selectedDivision || selectedSeason || trainingFilter
                     ? 'Try adjusting your search terms or filters'
                     : 'Get started by adding volunteers manually or importing from CSV'
                   }

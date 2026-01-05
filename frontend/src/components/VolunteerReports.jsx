@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Download, Users, Mail, Phone } from 'lucide-react';
+import { Download, Users, Mail, Phone, CheckCircle, XCircle } from 'lucide-react';
 import api, { divisionsAPI, teamsAPI, seasonsAPI } from '../services/api';
 
 const DIVISION_SORT_ORDER = [
@@ -123,7 +123,8 @@ const VolunteerReports = () => {
       'Address',
       'City',
       'State',
-      'Zip Code'
+      'Zip Code',
+      'Training Completed'
     ];
 
     const csvData = volunteers.map(volunteer => [
@@ -136,7 +137,8 @@ const VolunteerReports = () => {
       volunteer.address_line_1 || '',
       volunteer.city || '',
       volunteer.state || '',
-      volunteer.zip_code || ''
+      volunteer.zip_code || '',
+      volunteer.training_completed ? 'Yes' : 'No'
     ]);
 
     const csvContent = [headers, ...csvData]
@@ -479,6 +481,110 @@ const VolunteerReports = () => {
                 ))}
             </tbody>
           </table>
+        </div>
+      </div>
+
+      {/* Special Volunteers Report - Managers, Team Parents, Assistant Coaches */}
+      <div className="bg-white rounded-lg shadow">
+        <div className="px-6 py-4 border-b border-gray-200">
+          <h3 className="text-lg font-semibold text-gray-900">
+            Special Volunteers (Managers, Team Parents, Assistant Coaches)
+          </h3>
+          <p className="text-sm text-gray-500 mt-1">
+            Volunteers with assigned roles other than "Parent"
+          </p>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Volunteer
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Role
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Division
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Team
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Training Status
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Contact
+                </th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {volunteers
+                .filter(v => v.role !== 'Parent' && ['Manager', 'Team Parent', 'Assistant Coach'].includes(v.role))
+                .map((volunteer) => (
+                  <tr key={volunteer.id} className="hover:bg-gray-50">
+                    <td className="px-6 py-4">
+                      <div className="text-sm font-medium text-gray-900">
+                        {volunteer.name}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${roleColors[volunteer.role] || 'bg-gray-100 text-gray-800'}`}>
+                        {volunteer.role}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="text-sm text-gray-900">
+                        {volunteer.division?.name || 'Any Division'}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="text-sm text-gray-900">
+                        {volunteer.team?.name || 'Unallocated'}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      {volunteer.training_completed ? (
+                        <span className="inline-flex items-center px-2 py-1 rounded-md text-xs font-medium bg-green-100 text-green-800">
+                          <CheckCircle className="h-3 w-3 mr-1" />
+                          Completed
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center px-2 py-1 rounded-md text-xs font-medium bg-yellow-100 text-yellow-800">
+                          <XCircle className="h-3 w-3 mr-1" />
+                          Pending
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-6 py-4">
+                      {volunteer.email && (
+                        <div className="flex items-center text-sm text-gray-600 mb-1">
+                          <Mail className="h-3 w-3 mr-2" />
+                          {volunteer.email}
+                        </div>
+                      )}
+                      {volunteer.phone && (
+                        <div className="flex items-center text-sm text-gray-600">
+                          <Phone className="h-3 w-3 mr-2" />
+                          {volunteer.phone}
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+
+          {volunteers.filter(v => v.role !== 'Parent' && ['Manager', 'Team Parent', 'Assistant Coach'].includes(v.role)).length === 0 && (
+            <div className="text-center py-12">
+              <Users className="mx-auto h-12 w-12 text-gray-400" />
+              <h3 className="mt-2 text-sm font-medium text-gray-900">No special volunteers found</h3>
+              <p className="mt-1 text-sm text-gray-500">
+                No volunteers with Manager, Team Parent, or Assistant Coach roles
+              </p>
+            </div>
+          )}
         </div>
       </div>
 

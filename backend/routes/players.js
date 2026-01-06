@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const supabase = require('../config/database');
 const familyMatching = require('../services/familyMatching');
+const workbondExemptService = require('../services/workbondExemptService');
 
 // Create a custom JSON parser with increased limit for the import route
 const jsonParser = express.json({ limit: '50mb' });
@@ -578,22 +579,31 @@ router.post('/import', jsonParser, async (req, res) => {
     }
 
     const response = { 
-      message: `${allProcessedPlayers.length + updatedPlayers.length} players processed successfully (${allProcessedPlayers.length} new, ${updatedPlayers.length} updated)`, 
-      data: {
-        newPlayers: allProcessedPlayers,
-        updatedPlayers: updatedPlayers
-      },
-      familyCount: createdFamilies.size,
-      warnings: allErrors
-    };
+  message: `${allProcessedPlayers.length + updatedPlayers.length} players processed successfully (${allProcessedPlayers.length} new, ${updatedPlayers.length} updated)`, 
+  data: {
+    newPlayers: allProcessedPlayers,
+    updatedPlayers: updatedPlayers
+  },
+  familyCount: createdFamilies.size,
+  warnings: allErrors
+};
 
-    if (allErrors.length > 0) {
-      response.message += ` (${allErrors.length} rows had errors)`;
-    }
+// Run workbond exemption check AFTER import
+console.log('Running workbond exemption check...');
+try {
+  await workbondExemptService.updateExemptionsAfterImport(season_id);
+} catch (exemptError) {
+  console.error('Error updating workbond exemptions:', exemptError);
+  // Don't fail the import, just log the error
+}
 
-    console.log('=== PLAYER IMPORT COMPLETE (SMART MERGE) ===');
-    console.log(`Summary: ${allProcessedPlayers.length} new players, ${updatedPlayers.length} updated players`);
-    res.status(201).json(response);
+if (allErrors.length > 0) {
+  response.message += ` (${allErrors.length} rows had errors)`;
+}
+
+console.log('=== PLAYER IMPORT COMPLETE (SMART MERGE) ===');
+console.log(`Summary: ${allProcessedPlayers.length} new players, ${updatedPlayers.length} updated players`);
+res.status(201).json(response);
   } catch (error) {
     console.error('=== PLAYER IMPORT ERROR ===');
     console.error('Import error:', error);

@@ -1402,9 +1402,19 @@ const formatBirthDate = (dateString) => {
                   <td className="px-4 py-4">
   {player.family?.work_bond_check_status && player.family.work_bond_check_status.trim() !== '' ? (
     <div>
-      <span className="inline-flex items-center px-2 py-1 text-xs bg-green-100 text-green-800 rounded-full mb-1">
-        Received
-      </span>
+      {player.family.work_bond_check_status.includes('Exempt') ? (
+        <span className="inline-flex items-center px-2 py-1 text-xs bg-purple-100 text-purple-800 rounded-full mb-1">
+          Exempt
+        </span>
+      ) : player.family.work_bond_check_received ? (
+        <span className="inline-flex items-center px-2 py-1 text-xs bg-green-100 text-green-800 rounded-full mb-1">
+          Received
+        </span>
+      ) : (
+        <span className="inline-flex items-center px-2 py-1 text-xs bg-yellow-100 text-yellow-800 rounded-full mb-1">
+          Not Received
+        </span>
+      )}
       <div className="text-xs text-gray-500 whitespace-pre-line">
         {player.family.work_bond_check_status}
       </div>

@@ -167,6 +167,13 @@ const Players = () => {
     setEditTeamId(player?.team_id || '');
     setShowTeamEditModal(true);
   };
+  
+  // Add this helper function:
+const formatBirthDate = (dateString) => {
+  // Assuming date is stored as YYYY-MM-DD
+  const [year, month, day] = dateString.split('-');
+  return `${month}/${day}/${year}`;
+};
 
   // ADD: Open the "Change Status" modal for a player
   const openStatusEdit = (player) => {
@@ -436,20 +443,23 @@ const Players = () => {
   };
 
   // Calculate age from birth date
-  const calculateAge = (birthDate) => {
-    if (!birthDate) return 'N/A';
-    
-    const today = new Date();
-    const birth = new Date(birthDate);
-    let age = today.getFullYear() - birth.getFullYear();
-    const monthDiff = today.getMonth() - birth.getMonth();
-    
-    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birth.getDate())) {
-      age--;
-    }
-    
-    return age;
-  };
+ const calculateAge = (birthDate) => {
+  if (!birthDate) return 'N/A';
+  
+  // Parse the date string directly without timezone
+  const [year, month, day] = birthDate.split('-').map(Number);
+  const birth = new Date(year, month - 1, day); // Month is 0-indexed
+  
+  const today = new Date();
+  let age = today.getFullYear() - birth.getFullYear();
+  const monthDiff = today.getMonth() - birth.getMonth();
+  
+  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birth.getDate())) {
+    age--;
+  }
+  
+  return age;
+};
 
   const getColorClass = (color) => {
     const colorMap = {
@@ -1359,8 +1369,10 @@ const Players = () => {
                     <div className="text-sm">
                       <div>Age: {calculateAge(player.birth_date)}</div>
                       <div className="text-gray-500">
-                        {player.birth_date ? new Date(player.birth_date).toLocaleDateString() : 'N/A'}
-                      </div>
+  {player.birth_date ? formatBirthDate(player.birth_date) : 'N/A'}
+</div>
+
+
                       <div className="text-gray-500">{player.gender || 'N/A'}</div>
                     </div>
                   </td>
@@ -1388,21 +1400,21 @@ const Players = () => {
 
                   {/* Workbond Check Status Column */}
                   <td className="px-4 py-4">
-                    {player.family?.work_bond_check_received ? (
-                      <span className="inline-flex items-center px-2 py-1 text-xs bg-green-100 text-green-800 rounded-full">
-                        Received
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center px-2 py-1 text-xs bg-yellow-100 text-yellow-800 rounded-full">
-                        Not Received
-                      </span>
-                    )}
-                    {player.family?.work_bond_check_status ? (
-                      <div className="mt-1 text-xs text-gray-500 whitespace-pre-line">
-                        {player.family.work_bond_check_status}
-                      </div>
-                    ) : null}
-                  </td>
+  {player.family?.work_bond_check_status && player.family.work_bond_check_status.trim() !== '' ? (
+    <div>
+      <span className="inline-flex items-center px-2 py-1 text-xs bg-green-100 text-green-800 rounded-full mb-1">
+        Received
+      </span>
+      <div className="text-xs text-gray-500 whitespace-pre-line">
+        {player.family.work_bond_check_status}
+      </div>
+    </div>
+  ) : (
+    <span className="inline-flex items-center px-2 py-1 text-xs bg-yellow-100 text-yellow-800 rounded-full">
+      Not Received
+    </span>
+  )}
+</td>
 
                   {/* Medical Conditions Column */}
                   <td className="px-4 py-4">

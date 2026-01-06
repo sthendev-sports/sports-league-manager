@@ -441,12 +441,15 @@ router.post('/import', jsonParser, async (req, res) => {
 
               // NEW: Also merge guardian/contact fields onto the existing family (if present)
               try {
-                if (existingPlayer.family_id) {
-                  await familyMatching.mergeFamilyDetails(existingPlayer.family_id, playerData);
-                }
-              } catch (e) {
-                console.warn('Family merge (existing player) failed:', e?.message || e);
-              }
+  if (existingPlayer.family_id) {
+    await familyMatching.mergeFamilyDetails(existingPlayer.family_id, playerData, {
+      season_id: season_id,
+      clearWorkbondIfEmpty: true
+    });
+  }
+} catch (e) {
+  console.warn('Family merge (existing player) failed:', e?.message || e);
+}
               
             } else {
               // New player - create family association
@@ -463,12 +466,15 @@ router.post('/import', jsonParser, async (req, res) => {
 
               // NEW: Ensure guardian/contact details are merged onto the family record
               try {
-                if (family?.id) {
-                  await familyMatching.mergeFamilyDetails(family.id, playerData);
-                }
-              } catch (e) {
-                console.warn('Family merge (new player) failed:', e?.message || e);
-              }
+  if (family?.id) {
+    await familyMatching.mergeFamilyDetails(family.id, playerData, {
+      season_id: season_id,
+      clearWorkbondIfEmpty: true
+    });
+  }
+} catch (e) {
+  console.warn('Family merge (new player) failed:', e?.message || e);
+}
 
               // Add player to family group
               if (!familyMap.has(family.id)) {
@@ -745,12 +751,33 @@ function parseBoolean(value) {
   return false; // Default to false for any other values
 }
 
-// Helper function: Parse payment status
+// Helper function: Parse payment status - FIXED for better detection
 function parsePaymentStatus(paymentStatus) {
   if (!paymentStatus) return false;
   
-  const status = paymentStatus.toLowerCase();
-  return status.includes('credit card') || status.includes('paid') || status.includes('check');
+  const status = paymentStatus.toLowerCase().trim();
+  
+  // Check for completed payment indicators
+  if (status.includes('completed') || 
+      status.includes('paid') || 
+      status.includes('credit card') || 
+      status.includes('check') ||
+      status.includes('payment received') ||
+      status === 'complete' ||
+      status === 'paid') {
+    return true;
+  }
+  
+  // Check for pending indicators
+  if (status.includes('pending') || 
+      status.includes('unpaid') || 
+      status.includes('waiting') ||
+      status.includes('processing') ||
+      status === 'pending') {
+    return false;
+  }
+  
+  return false; // Default to false for unknown statuses
 }
 
 // Helper function to create new family
@@ -769,8 +796,8 @@ async function createNewFamily(playerData, familyId) {
     city: playerData.city,
     state: playerData.state,
     zip_code: playerData.zip_code,
-    work_bond_check_received: parseBoolean(playerData.workbond_check_status) && 
-      !playerData.workbond_check_status.includes('Pending')
+    // IMPORTANT: Only set work_bond_check_received if explicitly provided
+    work_bond_check_received: parseWorkbondStatus(playerData.workbond_check_status)
   };
 
   // Fallback for primary contact name
@@ -786,6 +813,36 @@ async function createNewFamily(playerData, familyId) {
 
   if (error) throw error;
   return newFamily;
+}
+
+// NEW: Helper function to parse workbond status - handles empty values correctly
+function parseWorkbondStatus(workbondStatus) {
+  if (!workbondStatus || workbondStatus.trim() === '') {
+    return false; // Empty string means NOT received
+  }
+  
+  const status = workbondStatus.toLowerCase().trim();
+  
+  // Check for received indicators
+  if (status.includes('received') || 
+      status.includes('yes') || 
+      status.includes('true') ||
+      status.includes('1') ||
+      status === 'received') {
+    return true;
+  }
+  
+  // Check for not received indicators
+  if (status.includes('pending') || 
+      status.includes('no') || 
+      status.includes('false') ||
+      status.includes('0') ||
+      status.includes('not') ||
+      status === 'pending') {
+    return false;
+  }
+  
+  return false; // Default to false for unknown statuses
 }
 
 // Helper function to create volunteers for a family
@@ -830,52 +887,39 @@ async function createFamilyVolunteers(family, seasonId, playerData) {
   }
 }
 
-// Helper function to parse various date formats
+// Helper function to parse various date formats - FIXED for timezone issues
 function parseDate(dateString) {
   if (!dateString) return null;
   
-  // Try different date formats
-  const formats = [
-    'MM/DD/YYYY', 'M/D/YYYY', 'YYYY-MM-DD', 
-    'MM-DD-YYYY', 'M-D-YYYY'
-  ];
+  const cleanDateString = String(dateString).trim();
   
-  for (const format of formats) {
-    const parsed = tryParseDate(dateString, format);
-    if (parsed) return parsed;
+  // If it's already in YYYY-MM-DD, return as-is
+  if (cleanDateString.match(/^\d{4}-\d{2}-\d{2}$/)) {
+    return cleanDateString;
   }
   
-  // If no format works, return null
-  return null;
-}
-
-function tryParseDate(dateString, format) {
-  try {
-    if (format === 'MM/DD/YYYY' || format === 'M/D/YYYY') {
-      const parts = dateString.split('/');
-      if (parts.length === 3) {
-        const month = parseInt(parts[0]) - 1;
-        const day = parseInt(parts[1]);
-        const year = parseInt(parts[2]);
-        const date = new Date(year, month, day);
-        if (!isNaN(date.getTime())) return date.toISOString().split('T')[0];
-      }
-    } else if (format === 'MM-DD-YYYY' || format === 'M-D-YYYY') {
-      const parts = dateString.split('-');
-      if (parts.length === 3) {
-        const month = parseInt(parts[0]) - 1;
-        const day = parseInt(parts[1]);
-        const year = parseInt(parts[2]);
-        const date = new Date(year, month, day);
-        if (!isNaN(date.getTime())) return date.toISOString().split('T')[0];
-      }
-    } else if (format === 'YYYY-MM-DD') {
-      const date = new Date(dateString);
-      if (!isNaN(date.getTime())) return date.toISOString().split('T')[0];
+  // Convert MM/DD/YYYY to YYYY-MM-DD
+  if (cleanDateString.includes('/')) {
+    const parts = cleanDateString.split('/');
+    if (parts.length === 3) {
+      const month = parts[0].padStart(2, '0');
+      const day = parts[1].padStart(2, '0');
+      const year = parts[2];
+      return `${year}-${month}-${day}`;
     }
-  } catch (error) {
-    // Continue to next format
   }
+  
+  // Convert MM-DD-YYYY to YYYY-MM-DD  
+  if (cleanDateString.includes('-')) {
+    const parts = cleanDateString.split('-');
+    if (parts.length === 3 && parts[0].length <= 2 && parts[1].length <= 2 && parts[2].length === 4) {
+      const month = parts[0].padStart(2, '0');
+      const day = parts[1].padStart(2, '0');
+      const year = parts[2];
+      return `${year}-${month}-${day}`;
+    }
+  }
+  
   return null;
 }
 

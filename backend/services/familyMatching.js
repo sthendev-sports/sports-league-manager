@@ -171,10 +171,8 @@ class FamilyMatchingService {
     }
   }
 
-  // NEW: Merge incoming guardian/contact data onto an existing family record.
-  // - Never overwrites existing fields with empty values
-  // - Allows updates when the source system changes a phone/email/name
-  async mergeFamilyDetails(familyId, playerData) {
+  // UPDATED: Merge family details - COMPLETELY OVERWRITE workbond for the current season
+  async mergeFamilyDetails(familyId, playerData, options = {}) {
     if (!familyId) return null;
 
     const updates = {};
@@ -213,6 +211,23 @@ class FamilyMatchingService {
     if (state) updates.state = state;
     if (zip) updates.zip_code = zip;
 
+    // SIMPLE RULE: Always set workbond based on import file
+    if (playerData.workbond_check_status !== undefined) {
+      const status = playerData.workbond_check_status.toString().trim();
+      
+      if (status === '') {
+        // If blank, set both fields to empty/false
+        updates.work_bond_check_received = false;
+        updates.work_bond_check_status = '';
+      } else {
+        // If there's data, store it exactly as provided
+        updates.work_bond_check_received = this.parseWorkbondStatus(status);
+        updates.work_bond_check_status = status;
+      }
+      
+      console.log(`Setting workbond for family ${familyId}: status="${status}", received=${updates.work_bond_check_received}`);
+    }
+
     // If there are no updates, skip
     if (Object.keys(updates).length === 0) return null;
 
@@ -225,11 +240,110 @@ class FamilyMatchingService {
 
     if (error) {
       console.error('Error merging family details:', error);
-      // Don't throw - importing players should still proceed
       return null;
     }
 
     return data;
+  }
+
+  // NEW: Store workbond status per season
+  async updateSeasonWorkbondStatus(familyId, seasonId, workbondStatus) {
+    try {
+      const statusValue = this.parseWorkbondStatus(workbondStatus);
+      const noteValue = workbondStatus.trim() || '';
+      
+      // Create or update season-specific workbond record
+      const { data: existing, error: checkError } = await supabase
+        .from('family_season_workbond')
+        .select('id')
+        .eq('family_id', familyId)
+        .eq('season_id', seasonId)
+        .single();
+
+      if (checkError && checkError.code !== 'PGRST116') { // PGRST116 = not found
+        console.error('Error checking workbond status:', checkError);
+      }
+
+      if (existing) {
+        // Update existing
+        const { error } = await supabase
+          .from('family_season_workbond')
+          .update({
+            received: statusValue,
+            notes: noteValue,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', existing.id);
+
+        if (error) console.error('Error updating workbond status:', error);
+      } else {
+        // Create new
+        const { error } = await supabase
+          .from('family_season_workbond')
+          .insert({
+            family_id: familyId,
+            season_id: seasonId,
+            received: statusValue,
+            notes: noteValue
+          });
+
+        if (error) console.error('Error creating workbond status:', error);
+      }
+    } catch (error) {
+      console.error('Error in updateSeasonWorkbondStatus:', error);
+    }
+  }
+
+  // NEW: Get workbond status for a family in a specific season
+  async getSeasonWorkbondStatus(familyId, seasonId) {
+    try {
+      const { data, error } = await supabase
+        .from('family_season_workbond')
+        .select('received, notes')
+        .eq('family_id', familyId)
+        .eq('season_id', seasonId)
+        .single();
+
+      if (error) {
+        if (error.code === 'PGRST116') { // Not found
+          return { received: false, notes: '' };
+        }
+        console.error('Error getting workbond status:', error);
+        return { received: false, notes: '' };
+      }
+
+      return data || { received: false, notes: '' };
+    } catch (error) {
+      console.error('Error in getSeasonWorkbondStatus:', error);
+      return { received: false, notes: '' };
+    }
+  }
+
+  parseWorkbondStatus(workbondStatus) {
+    if (!workbondStatus || workbondStatus.trim() === '') {
+      return false; // Empty string means NOT received
+    }
+    
+    const status = workbondStatus.toLowerCase().trim();
+    
+    if (status.includes('received') || 
+        status.includes('yes') || 
+        status.includes('true') ||
+        status.includes('1') ||
+        status === 'received') {
+      return true;
+    }
+    
+    if (status.includes('pending') || 
+        status.includes('no') || 
+        status.includes('false') ||
+        status.includes('0') ||
+        status.includes('not') ||
+        status === 'pending') {
+      return false;
+    }
+    
+    return false;
   }
 }
 

@@ -161,8 +161,9 @@ export const parseCSVLine = (line) => {
 };
 
 const cleanHeaderName = (header) => {
+  // EXTENDED: Add new column header mappings
   const headerMap = {
-    // Player fields
+    // Player fields - OLD NAMES
     'registrationno': 'registration_no',
     'registration no': 'registration_no',
     'firstname': 'first_name',
@@ -196,6 +197,30 @@ const cleanHeaderName = (header) => {
     'guardian2 last name': 'secondary_guardian_last_name',
     'guardian2 email': 'secondary_guardian_email',
     'guardian2 phone': 'secondary_guardian_phone',
+
+    // NEW COLUMN HEADER MAPPINGS
+    'order no': 'registration_no',
+    'order no.': 'registration_no',
+    'division name': 'program_title',
+    'player first name': 'first_name',
+    'player last name': 'last_name',
+    'player birth date': 'birth_date',
+    'player gender': 'gender',
+    'please list any medical conditions: (physical limitations, allergies, hearing, sight, etc.)': 'medical_conditions',
+    'new or returning': 'new_or_returning',
+    'does your child play travel baseball/softball?': 'travel_player',
+    'uniform shirt size?': 'uniform_shirt_size',
+    'uniform pant size?': 'uniform_pants_size',
+    'account first name': 'parent1_firstname',
+    'account last name': 'parent1_lastname',
+    'user email': 'parent1_email',
+    'cellphone': 'parent1_phone1',
+    'additional first name': 'parent2_firstname',
+    'additional last name': 'parent2_lastname',
+    'additional email': 'parent2_email',
+    'additional cellphone': 'parent2_phone1',
+    'order payment status': 'payment_status',
+    'admin account notes': 'workbond_check_status',
 
     // Volunteer fields (if any)
     'volunteer name': 'volunteer_name',

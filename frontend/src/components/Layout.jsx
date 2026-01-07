@@ -16,6 +16,7 @@ import {
   CalendarDays,
   UserCheck,
   ClipboardCheck,
+  ClipboardList,
   Shield,
   LogOut,
 } from 'lucide-react';
@@ -42,10 +43,12 @@ const Layout = ({ children }) => {
       name: 'Workbond Management',
       href: '/workbond-management',
       icon: ClipboardCheck,
+  ClipboardList,
       roles: ['Administrator', 'President', 'Work Bond Manager'],
     },
     //{ name: 'Seasons', href: '/seasons', icon: Calendar },
     { name: 'Volunteers', href: '/volunteers', icon: HandHelping },
+    { name: 'Requests', href: '/requests', icon: ClipboardList, roles: ['Administrator', 'President'] },
 	{ name: 'Mailing List', href: '/mailing-list', icon: Mail },
     { name: 'Board Members', href: '/boardmembers', icon: UserCheck },
 	{

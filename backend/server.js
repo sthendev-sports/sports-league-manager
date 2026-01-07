@@ -48,6 +48,7 @@ const seasonExportRoutes = require('./routes/season-export');
 const gamesRoutes = require('./routes/games');
 const dashboardRoutes = require('./routes/dashboard');
 const workbondRoutes = require('./routes/workbond');
+const requestsRoutes = require('./routes/requests');
 const publicCheckWorkbondRoutes = require('./routes/publicCheckWorkbond');
 // const workbondImportRoutes = require('./routes/import-shifts');
 //app.use('/api/draft-new', require('./routes/draft-new'));
@@ -72,6 +73,7 @@ app.use('/api/season-export', seasonExportRoutes);
 app.use('/api/games', gamesRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/workbond', workbondRoutes);
+app.use('/api/requests', requestsRoutes);
 app.use('/api/public/checkworkbond', publicCheckWorkbondRoutes);
 app.use('/api/public/workbond-status', publicCheckWorkbondRoutes); // backward compat
 // app.use('/api/workbond', workbondImportRoutes); // enable later if needed

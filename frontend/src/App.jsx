@@ -14,6 +14,7 @@ import MailingList from './pages/MailingList';
 import Configuration from './pages/Configuration';
 import Volunteers from './pages/Volunteers';
 import TeamUniforms from './pages/TeamUniforms';
+import Requests from './pages/Requests';
 import GameScheduler from './pages/GameScheduler';
 import BoardMembers from './pages/BoardMembers';
 import WorkbondManagement from './pages/WorkbondManagement';
@@ -55,6 +56,18 @@ function App() {
                 <Route
                   path="/teams"
                   element={<ProtectedRoute element={<Teams />} />}
+                />
+
+                <Route
+                  path="/requests"
+                  element={
+                    <ProtectedRoute
+                      element={<Requests />}
+                      requiredRoles={['Administrator', 'President']}
+                    />
+                  }
+                />
+} />}
                 />
                 <Route
                   path="/draft"

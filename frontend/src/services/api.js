@@ -358,6 +358,15 @@ export const importAPI = {
   },
 };
 
+// Requests API
+export const requestsAPI = {
+  getAll: (filters = {}) => api.get('/requests', { params: filters }),
+  create: (data) => api.post('/requests', data),
+  update: (id, data) => api.put(`/requests/${id}`, data),
+  delete: (id) => api.delete(`/requests/${id}`),
+};
+
+
 // Health check
 export const healthCheck = () => api.get('/health');
 

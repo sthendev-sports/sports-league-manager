@@ -520,9 +520,9 @@ router.post('/import', jsonParser, async (req, res) => {
             }
 
             // Create volunteers from parent information (only for new families)
-            if (familyPlayers[0].isNewFamily) {
-              await createFamilyVolunteers(family, season_id, familyPlayers[0].playerData);
-            }
+            //if (familyPlayers[0].isNewFamily) {
+              //await createFamilyVolunteers(family, season_id, familyPlayers[0].playerData);
+            //}
             
           } catch (error) {
             familyPlayers.forEach(({ index }) => {

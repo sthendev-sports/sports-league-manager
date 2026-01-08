@@ -4,6 +4,7 @@ function getLastName(name = '') {
   const parts = String(name).trim().split(/\s+/).filter(Boolean);
   return (parts[parts.length - 1] || '').toLowerCase();
 }
+
 import { Users, Plus, Search, Download, Upload, Filter, Mail, Phone, Edit, Trash2, Save, AlertCircle, CheckCircle, XCircle } from 'lucide-react';
 import CSVImport from '../components/CSVImport';
 import CSVTemplate from '../components/CSVTemplate';
@@ -43,6 +44,13 @@ const Volunteers = () => {
   }, []);
 
   useEffect(() => {
+    // Load divisions when season changes
+    if (selectedSeason) {
+      loadDivisions();
+    }
+  }, [selectedSeason]);
+
+  useEffect(() => {
     // Only load volunteers once a season is selected (default is Active season)
     if (selectedSeason) {
       loadVolunteers();
@@ -53,7 +61,7 @@ const Volunteers = () => {
     try {
       setLoading(true);
       await Promise.all([
-        loadDivisions(),
+        // Removed loadDivisions() from here - it will be loaded when season is selected
         loadTeams(),
         loadSeasons()
       ]);
@@ -107,8 +115,15 @@ const Volunteers = () => {
 
   const loadDivisions = async () => {
     try {
-      console.log('Loading divisions...');
-      const response = await fetch('/api/divisions');
+      console.log('Loading divisions for season:', selectedSeason);
+      let url = '/api/divisions';
+      
+      // Add season filter if a season is selected
+      if (selectedSeason) {
+        url += `?season_id=${selectedSeason}`;
+      }
+      
+      const response = await fetch(url);
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: Failed to load divisions`);
       }

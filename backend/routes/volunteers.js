@@ -159,6 +159,7 @@ router.delete('/:id', async (req, res) => {
  *   - division name
  *   - team name (optional / "Unallocated")
  */
+
 router.post('/import', async (req, res) => {
   try {
     const { volunteers: volunteersData, season_id } = req.body;
@@ -180,15 +181,23 @@ router.post('/import', async (req, res) => {
 
     // Cache family matches so we don't query Supabase repeatedly for the same email/phone
     const familyMatchCache = new Map();
-    const getCachedFamilyId = async ({ email, phone }) => {
-      const e = String(email || '').trim().toLowerCase();
-      const p = normalizePhone(phone);
-      const key = `${e}|${p}`;
-      if (familyMatchCache.has(key)) return familyMatchCache.get(key);
-      const fid = await findMatchingFamilyId({ email: e, phone: p });
-      familyMatchCache.set(key, fid);
-      return fid;
-    };
+    // Replace the getCachedFamilyId function
+const getCachedFamilyId = async ({ email, phone }, seasonId) => {
+  const e = String(email || '').trim().toLowerCase();
+  const p = normalizePhone(phone);
+  const key = `${e}|${p}|${seasonId}`;  // Include season in cache key!
+  
+  if (familyMatchCache.has(key)) {
+    console.log(`Cache hit for key: ${key}`);
+    return familyMatchCache.get(key);
+  }
+  
+  const fid = await findMatchingFamilyId({ email: e, phone: p }, seasonId);
+  familyMatchCache.set(key, fid);
+  console.log(`Cached result for key ${key}: ${fid}`);
+  
+  return fid;
+};
 
     // Load existing volunteers for this season for matching
     console.log('Loading existing volunteers for season:', season_id);
@@ -348,7 +357,13 @@ router.post('/import', async (req, res) => {
           shifts_completed: 0,
           shifts_required: 0,
           can_pickup: false,
-          family_id: await getCachedFamilyId({ email: volunteerData['volunteer email address'], phone: volunteerData['volunteer cellphone'] }),
+          family_id: await getCachedFamilyId(
+  { 
+    email: volunteerData['volunteer email address'], 
+    phone: volunteerData['volunteer cellphone'] 
+  },
+  season_id  // PASS THE SEASON ID!
+),
           player_id: null,
         };
 
@@ -636,43 +651,71 @@ function normalizePhone(phone) {
 
 // Try to find a matching family by email/phone.
 // Returns family UUID (families.id) or null.
-async function findMatchingFamilyId({ email, phone }) {
+// Replace the ENTIRE findMatchingFamilyId function (around line ~350)
+async function findMatchingFamilyId({ email, phone }, seasonId) {
+  console.log(`Finding family for email: ${email}, phone: ${phone}, season: ${seasonId}`);
+  
   const emailNorm = String(email || '').trim().toLowerCase();
   const phoneNorm = normalizePhone(phone);
 
-  // 1) Exact email match (primary or parent2)
+  let candidateFamilies = [];
+
+  // 1. Find families by EMAIL (primary or secondary)
   if (emailNorm) {
-    const { data: famByEmail, error } = await supabase
+    const { data: famByEmail, error: emailError } = await supabase
       .from('families')
       .select('id')
-      .or(`primary_contact_email.eq.${emailNorm},parent2_email.eq.${emailNorm}`)
-      .limit(1);
+      .or(`primary_contact_email.ilike.${emailNorm},parent2_email.ilike.${emailNorm}`);
 
-    if (!error && famByEmail && famByEmail.length > 0) {
-      return famByEmail[0].id;
+    if (!emailError && famByEmail) {
+      candidateFamilies = famByEmail;
+      console.log(`Found ${candidateFamilies.length} candidate families by email`);
     }
   }
 
-  // 2) Phone match (normalize and compare in JS)
-  // Supabase can't easily normalize with SQL, so we do a coarse fetch by last 4 digits
-  if (phoneNorm && phoneNorm.length >= 4) {
+  // 2. If no email matches, try PHONE
+  if (candidateFamilies.length === 0 && phoneNorm && phoneNorm.length >= 4) {
     const last4 = phoneNorm.slice(-4);
-    const { data: famCandidates, error } = await supabase
+    const { data: famCandidates, error: phoneError } = await supabase
       .from('families')
       .select('id, primary_contact_phone, parent2_phone')
       .or(`primary_contact_phone.ilike.%${last4}%,parent2_phone.ilike.%${last4}%`)
       .limit(50);
 
-    if (!error && famCandidates && famCandidates.length > 0) {
+    if (!phoneError && famCandidates) {
       for (const fam of famCandidates) {
         const p1 = normalizePhone(fam.primary_contact_phone);
         const p2 = normalizePhone(fam.parent2_phone);
-        if (p1 && p1 == phoneNorm) return fam.id;
-        if (p2 && p2 == phoneNorm) return fam.id;
+        if ((p1 && p1 === phoneNorm) || (p2 && p2 === phoneNorm)) {
+          candidateFamilies.push({ id: fam.id });
+          console.log(`Found family by phone match`);
+          break;
+        }
       }
     }
   }
 
+  // 3. FILTER: Only families with players in CURRENT SEASON
+  console.log(`Checking ${candidateFamilies.length} candidate families for season ${seasonId}`);
+  
+  for (const family of candidateFamilies) {
+    const { data: seasonPlayers, error: seasonError } = await supabase
+      .from('players')
+      .select('id, first_name, last_name')
+      .eq('family_id', family.id)
+      .eq('season_id', seasonId)  // CRITICAL: Check current season
+      .limit(5);
+
+    if (!seasonError && seasonPlayers && seasonPlayers.length > 0) {
+      console.log(`✅ Family ${family.id} has ${seasonPlayers.length} player(s) in season ${seasonId}:`, 
+        seasonPlayers.map(p => `${p.first_name} ${p.last_name}`));
+      return family.id;
+    } else {
+      console.log(`❌ Family ${family.id} has NO players in season ${seasonId}`);
+    }
+  }
+
+  console.log(`No family found with players in season ${seasonId}`);
   return null;
 }
 

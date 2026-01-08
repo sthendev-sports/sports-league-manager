@@ -131,20 +131,37 @@ const Players = () => {
       
       // Use the improved volunteer data enhancement
       const playersWithVolunteers = await enhancePlayersWithVolunteerData(response.data || []);
-      // Ignore stale responses (e.g., initial "all seasons" load finishing after active-season load)
-      if (seqId !== playersLoadSeq.current) return;
-      setPlayers(playersWithVolunteers);
-    } catch (error) {
-      console.error('Error loading players:', error);
-      if (seqId !== playersLoadSeq.current) return;
-      setError('Failed to load players. ' + error.message);
-      setPlayers([]);
-    } finally {
-      if (seqId === playersLoadSeq.current) {
-        setLoading(false);
+      // DEBUG: Also load ALL volunteers to see what's available
+    try {
+      let volunteersUrl = '/api/volunteers';
+      if (selectedSeason) {
+        volunteersUrl += `?season_id=${selectedSeason}`;
       }
+      const volunteersResponse = await fetch(volunteersUrl);
+      if (volunteersResponse.ok) {
+        const allVolunteers = await volunteersResponse.json();
+        console.log('DEBUG: All volunteers loaded:', allVolunteers.length);
+        console.log('DEBUG: Volunteers without family_id:', 
+          allVolunteers.filter(v => !v.family_id).map(v => ({ name: v.name, id: v.id })));
+      }
+    } catch (debugErr) {
+      console.log('Debug volunteer load error:', debugErr);
     }
-  };
+    
+    // Ignore stale responses
+    if (seqId !== playersLoadSeq.current) return;
+    setPlayers(playersWithVolunteers);
+  } catch (error) {
+    console.error('Error loading players:', error);
+    if (seqId !== playersLoadSeq.current) return;
+    setError('Failed to load players. ' + error.message);
+    setPlayers([]);
+  } finally {
+    if (seqId === playersLoadSeq.current) {
+      setLoading(false);
+    }
+  }
+};
 
   const loadTeams = async () => {
     if (!selectedSeason) {
@@ -678,12 +695,16 @@ const formatBirthDate = (dateString) => {
 
   // Handle linking volunteer
   const handleLinkVolunteer = async () => {
-    if (!linkSelections.volunteerId || !linkSelections.playerId) {
-      alert('Please select both a volunteer and a player');
-      return;
-    }
+  if (!linkSelections.volunteerId || !linkSelections.playerId) {
+    alert('Please select both a volunteer and a player');
+    return;
+  }
 
-    const volunteer = unlinkedVolunteers.find(v => v.id === linkSelections.volunteerId);
+  // First, fetch the latest volunteer data
+  try {
+    const volunteersResponse = await fetch(`/api/volunteers${selectedSeason ? `?season_id=${selectedSeason}` : ''}`);
+    const allVolunteers = await volunteersResponse.json();
+    const volunteer = allVolunteers.find(v => v.id === linkSelections.volunteerId);
     const player = players.find(p => p.id === linkSelections.playerId);
 
     if (!volunteer || !player) {
@@ -695,8 +716,14 @@ const formatBirthDate = (dateString) => {
     if (success) {
       setLinkSelections({ volunteerId: '', playerId: '' });
       setShowFamilyLinker(false);
+      // Refresh players to see updated volunteer data
+      await loadPlayers();
     }
-  };
+  } catch (error) {
+    console.error('Error linking volunteer:', error);
+    alert(`Error linking volunteer: ${error.message}`);
+  }
+};
 
   // NEW: Function to link volunteer to family
   const linkVolunteerToFamily = async (volunteerId, familyId) => {
@@ -790,128 +817,95 @@ const formatBirthDate = (dateString) => {
 
   // Family Linker Form Content
   const FamilyLinkerFormContent = (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+  <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+    <div>
+      <p className="text-sm text-gray-600 mb-4">
+        These volunteers don't have family associations. Link them to players to display their roles correctly.
+      </p>
+      
       <div>
-        <p className="text-sm text-gray-600 mb-4">
-          These volunteers don't have family associations. Link them to players to display their roles correctly.
-        </p>
-        
-        <div>
-          <label style={{
-            display: 'block',
+        <label style={{
+          display: 'block',
+          fontSize: '14px',
+          fontWeight: '500',
+          color: '#374151',
+          marginBottom: '8px'
+        }}>
+          Select Volunteer *
+        </label>
+        <select
+          required
+          style={{
+            width: '100%',
+            padding: '10px 12px',
+            border: '1px solid #d1d5db',
+            borderRadius: '8px',
             fontSize: '14px',
-            fontWeight: '500',
             color: '#374151',
-            marginBottom: '8px'
-          }}>
-            Select Volunteer *
-          </label>
-          <select
-            required
-            style={{
-              width: '100%',
-              padding: '10px 12px',
-              border: '1px solid #d1d5db',
-              borderRadius: '8px',
-              fontSize: '14px',
-              color: '#374151',
-              backgroundColor: 'white'
-            }}
-            value={linkSelections.volunteerId}
-            onChange={(e) => setLinkSelections(prev => ({ ...prev, volunteerId: e.target.value }))}
-          >
-            <option value="">Choose a volunteer...</option>
-            {unlinkedVolunteers.map(volunteer => (
-              <option key={volunteer.id} value={volunteer.id}>
-                {volunteer.name} - {volunteer.role} {volunteer.email ? `(${volunteer.email})` : ''}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div>
-          <label style={{
-            display: 'block',
-            fontSize: '14px',
-            fontWeight: '500',
-            color: '#374151',
-            marginBottom: '8px'
-          }}>
-            Select Player to Link To *
-          </label>
-          <select
-            required
-            style={{
-              width: '100%',
-              padding: '10px 12px',
-              border: '1px solid #d1d5db',
-              borderRadius: '8px',
-              fontSize: '14px',
-              color: '#374151',
-              backgroundColor: 'white'
-            }}
-            value={linkSelections.playerId}
-            onChange={(e) => setLinkSelections(prev => ({ ...prev, playerId: e.target.value }))}
-          >
-            <option value="">Choose a player...</option>
-            {players.map(player => (
-              <option key={player.id} value={player.id}>
-                {player.first_name} {player.last_name} (Family: {player.family_id?.substring(0, 8)}...)
-              </option>
-            ))}
-          </select>
+            backgroundColor: 'white'
+          }}
+          value={linkSelections.volunteerId}
+          onChange={(e) => setLinkSelections(prev => ({ ...prev, volunteerId: e.target.value }))}
+          onClick={async () => {
+            // Fetch unlinked volunteers when dropdown is clicked
+            try {
+              const response = await fetch(`/api/volunteers${selectedSeason ? `?season_id=${selectedSeason}` : ''}`);
+              const allVolunteers = await response.json();
+              const unlinked = allVolunteers.filter(v => !v.family_id);
+              console.log('Fetched unlinked volunteers:', unlinked.length);
+              setUnlinkedVolunteers(unlinked);
+            } catch (error) {
+              console.error('Error fetching unlinked volunteers:', error);
+            }
+          }}
+        >
+          <option value="">Choose a volunteer...</option>
+          {unlinkedVolunteers.map(volunteer => (
+            <option key={volunteer.id} value={volunteer.id}>
+              {volunteer.name} - {volunteer.role} {volunteer.email ? `(${volunteer.email})` : ''}
+            </option>
+          ))}
+        </select>
+        <div className="text-xs text-gray-500 mt-1">
+          Found {unlinkedVolunteers.length} unlinked volunteers in {selectedSeason ? 'this season' : 'all seasons'}
         </div>
       </div>
-
-      {unlinkedVolunteers.length > 0 && (
-        <div style={{ marginTop: '12px' }}>
-          <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '8px' }}>
-            Unlinked volunteers in this season: <strong>{unlinkedVolunteers.length}</strong>
-          </div>
-          <div>
-            <label style={{
-              display: 'block',
-              fontSize: '14px',
-              fontWeight: '500',
-              color: '#374151',
-              marginBottom: '8px'
-            }}>
-              Select Volunteer *
-            </label>
-            <select
-              required
-              style={{
-                width: '100%',
-                padding: '10px 12px',
-                border: '1px solid #d1d5db',
-                borderRadius: '8px',
-                fontSize: '14px',
-                color: '#374151',
-                backgroundColor: 'white'
-            }}
-              value={linkSelections.volunteerId}
-              onChange={(e) => setLinkSelections(prev => ({ ...prev, volunteerId: e.target.value }))}
-            >
-              <option value="">Choose a volunteer...</option>
-              {[...unlinkedVolunteers]
-                .sort((a, b) => {
-                  const al = String(a?.name || '').trim().split(/\s+/).pop()?.toLowerCase() || '';
-                  const bl = String(b?.name || '').trim().split(/\s+/).pop()?.toLowerCase() || '';
-                  if (al < bl) return -1;
-                  if (al > bl) return 1;
-                  return String(a?.name || '').localeCompare(String(b?.name || ''));
-                })
-                .map((volunteer) => (
-                  <option key={volunteer.id} value={volunteer.id}>
-                    {volunteer.name} - {volunteer.role}
-                  </option>
-                ))}
-            </select>
-          </div>
-        </div>
-      )}
     </div>
-  );
+
+    <div>
+      <label style={{
+        display: 'block',
+        fontSize: '14px',
+        fontWeight: '500',
+        color: '#374151',
+        marginBottom: '8px'
+      }}>
+        Select Player to Link To *
+      </label>
+      <select
+        required
+        style={{
+          width: '100%',
+          padding: '10px 12px',
+          border: '1px solid #d1d5db',
+          borderRadius: '8px',
+          fontSize: '14px',
+          color: '#374151',
+          backgroundColor: 'white'
+        }}
+        value={linkSelections.playerId}
+        onChange={(e) => setLinkSelections(prev => ({ ...prev, playerId: e.target.value }))}
+      >
+        <option value="">Choose a player...</option>
+        {players.map(player => (
+          <option key={player.id} value={player.id}>
+            {player.first_name} {player.last_name} (Family ID: {player.family_id?.substring(0, 8)}...)
+          </option>
+        ))}
+      </select>
+    </div>
+  </div>
+);
 
   if (loading) {
     return (

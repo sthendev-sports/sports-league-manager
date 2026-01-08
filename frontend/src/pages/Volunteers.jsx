@@ -636,7 +636,38 @@ const Volunteers = () => {
           <option value="Board Member">Board Member</option>
         </select>
       </div>
-
+<div>
+  <label style={{
+    display: 'block',
+    fontSize: '14px',
+    fontWeight: '500',
+    color: '#374151',
+    marginBottom: '8px'
+  }}>
+    Interested Roles
+  </label>
+  <input
+    type="text"
+    style={{
+      width: '100%',
+      padding: '10px 12px',
+      border: '1px solid #d1d5db',
+      borderRadius: '8px',
+      fontSize: '14px',
+      color: '#374151',
+      backgroundColor: 'white'
+    }}
+    value={editingVolunteer ? editingVolunteer.interested_roles || '' : newVolunteer.interested_roles || ''}
+    onChange={(e) => editingVolunteer
+      ? setEditingVolunteer(prev => ({ ...prev, interested_roles: e.target.value }))
+      : setNewVolunteer(prev => ({ ...prev, interested_roles: e.target.value }))
+    }
+    placeholder="Manager, Assistant Coach, Team Parent"
+  />
+  <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px' }}>
+    Enter comma-separated roles (e.g., "Manager, Assistant Coach, Team Parent")
+  </p>
+</div>
       <div>
         <label style={{
           display: 'block',

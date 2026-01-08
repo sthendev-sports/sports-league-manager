@@ -48,6 +48,7 @@ const Modal = ({ isOpen, onClose, title, children, footer }) => {
         position: 'relative',
         width: '100%',
         maxWidth: '500px',
+        maxHeight: '90vh', // Limit height to 90% of viewport
         backgroundColor: 'white',
         borderRadius: '12px',
         boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.3)',
@@ -62,7 +63,8 @@ const Modal = ({ isOpen, onClose, title, children, footer }) => {
           backgroundColor: 'white',
           display: 'flex',
           alignItems: 'center',
-          justifyContent: 'space-between'
+          justifyContent: 'space-between',
+          flexShrink: 0 // Prevent header from shrinking
         }}>
           <h2 style={{ 
             fontSize: '20px', 
@@ -89,8 +91,10 @@ const Modal = ({ isOpen, onClose, title, children, footer }) => {
           </button>
         </div>
 
-        {/* Content */}
+        {/* Scrollable Content */}
         <div style={{
+          flex: 1, // Take available space
+          overflowY: 'auto', // Enable vertical scrolling
           padding: '24px'
         }}>
           {children}
@@ -101,7 +105,8 @@ const Modal = ({ isOpen, onClose, title, children, footer }) => {
           <div style={{
             padding: '24px',
             borderTop: '1px solid #e5e7eb',
-            backgroundColor: '#f9fafb'
+            backgroundColor: '#f9fafb',
+            flexShrink: 0 // Prevent footer from shrinking
           }}>
             {footer}
           </div>

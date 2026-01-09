@@ -262,7 +262,7 @@ const Volunteers = () => {
       // Ensure we have all required fields for your schema
       const completeVolunteerData = {
         ...cleanVolunteerData,
-        background_check_completed: false,
+        background_check_completed: 'pending',
         background_check_complete: false,
         is_approved: false,
         shifts_completed: 0,
@@ -820,7 +820,45 @@ const Volunteers = () => {
         />
       </div>
 
-      <div>
+            <div>
+        <label
+          htmlFor="background_check_completed"
+          style={{
+            display: 'block',
+            fontSize: '14px',
+            fontWeight: '500',
+            color: '#374151',
+            marginBottom: '8px'
+          }}
+        >
+          Background Check Status
+        </label>
+        <input
+          id="background_check_completed"
+          type="text"
+          style={{
+            width: '100%',
+            padding: '10px 12px',
+            border: '1px solid #d1d5db',
+            borderRadius: '8px',
+            fontSize: '14px',
+            color: '#374151',
+            backgroundColor: 'white'
+          }}
+          value={editingVolunteer ? (editingVolunteer.background_check_completed || '') : (newVolunteer.background_check_completed || '')}
+          onChange={(e) =>
+            editingVolunteer
+              ? setEditingVolunteer(prev => ({ ...prev, background_check_completed: e.target.value }))
+              : setNewVolunteer(prev => ({ ...prev, background_check_completed: e.target.value }))
+          }
+          placeholder="pending / completed / etc"
+        />
+        <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px' }}>
+          This is populated from the CSV column "verification status" during import.
+        </p>
+      </div>
+
+<div>
         <div style={{ display: 'flex', alignItems: 'center' }}>
           <input
             type="checkbox"
@@ -1123,6 +1161,9 @@ const Volunteers = () => {
                       Training Status
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Background Check
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Actions
                     </th>
                   </tr>
@@ -1185,6 +1226,9 @@ const Volunteers = () => {
                             </div>
                           )}
                         </div>
+                      </td>
+                      <td className="px-6 py-4 text-sm text-gray-900">
+                        {volunteer.background_check_completed || 'pending'}
                       </td>
                       <td className="px-6 py-4 text-sm font-medium">
                         <button

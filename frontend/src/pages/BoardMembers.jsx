@@ -55,6 +55,22 @@ const BoardMembers = () => {
   }
 };
 
+  const handleResetCompliance = async () => {
+    const ok = window.confirm(
+      'This will clear Abuse Awareness Training and Background Check for ALL active board members. Continue?'
+    );
+    if (!ok) return;
+
+    try {
+      await boardMembersAPI.resetCompliance(true);
+      await loadBoardMembers();
+    } catch (error) {
+      console.error('Error resetting compliance:', error);
+      setError('Failed to reset compliance statuses. ' + error.message);
+    }
+  };
+
+
 
   const handleSubmit = async (e) => {
     if (e) e.preventDefault();
@@ -95,6 +111,7 @@ const BoardMembers = () => {
       spouse_last_name: member.spouse_last_name || '',
       spouse_email: member.spouse_email || '',
       abuse_awareness_completed: member.abuse_awareness_completed || false,
+	  background_check_completed: member.background_check_completed || false,
       is_active: member.is_active !== undefined ? member.is_active : true,
       notes: member.notes || ''
     });
@@ -139,7 +156,8 @@ const BoardMembers = () => {
         spouse_first_name: member.spouse_first_name || member['spouse_first name'] || member['spouse first name'] || '',
         spouse_last_name: member.spouse_last_name || member['spouse_last name'] || member['spouse last name'] || '',
         spouse_email: member.spouse_email || member['spouse_email'] || '',
-        abuse_awareness_completed: member.abuse_awareness_completed === 'Y' || member['abuse_awareness_completed'] === 'Y'
+        abuse_awareness_completed: member.abuse_awareness_completed === 'Y' || member['abuse_awareness_completed'] === 'Y',
+		background_check_completed: member.background_check_completed === 'Y' || member['background_check_completed'] === 'Y' || member['verification status'] === 'Y'
       }));
 
       const response = await api.post('/board-members/import', {
@@ -310,6 +328,13 @@ const result = response.data;
               Import
             </button>
             <button
+              onClick={handleResetCompliance}
+              className="inline-flex items-center px-4 py-2 border border-red-300 rounded-md shadow-sm text-sm font-medium text-red-700 bg-white hover:bg-red-50"
+            >
+              <Shield className="h-4 w-4 mr-2" />
+              Clear Training + Background
+            </button>
+            <button
               onClick={() => setShowForm(true)}
               className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700"
             >
@@ -352,6 +377,9 @@ const result = response.data;
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Training
               </th>
+			  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+      Background Check
+    </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Status
               </th>
@@ -415,6 +443,17 @@ const result = response.data;
                     </span>
                   )}
                 </td>
+				<td className="px-6 py-4 whitespace-nowrap">
+  {member.background_check_completed ? (
+    <span className="inline-flex items-center px-2 py-1 text-xs bg-green-100 text-green-800 rounded-full">
+      Completed
+    </span>
+  ) : (
+    <span className="inline-flex items-center px-2 py-1 text-xs bg-yellow-100 text-yellow-800 rounded-full">
+      Pending
+    </span>
+  )}
+</td>
                 <td className="px-6 py-4 whitespace-nowrap">
                   {member.is_active ? (
                     <span className="inline-flex items-center px-2 py-1 text-xs bg-green-100 text-green-800 rounded-full">
@@ -715,7 +754,27 @@ const result = response.data;
               Abuse Awareness Training Completed
             </label>
           </div>
-
+<div>
+  <label style={{
+    display: 'flex',
+    alignItems: 'center',
+    fontSize: '14px',
+    fontWeight: '500',
+    color: '#374151',
+    marginBottom: '8px',
+    cursor: 'pointer'
+  }}>
+    <input
+      type="checkbox"
+      style={{
+        marginRight: '8px'
+      }}
+      checked={formData.background_check_completed}
+      onChange={(e) => setFormData({ ...formData, background_check_completed: e.target.checked })}
+    />
+    Background Check Completed
+  </label>
+</div>
           <div>
             <label style={{
               display: 'flex',

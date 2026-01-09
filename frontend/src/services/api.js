@@ -94,6 +94,10 @@ export const boardMembersAPI = {
   create: (data) => api.post('/board-members', data),
   update: (id, data) => api.put(`/board-members/${id}`, data),
   delete: (id) => api.delete(`/board-members/${id}`),
+
+  // Clears Training (abuse awareness) + Background Check for the new season
+  resetCompliance: (onlyActive = true) =>
+    api.post('/board-members/reset-compliance', { only_active: onlyActive }),
 };
 
 // Draft API

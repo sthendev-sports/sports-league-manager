@@ -351,7 +351,7 @@ const getCachedFamilyId = async ({ email, phone }, seasonId) => {
           training_completed: false, // Default to false for imports
 
           // Defaults required by schema
-          background_check_completed: false,
+          background_check_completed: volunteerData['verification status'] || 'pending',
           background_check_complete: false,
           is_approved: false,
           shifts_completed: 0,
@@ -606,6 +606,14 @@ async function updateExistingVolunteer(existingVolunteer, newVolunteerData) {
     updates.training_completed = newVolunteerData.training_completed;
     hasChanges = true;
   }
+  // NEW: Background Check Status
+if (
+  newVolunteerData.background_check_completed &&
+  newVolunteerData.background_check_completed !== existingVolunteer.background_check_completed
+) {
+  updates.background_check_completed = newVolunteerData.background_check_completed;
+  hasChanges = true;
+}
 
   // NEW R1: keep interested_roles in sync with CSV
   if (

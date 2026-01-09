@@ -221,4 +221,40 @@ router.get('/player-agents', async (req, res) => {
   }
 });
 
+
+
+// Reset yearly compliance statuses (training/background check) for board members
+// POST /api/board-members/reset-compliance
+// Body (optional): { only_active: true }
+router.post('/reset-compliance', async (req, res) => {
+  try {
+    const { only_active = true } = req.body || {};
+
+    let query = supabase
+      .from('board_members')
+      .update({
+        abuse_awareness_completed: false,
+        background_check_completed: false,
+        updated_at: new Date().toISOString(),
+      });
+
+    if (only_active) {
+      query = query.eq('is_active', true);
+    }
+
+    const { data, error } = await query.select('id');
+
+    if (error) throw error;
+
+    res.json({
+      message: 'Compliance statuses reset successfully',
+      updated_count: Array.isArray(data) ? data.length : 0,
+      only_active,
+    });
+  } catch (error) {
+    console.error('Error resetting compliance statuses:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 module.exports = router;

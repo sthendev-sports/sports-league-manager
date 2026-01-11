@@ -9,6 +9,7 @@ const supabase = require('../config/database');
  *    - We read workbond_requirements.shifts_required.
  *    - If requirements query fails, we RETURN 500 instead of silently defaulting to 1.
  * 2) Keeps prior shift log / CRUD endpoints as-is.
+ * 3) FIXED: Board member exemption now checks by email as well as family_id
  */
 
 // -------------------- REQUIREMENTS --------------------
@@ -389,11 +390,10 @@ router.get('/summary', async (req, res) => {
       completedByFamily.set(key, (completedByFamily.get(key) || 0) + (s.spots_completed || 0));
     }
 
-    // Preload board members ONCE and compute exemptions in-memory (this is the performance fix you referenced)
-    // Note: we intentionally do NOT filter by season_id since some schemas don't have that column.
+    // FIXED: Load board members with email and create maps by family_id AND email
     const { data: boardMembers, error: boardMembersError } = await supabase
       .from('board_members')
-      .select('family_id, role')
+      .select('family_id, role, email')
       .eq('is_active', true);
 
     if (boardMembersError) throw boardMembersError;
@@ -413,37 +413,67 @@ router.get('/summary', async (req, res) => {
       volunteerExemptRolesByFamily.get(key).add(v.role);
     }
 
+    // Create two maps for board members: one by family_id, one by email
     const boardRolesByFamily = new Map();
+    const boardRolesByEmail = new Map();
     for (const b of (boardMembers || [])) {
-      const fid = b.family_id;
-      if (!fid) continue;
-      const key = String(fid);
-      if (!boardRolesByFamily.has(key)) boardRolesByFamily.set(key, new Set());
-      if (b.role) boardRolesByFamily.get(key).add(b.role);
+      if (b.family_id) {
+        const key = String(b.family_id);
+        if (!boardRolesByFamily.has(key)) boardRolesByFamily.set(key, new Set());
+        if (b.role) boardRolesByFamily.get(key).add(b.role);
+      }
+      if (b.email) {
+        const emailKey = b.email.toLowerCase().trim();
+        if (!boardRolesByEmail.has(emailKey)) boardRolesByEmail.set(emailKey, new Set());
+        if (b.role) boardRolesByEmail.get(emailKey).add(b.role);
+      }
     }
 
-    function getExemptionForFamilyKeys(keys) {
+    // NEW: Function to get exemption info checking both family_id and email
+    function getExemptionForFamily(family) {
       const reasons = [];
 
-      // Volunteer exemption
+      // Volunteer exemption (check by family_id)
+      const familyIdKeys = [String(family.id), String(family.family_id)].filter(Boolean);
       const vRoles = new Set();
-      for (const k of keys) {
+      for (const k of familyIdKeys) {
         const set = volunteerExemptRolesByFamily.get(k);
         if (set) for (const r of set) vRoles.add(r);
       }
       if (vRoles.size) reasons.push(`Volunteer role: ${Array.from(vRoles).join(', ')}`);
 
-      // Board exemption
+      // Board member exemption (check by family_id AND email)
       const bRoles = new Set();
-      for (const k of keys) {
+      
+      // Check by family_id
+      for (const k of familyIdKeys) {
         const set = boardRolesByFamily.get(k);
         if (set) for (const r of set) bRoles.add(r);
       }
-      if (bRoles.size) reasons.push(`Board Member: ${Array.from(bRoles).join(', ')}`);
-      else {
+      
+      // Check by email (primary and parent2)
+      const emails = [
+        family.primary_contact_email,
+        family.parent2_email
+      ].filter(Boolean).map(e => e.toLowerCase().trim());
+      
+      for (const email of emails) {
+        const set = boardRolesByEmail.get(email);
+        if (set) for (const r of set) bRoles.add(r);
+      }
+      
+      if (bRoles.size) {
+        reasons.push(`Board Member: ${Array.from(bRoles).join(', ')}`);
+      } else {
         // If there is an active board member row with empty role, still exempt
-        for (const k of keys) {
+        for (const k of familyIdKeys) {
           if (boardRolesByFamily.has(k) && boardRolesByFamily.get(k).size === 0) {
+            reasons.push('Board Member');
+            break;
+          }
+        }
+        for (const email of emails) {
+          if (boardRolesByEmail.has(email) && boardRolesByEmail.get(email).size === 0) {
             reasons.push('Board Member');
             break;
           }
@@ -457,8 +487,6 @@ router.get('/summary', async (req, res) => {
     const summary = [];
 
     for (const family of (families || [])) {
-      const keysToTry = [String(family.id), String(family.family_id)].filter(Boolean);
-
       const familyPlayers =
         playersByFamily.get(String(family.id)) ||
         playersByFamily.get(String(family.family_id)) ||
@@ -490,7 +518,8 @@ router.get('/summary', async (req, res) => {
         completedByFamily.get(String(family.family_id)) ??
         0;
 
-      const exInfo = getExemptionForFamilyKeys(keysToTry);
+      // FIXED: Use the new function that checks both family_id and email
+      const exInfo = getExemptionForFamily(family);
       const finalRequiredShifts = exInfo.is_exempt ? 0 : requiredShifts;
       const remainingShifts = Math.max(0, finalRequiredShifts - completedShifts);
 

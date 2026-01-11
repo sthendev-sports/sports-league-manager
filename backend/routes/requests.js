@@ -31,21 +31,23 @@ router.get('/', async (req, res) => {
 
     let query = supabase
       .from('requests')
-      .select(`
-        *,
-        player:players (
-          id,
-          first_name,
-          last_name,
-          birth_date,
-          status,
-          division_id,
-          season_id,
-          division:divisions (id, name)
-        ),
-        current_division:divisions!requests_current_division_id_fkey (id, name),
-        new_division:divisions!requests_new_division_id_fkey (id, name)
-      `)
+.select(`
+  *,
+  requesting_player:players!requests_player_id_fkey (
+    id,
+    first_name,
+    last_name,
+    birth_date,
+    division_id
+  ),
+  requested_player:players!requests_requested_player_id_fkey (
+    id,
+    first_name,
+    last_name,
+    birth_date,
+    division_id
+  )
+`)
       .order('created_at', { ascending: false });
 
     if (season_id) query = query.eq('season_id', season_id);
@@ -72,7 +74,8 @@ router.post('/', async (req, res) => {
       program,
       comments,
       current_division_id,
-      new_division_id
+      new_division_id,
+	  requested_teammate_name
     } = req.body || {};
 
     if (!season_id) return res.status(400).json({ error: 'season_id is required' });
@@ -87,7 +90,8 @@ router.post('/', async (req, res) => {
       program: program || null,
       comments: comments || null,
       current_division_id: current_division_id || null,
-      new_division_id: new_division_id || null
+      new_division_id: new_division_id || null,
+	  requested_teammate_name: requested_teammate_name || null
     };
 
     const { data, error } = await supabase
@@ -115,7 +119,8 @@ router.put('/:id', async (req, res) => {
       program,
       comments,
       current_division_id,
-      new_division_id
+      new_division_id,
+	  requested_teammate_name
     } = req.body || {};
 
     const updates = {
@@ -126,6 +131,7 @@ router.put('/:id', async (req, res) => {
       comments: comments ?? null,
       current_division_id: current_division_id ?? null,
       new_division_id: new_division_id ?? null,
+	  requested_teammate_name: requested_teammate_name ?? null,
       updated_at: new Date().toISOString()
     };
 

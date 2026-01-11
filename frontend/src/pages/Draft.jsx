@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Users, Download, Mail, Filter, Trophy, AlertCircle, Printer, UserPlus } from 'lucide-react';
 import DraftGrid from '../components/DraftGrid';
-import PrintableDraftSheet from '../components/PrintableDraftSheet';
+import PrintableDraftSheet from '../components/PrintableDraftSheet'; // Keep this import
+import Modal from '../components/Modal';
 import api from '../services/api';
 
 const Draft = () => {
@@ -21,14 +22,19 @@ const Draft = () => {
   const [error, setError] = useState(null);
   const [divisionsError, setDivisionsError] = useState(null);
   const [draftStarted, setDraftStarted] = useState(false);
+  const [showTeammateModal, setShowTeammateModal] = useState(false);
+  const [teammateRequests, setTeammateRequests] = useState([]);
 
   // NEW: Draft mode vs "Add Player To Team" mode (late registrations)
   const [mode, setMode] = useState('draft'); // 'draft' | 'add'
 
-  // New states for printable draft sheet
+  // New states for printable draft sheet - now using Modal component
   const [showPrintModal, setShowPrintModal] = useState(false);
   const [printData, setPrintData] = useState(null);
   const [printLoading, setPrintLoading] = useState(false);
+  const [printSeason, setPrintSeason] = useState('');
+  const [printDivision, setPrintDivision] = useState('');
+  const [showPrintableSheet, setShowPrintableSheet] = useState(false); // NEW: Control when to show printable sheet
 
   useEffect(() => {
     loadSeasons();
@@ -100,7 +106,6 @@ const Draft = () => {
       setError(null);
       console.log('Loading draft data for:', { selectedDivision, selectedSeason });
       
-      //const response = await fetch(`/api/players/draft/${selectedDivision}?season_id=${selectedSeason}`);
       const response = await fetch(`/api/draft/data?division_id=${selectedDivision}&season_id=${selectedSeason}`);
       
       if (!response.ok) {
@@ -139,54 +144,104 @@ const Draft = () => {
   };
 
   const loadPrintData = async (divisionId, seasonId) => {
-    try {
-      setPrintLoading(true);
-      console.log('Loading print data for:', { divisionId, seasonId });
-      
-      //const response = await fetch(`/api/players/draft/${divisionId}?season_id=${seasonId}`);
-      const response = await fetch(`/api/draft/data?division_id=${divisionId}&season_id=${seasonId}`);
-      
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`HTTP ${response.status}: ${errorText}`);
-      }
-      
-      const data = await response.json();
-      console.log('Print data loaded successfully:', data);
-      
-      if (!data) {
-        throw new Error('No data returned from server');
-      }
-      
-      const playersWithNumbers = Array.isArray(data.players) 
-        ? data.players.map((player, index) => ({
-            ...player,
-            draftNumber: index + 1
-          }))
-        : [];
-
-      const safeData = {
-        players: playersWithNumbers,
-        divisionName: divisions.find(d => d.id === divisionId)?.name || 'Unknown Division',
-        seasonName: seasons.find(s => s.id === seasonId)?.name || 'Unknown Season'
-      };
-      
-      console.log('Safe print data:', safeData);
-      setPrintData(safeData);
-    } catch (error) {
-      console.error('Error loading print data:', error);
-      alert(`Failed to load draft data for printing: ${error.message}`);
-    } finally {
-      setPrintLoading(false);
+  try {
+    setPrintLoading(true);
+    console.log('Loading print data for:', { divisionId, seasonId });
+    
+    // Load draft data
+    const response = await fetch(`/api/draft/data?division_id=${divisionId}&season_id=${seasonId}`);
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`HTTP ${response.status}: ${errorText}`);
     }
-  };
+    
+    const data = await response.json();
+    console.log('Print data loaded successfully:', data);
+    
+    if (!data) {
+      throw new Error('No data returned from server');
+    }
+    
+    const playersWithNumbers = Array.isArray(data.players) 
+      ? data.players.map((player, index) => ({
+          ...player,
+          draftNumber: index + 1
+        }))
+      : [];
+
+    // Load teammate requests for this division
+    let teammateRequests = [];
+    try {
+		console.log('Teammate requests loaded:', teammateRequests);
+console.log('First teammate request:', teammateRequests[0]);
+      const token = localStorage.getItem('slm_token');
+      const requestsResponse = await fetch(`/api/requests?season_id=${seasonId}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (requestsResponse.ok) {
+        const requestsData = await requestsResponse.json();
+        const filtered = (requestsData || []).filter(r => 
+          r.type === 'Teammate Request' && r.current_division_id === divisionId
+        );
+        
+        // Enhance with draft numbers
+        teammateRequests = filtered.map(req => {
+          const player = playersWithNumbers.find(p => p.id === req.player_id);
+          return {
+            ...req,
+            draftNumber: player ? player.draftNumber : 'Not assigned',
+            requestingPlayerName: req.requesting_player ? 
+              `${req.requesting_player.last_name || ''}, ${req.requesting_player.first_name || ''}` : 
+              'Unknown Player'
+          };
+        });
+        console.log('Loaded teammate requests:', teammateRequests.length);
+      }
+    } catch (reqError) {
+      console.error('Error loading teammate requests:', reqError);
+      // Continue without teammate requests if there's an error
+    }
+
+    const safeData = {
+      players: playersWithNumbers,
+      divisionName: divisions.find(d => d.id === divisionId)?.name || 'Unknown Division',
+      seasonName: seasons.find(s => s.id === seasonId)?.name || 'Unknown Season',
+      teammateRequests: teammateRequests // Add teammate requests to print data
+    };
+    
+    console.log('Safe print data with teammate requests:', safeData);
+    setPrintData(safeData);
+  } catch (error) {
+    console.error('Error loading print data:', error);
+    alert(`Failed to load draft data for printing: ${error.message}`);
+  } finally {
+    setPrintLoading(false);
+  }
+};
 
   const handlePrintClick = () => {
+    setPrintSeason('');
+    setPrintDivision('');
+    setPrintData(null);
+    setShowPrintableSheet(false);
     setShowPrintModal(true);
   };
 
-  const handleGeneratePrintSheet = (divisionId, seasonId) => {
-    loadPrintData(divisionId, seasonId);
+  const handleGeneratePreview = () => {
+    if (!printSeason || !printDivision) {
+      alert('Please select both season and division');
+      return;
+    }
+    loadPrintData(printDivision, printSeason);
+  };
+
+  const handleGeneratePrintableSheet = () => {
+    setShowPrintableSheet(true);
   };
 
   const canSwitchDivision = () => {
@@ -226,7 +281,50 @@ const Draft = () => {
     setDraftStarted(false);
   };
 
+  const openTeammateRequests = async () => {
+    try {
+      const res = await api.get('/requests', { params: { season_id: selectedSeason } });
+      const filtered = (res.data || []).filter(r => 
+        r.type === 'Teammate Request' && r.current_division_id === selectedDivision
+      );
+      
+      // Enhance with draft numbers
+      const enhancedRequests = filtered.map(req => {
+        const player = draftData?.players?.find(p => p.id === req.player_id);
+        return {
+          ...req,
+          draftNumber: player ? draftData.players.indexOf(player) + 1 : 'Not assigned'
+        };
+      });
+      
+      setTeammateRequests(enhancedRequests);
+      setShowTeammateModal(true);
+    } catch (e) {
+      console.error(e);
+      alert('Failed to load teammate requests');
+    }
+  };
+
   const hasDraftData = draftData && Array.isArray(draftData.players);
+
+  // If we're showing the printable sheet, render it instead of the normal content
+if (showPrintableSheet && printData) {
+  return (
+    <PrintableDraftSheet
+      players={printData.players}
+      divisionName={printData.divisionName}
+      seasonName={printData.seasonName}
+      teammateRequests={printData.teammateRequests || []} // ADD THIS LINE
+      onClose={() => {
+        setShowPrintableSheet(false);
+        setShowPrintModal(false);
+        setPrintData(null);
+        setPrintSeason('');
+        setPrintDivision('');
+      }}
+    />
+  );
+}
 
   return (
     <div className="w-full">
@@ -266,6 +364,7 @@ const Draft = () => {
         </div>
       )}
 
+      {/* Printable Draft Sheet Card - UPDATED */}
       <div className="bg-white shadow rounded-lg p-6 mb-6">
         <div className="flex items-center justify-between">
           <div>
@@ -278,6 +377,24 @@ const Draft = () => {
           >
             <Printer className="h-4 w-4 mr-2" />
             Generate Draft Sheet
+          </button>
+        </div>
+      </div>
+
+      {/* Teammate Requests Card */}
+      <div className="bg-white shadow rounded-lg p-6 mb-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900 mb-1">Teammate Requests</h2>
+            <p className="text-sm text-gray-600">View teammate requests for this division</p>
+          </div>
+          <button
+            onClick={openTeammateRequests}
+            disabled={!selectedDivision || !selectedSeason}
+            className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-purple-600 hover:bg-purple-700 disabled:bg-gray-400"
+          >
+            <Users className="h-4 w-4 mr-2" />
+            View Teammate Requests
           </button>
         </div>
       </div>
@@ -399,22 +516,258 @@ const Draft = () => {
         </div>
       )}
 
-      {showPrintModal && (
-        <PrintableDraftSheetModal
-          seasons={seasons}
-          divisions={divisions}
-          onGenerate={handleGeneratePrintSheet}
-          onClose={() => {
-            setShowPrintModal(false);
-            setPrintData(null);
-          }}
-          printData={printData}
-          printLoading={printLoading}
-        />
-      )}
+      {/* Printable Draft Sheet Modal - UPDATED to use Modal component */}
+      <Modal
+        isOpen={showPrintModal}
+        onClose={() => {
+          setShowPrintModal(false);
+          setPrintData(null);
+          setPrintSeason('');
+          setPrintDivision('');
+        }}
+        title="Generate Printable Draft Sheet"
+        footer={
+          <div className="flex justify-end gap-2">
+            <button
+              onClick={() => {
+                setShowPrintModal(false);
+                setPrintData(null);
+                setPrintSeason('');
+                setPrintDivision('');
+              }}
+              className="px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300"
+            >
+              Cancel
+            </button>
+            {!printData && (
+              <button
+                onClick={handleGeneratePreview}
+                disabled={!printSeason || !printDivision || printLoading}
+                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400"
+              >
+                {printLoading ? 'Loading...' : 'Preview Draft Sheet'}
+              </button>
+            )}
+            {printData && (
+              <button
+                onClick={handleGeneratePrintableSheet}
+                className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"
+              >
+                Generate Printable Sheet
+              </button>
+            )}
+          </div>
+        }
+      >
+        {!printData ? (
+          <div className="space-y-4">
+            <div className="text-sm text-gray-600 mb-4">
+              Select a season and division to preview the draft sheet.
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Season</label>
+                <select
+                  value={printSeason}
+                  onChange={(e) => setPrintSeason(e.target.value)}
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+                >
+                  <option value="">Select Season</option>
+                  {seasons.map(season => (
+                    <option key={season.id} value={season.id}>{season.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Division</label>
+                <select
+                  value={printDivision}
+                  onChange={(e) => setPrintDivision(e.target.value)}
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+                >
+                  <option value="">Select Division</option>
+                  {divisions.map(division => (
+                    <option key={division.id} value={division.id}>{division.name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <div className="text-sm text-gray-600 mb-4">
+              Preview for <span className="font-semibold">{printData.seasonName}</span> - <span className="font-semibold">{printData.divisionName}</span>
+            </div>
+            
+            {/* Player List Preview - Show all columns that your PrintableDraftSheet shows */}
+            <div className="overflow-auto max-h-96 border border-gray-200 rounded-md">
+              <table className="min-w-full text-sm">
+                <thead className="bg-gray-50 sticky top-0">
+                  <tr>
+                    <th className="px-3 py-2 font-medium text-gray-700 text-left">#</th>
+                    <th className="px-3 py-2 font-medium text-gray-700 text-left">Last Name</th>
+                    <th className="px-3 py-2 font-medium text-gray-700 text-left">First Name</th>
+                    <th className="px-3 py-2 font-medium text-gray-700 text-left">Age</th>
+                    <th className="px-3 py-2 font-medium text-gray-700 text-left">Program</th>
+                    {/*<th className="px-3 py-2 font-medium text-gray-700 text-left">School</th> */}
+                    <th className="px-3 py-2 font-medium text-gray-700 text-left">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {printData.players.map((player) => (
+                    <tr key={player.id} className="border-t hover:bg-gray-50">
+                      <td className="px-3 py-2 font-semibold text-center">{player.draftNumber}</td>
+                      <td className="px-3 py-2">{player.last_name || ''}</td>
+                      <td className="px-3 py-2">{player.first_name || ''}</td>
+                      <td className="px-3 py-2 text-center">
+                        {player.birth_date ? calculateAge(player.birth_date) : 'N/A'}
+                      </td>
+                      <td className="px-3 py-2">{player.program_title || ''}</td>
+                      {/*<td className="px-3 py-2">{player.school || ''}</td> */}
+                      <td className="px-3 py-2 text-center">
+                        {player.team_id ? (
+                          <span className="px-2 py-1 rounded-full text-xs bg-green-100 text-green-800">
+                            Drafted
+                          </span>
+                        ) : (
+                          <span className="px-2 py-1 rounded-full text-xs bg-yellow-100 text-yellow-800">
+                            Available
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {/* Teammate Requests Preview */}
+{printData.teammateRequests && printData.teammateRequests.length > 0 && (
+  <div className="mt-6 pt-6 border-t border-gray-300">
+    <h3 className="text-lg font-semibold text-gray-900 mb-3">Teammate Requests ({printData.teammateRequests.length})</h3>
+    <div className="overflow-auto max-h-64 border border-gray-200 rounded-md">
+      <table className="min-w-full text-sm">
+        <thead className="bg-gray-50">
+          <tr>
+            <th className="px-3 py-2 font-medium text-gray-700 text-left">Draft #</th>
+            <th className="px-3 py-2 font-medium text-gray-700 text-left">Requesting Player</th>
+            <th className="px-3 py-2 font-medium text-gray-700 text-left">Requested Teammate</th>
+            {/* <th className="px-3 py-2 font-medium text-gray-700 text-left">Status</th> */}
+          </tr>
+        </thead>
+        <tbody>
+          {printData.teammateRequests.map((request) => (
+            <tr key={request.id} className="border-t hover:bg-gray-50">
+              <td className="px-3 py-2 font-semibold">{request.draftNumber}</td>
+              <td className="px-3 py-2">{request.requestingPlayerName}</td>
+              <td className="px-3 py-2 font-medium">{request.requested_teammate_name || 'Not specified'}</td>
+              <td className="px-3 py-2">
+               {/* <span className={`px-2 py-1 rounded-full text-xs ${
+                  request.status === 'Approved' ? 'bg-green-100 text-green-800' :
+                  request.status === 'Denied' ? 'bg-red-100 text-red-800' :
+                  'bg-yellow-100 text-yellow-800'
+                }`}>
+                   {request.status || 'Pending'} 
+                </span>*/}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+    <p className="text-xs text-gray-500 mt-2 italic">
+      These requests will be included at the bottom of the printable draft sheet for manager reference.
+    </p>
+  </div>
+)}
+            <div className="flex justify-between items-center pt-4 border-t border-gray-200">
+              <div className="text-sm text-gray-600">
+                Total players: <span className="font-semibold">{printData.players.length}</span>
+              </div>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Teammate Requests Modal */}
+      <Modal
+        isOpen={showTeammateModal}
+        onClose={() => setShowTeammateModal(false)}
+        title="Teammate Requests"
+        footer={
+          <div className="flex justify-end">
+            <button
+              onClick={() => setShowTeammateModal(false)}
+              className="px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300"
+            >
+              Close
+            </button>
+          </div>
+        }
+      >
+        {teammateRequests.length === 0 ? (
+          <div className="text-center py-8 text-gray-500">
+            No teammate requests found for {divisions.find(d => d.id === selectedDivision)?.name || 'this division'}.
+          </div>
+        ) : (
+          <div className="overflow-auto">
+            <table className="min-w-full text-sm">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-3 py-2 font-medium text-gray-700 text-left">Draft #</th>
+                  <th className="px-3 py-2 font-medium text-gray-700 text-left">Requesting Player</th>
+                  <th className="px-3 py-2 font-medium text-gray-700 text-left">Requested Teammate</th>
+                  <th className="px-3 py-2 font-medium text-gray-700 text-left">Status</th>
+                  <th className="px-3 py-2 font-medium text-gray-700 text-left">Comments</th>
+                </tr>
+              </thead>
+              <tbody>
+                {teammateRequests.map((req) => {
+                  const requestingPlayer = req.requesting_player || {};
+                  
+                  return (
+                    <tr key={req.id} className="border-t">
+                      <td className="px-3 py-2 font-semibold">
+                        {req.draftNumber}
+                      </td>
+                      <td className="px-3 py-2">
+                        {requestingPlayer.last_name || ''}, {requestingPlayer.first_name || ''}
+                      </td>
+                      <td className="px-3 py-2 font-medium">
+                        {req.requested_teammate_name || 'Not specified'}
+                      </td>
+                      <td className="px-3 py-2">
+                        <span className={`px-2 py-1 rounded-full text-xs ${
+                          req.status === 'Approved' ? 'bg-green-100 text-green-800' :
+                          req.status === 'Denied' ? 'bg-red-100 text-red-800' :
+                          'bg-yellow-100 text-yellow-800'
+                        }`}>
+                          {req.status || 'Pending'}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2">{req.comments || ''}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 };
+
+// Helper function to calculate age
+function calculateAge(birthDateStr) {
+  if (!birthDateStr) return '';
+  const dob = new Date(birthDateStr);
+  if (Number.isNaN(dob.getTime())) return '';
+  const today = new Date();
+  let age = today.getFullYear() - dob.getFullYear();
+  const m = today.getMonth() - dob.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < dob.getDate())) age--;
+  return age;
+}
 
 // NEW: Assign late-registered (undrafted) players to an existing team
 const LatePlayerAssignment = ({ draftData, divisionId, seasonId, onRefresh }) => {
@@ -458,10 +811,10 @@ const LatePlayerAssignment = ({ draftData, divisionId, seasonId, onRefresh }) =>
       if (sendManagersEmail) {
         await api.post('/notifications/send-late-add-manager', payload);
       }
-if (sendPlayerAgentEmail) {
+      if (sendPlayerAgentEmail) {
         await api.post('/notifications/send-late-add-player-agent', payload);
       }
-alert('Player added to team. Emails sent based on your selections.');
+      alert('Player added to team. Emails sent based on your selections.');
 
       // Reset + refresh data so the player disappears from the undrafted list
       setSelectedPlayerId('');
@@ -575,90 +928,6 @@ alert('Player added to team. Emails sent based on your selections.');
           </div>
         </div>
       )}
-    </div>
-  );
-};
-
-const PrintableDraftSheetModal = ({ seasons, divisions, onGenerate, onClose, printData, printLoading }) => {
-  const [selectedDivision, setSelectedDivision] = useState('');
-  const [selectedSeason, setSelectedSeason] = useState('');
-
-  const handleGenerate = () => {
-    if (!selectedDivision || !selectedSeason) {
-      alert('Please select both season and division');
-      return;
-    }
-    onGenerate(selectedDivision, selectedSeason);
-  };
-
-  const handleClose = () => {
-    setSelectedDivision('');
-    setSelectedSeason('');
-    onClose();
-  };
-
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
-        <div className="p-6 border-b border-gray-200">
-          <div className="flex justify-between items-center">
-            <h2 className="text-xl font-semibold text-gray-900">Generate Printable Draft Sheet</h2>
-            <button onClick={handleClose} className="text-gray-400 hover:text-gray-600">
-              ×
-            </button>
-          </div>
-        </div>
-
-        <div className="p-6">
-          {!printData ? (
-            <div className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Season</label>
-                  <select
-                    value={selectedSeason}
-                    onChange={(e) => setSelectedSeason(e.target.value)}
-                    className="w-full border border-gray-300 rounded-md px-3 py-2"
-                  >
-                    <option value="">Select Season</option>
-                    {seasons.map(season => (
-                      <option key={season.id} value={season.id}>{season.name}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Division</label>
-                  <select
-                    value={selectedDivision}
-                    onChange={(e) => setSelectedDivision(e.target.value)}
-                    className="w-full border border-gray-300 rounded-md px-3 py-2"
-                  >
-                    <option value="">Select Division</option>
-                    {divisions.map(division => (
-                      <option key={division.id} value={division.id}>{division.name}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <button
-                onClick={handleGenerate}
-                disabled={printLoading}
-                className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 disabled:bg-gray-400"
-              >
-                {printLoading ? 'Loading...' : 'Generate Draft Sheet'}
-              </button>
-            </div>
-          ) : (
-            <PrintableDraftSheet
-              players={printData.players}
-              divisionName={printData.divisionName}
-              seasonName={printData.seasonName}
-              onClose={handleClose}
-            />
-          )}
-        </div>
-      </div>
     </div>
   );
 };

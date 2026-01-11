@@ -1,6 +1,6 @@
 import React from 'react';
 
-const PrintableDraftSheet = ({ divisionName, seasonName, players, onClose }) => {
+const PrintableDraftSheet = ({ divisionName, seasonName, players, teammateRequests = [], onClose }) => {
   const calculateAge = (birthDate) => {
     if (!birthDate) return 'N/A';
     const today = new Date();
@@ -21,7 +21,6 @@ const PrintableDraftSheet = ({ divisionName, seasonName, players, onClose }) => 
 
   const getVolunteerRoles = (player) => {
     if (!player.volunteers || player.volunteers.length === 0) return '';
-    //return player.volunteers.map(v => v.role).join(', ');
     return player.volunteers.map(v => v.derived_role || v.role || 'Volunteer').join(', ');
   };
 
@@ -46,6 +45,14 @@ const PrintableDraftSheet = ({ divisionName, seasonName, players, onClose }) => 
     )
   }));
 
+  const getStatusColor = (status) => {
+    switch(status?.toLowerCase()) {
+      case 'approved': return { bg: '#d1fae5', text: '#065f46' };
+      case 'denied': return { bg: '#fee2e2', text: '#991b1b' };
+      default: return { bg: '#fef3c7', text: '#92400e' };
+    }
+  };
+
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-lg w-full max-w-6xl max-h-[90vh] overflow-hidden">
@@ -56,6 +63,45 @@ const PrintableDraftSheet = ({ divisionName, seasonName, players, onClose }) => 
               onClick={() => {
                 // Create a new window for printing
                 const printWindow = window.open('', '_blank');
+                
+                // Build teammate requests HTML if they exist
+                let teammateRequestsHTML = '';
+                if (teammateRequests.length > 0) {
+  teammateRequestsHTML = `
+    <div style="page-break-before: always; margin-top: 40px;">
+      <h2 style="text-align: center; font-size: 20px; font-weight: bold; margin-bottom: 20px; border-bottom: 2px solid #333; padding-bottom: 10px;">
+        Teammate Requests - ${divisionName}
+      </h2>
+      
+      <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
+        <thead>
+          <tr style="background-color: #f0f0f0;">
+            <th style="border: 1px solid #ccc; padding: 8px; text-align: left; font-weight: bold; width: 10%;">Draft #</th>
+            <th style="border: 1px solid #ccc; padding: 8px; text-align: left; font-weight: bold; width: 30%;">Requesting Player</th>
+            <th style="border: 1px solid #ccc; padding: 8px; text-align: left; font-weight: bold; width: 30%;">Requested Teammate</th>
+            <th style="border: 1px solid #ccc; padding: 8px; text-align: left; font-weight: bold; width: 30%;">Notes</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${teammateRequests.map(request => `
+            <tr style="border-bottom: 1px solid #eee;">
+              <td style="border: 1px solid #ccc; padding: 8px; text-align: center;">${request.draftNumber}</td>
+              <td style="border: 1px solid #ccc; padding: 8px;">${request.requestingPlayerName || 'Unknown Player'}</td>
+              <td style="border: 1px solid #ccc; padding: 8px; font-weight: bold;">${request.requested_teammate_name || 'Not specified'}</td>
+              <td style="border: 1px solid #ccc; padding: 8px;">${request.comments || ''}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+      
+      <div style="font-size: 12px; color: #666; margin-top: 20px; font-style: italic; border-top: 1px solid #eee; padding-top: 10px;">
+        <p><strong>Note to Managers:</strong> These are player requests to be on the same team as the listed teammate. 
+        Please consider these requests during the draft when making your selections.</p>
+      </div>
+    </div>
+  `;
+}
+
                 printWindow.document.write(`
                   <html>
                     <head>
@@ -155,6 +201,8 @@ const PrintableDraftSheet = ({ divisionName, seasonName, players, onClose }) => 
                         <p><strong>Instructions:</strong> Call out player numbers during the draft. Players with 👥 have siblings - picking them automatically drafts their siblings.</p>
                         <p><strong>Note:</strong> Highlighted rows indicate players with siblings in the division.</p>
                       </div>
+                      
+                      ${teammateRequestsHTML}
                     </body>
                   </html>
                 `);
@@ -181,9 +229,14 @@ const PrintableDraftSheet = ({ divisionName, seasonName, players, onClose }) => 
               <h1 className="text-2xl font-bold">{divisionName} - Draft Sheet</h1>
               <p className="text-lg">{seasonName}</p>
               <p className="text-sm">Total Players: {players.length}</p>
+              {teammateRequests.length > 0 && (
+                <p className="text-sm text-blue-600 font-medium">
+                  Teammate Requests: {teammateRequests.length} (will appear on printed sheet)
+                </p>
+              )}
             </div>
 
-            <table className="w-full border-collapse border border-gray-300 text-sm">
+            <table className="w-full border-collapse border border-gray-300 text-sm mb-8">
               <thead>
                 <tr className="bg-gray-100">
                   <th className="border border-gray-300 p-1 text-left w-12">#</th>
@@ -234,6 +287,64 @@ const PrintableDraftSheet = ({ divisionName, seasonName, players, onClose }) => 
               <p><strong>Instructions:</strong> Call out player numbers during the draft. Players with 👥 have siblings - picking them automatically drafts their siblings.</p>
               <p><strong>Note:</strong> Highlighted rows indicate players with siblings in the division.</p>
             </div>
+
+            {/* Teammate Requests Preview */}
+            {teammateRequests.length > 0 && (
+              <div className="mt-10 pt-8 border-t border-gray-300">
+                <h3 className="text-xl font-bold text-center mb-6 pb-2 border-b border-gray-300">
+                  Teammate Requests - {divisionName}
+                </h3>
+                
+                <table className="w-full border-collapse border border-gray-300 text-sm mb-4">
+                  <thead>
+                    <tr className="bg-gray-100">
+                      <th className="border border-gray-300 p-2 text-left w-16">Draft #</th>
+                      <th className="border border-gray-300 p-2 text-left">Requesting Player</th>
+                      <th className="border border-gray-300 p-2 text-left">Requested Teammate</th>
+                      {/*<th className="border border-gray-300 p-2 text-left w-20">Status</th> */}
+                      <th className="border border-gray-300 p-2 text-left">Notes</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {teammateRequests.map((request) => {
+                      const statusColors = getStatusColor(request.status);
+                      return (
+                        <tr key={request.id} className="border-b border-gray-200 hover:bg-gray-50">
+                          <td className="border border-gray-300 p-2 text-center font-semibold">
+                            {request.draftNumber}
+                          </td>
+                          <td className="border border-gray-300 p-2">
+                            {request.requestingPlayerName || 'Unknown Player'}
+                          </td>
+                          <td className="border border-gray-300 p-2 font-medium">
+                            {request.requested_teammate_name || 'Not specified'}
+                          </td>
+                          <td className="border border-gray-300 p-2">
+                            <span 
+                              className="px-2 py-1 rounded-full text-xs font-bold"
+                              style={{
+                                backgroundColor: statusColors.bg,
+                                color: statusColors.text
+                              }}
+                            >
+                              {/*{request.status || 'Pending'} */}
+                            </span>
+                          </td>
+                          <td className="border border-gray-300 p-2 text-xs">
+                            {request.comments || ''}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                
+                <div className="text-xs text-gray-600 italic p-3 bg-gray-50 rounded border border-gray-200">
+                  <p className="font-semibold mb-1">Note to Managers:</p>
+                  <p>These are player requests to be on the same team as the listed teammate. Please consider these requests during the draft when making your selections. "Approved" requests should be prioritized.</p>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>

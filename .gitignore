@@ -1,4 +1,5 @@
 # Environment files (never commit secrets)
 .env
 backend/.env
+backend/generatetoken.js
 frontend/.env

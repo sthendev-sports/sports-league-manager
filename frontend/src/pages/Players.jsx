@@ -20,6 +20,17 @@ const Players = () => {
   const [editStatus, setEditStatus] = useState('');
   const [savingStatus, setSavingStatus] = useState(false);
   
+  //ADD: Workbond edit modal
+  const [showWorkbondEditModal, setShowWorkbondEditModal] = useState(false);
+const [editWorkbondStatus, setEditWorkbondStatus] = useState('');
+const [savingWorkbond, setSavingWorkbond] = useState(false);
+// Add the function to open the workbond edit modal:
+const openWorkbondEdit = (player) => {
+  setEditingPlayer(player);
+  setEditWorkbondStatus(player.family?.work_bond_check_status || '');
+  setShowWorkbondEditModal(true);
+};
+  
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
@@ -724,7 +735,60 @@ const formatBirthDate = (dateString) => {
     alert(`Error linking volunteer: ${error.message}`);
   }
 };
+// Add the function to save workbond status:
+const handleSaveWorkbondChange = async () => {
+  if (!editingPlayer) return;
 
+  try {
+    setSavingWorkbond(true);
+
+    // Update the family's work_bond_check_status
+    const familyId = editingPlayer.family_id;
+    if (familyId) {
+      // Call API to update family workbond status
+      const response = await fetch(`/api/families/${familyId}/workbond-status`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          work_bond_check_status: editWorkbondStatus,
+          // Also update the boolean flag based on whether status is empty
+          work_bond_check_received: editWorkbondStatus.trim() !== ''
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to update workbond status');
+      }
+
+      const updatedFamily = await response.json();
+      
+      // Update local state
+      setPlayers(prevPlayers => prevPlayers.map(player => {
+        if (player.family_id === familyId) {
+          return {
+            ...player,
+            family: {
+              ...player.family,
+              work_bond_check_status: updatedFamily.work_bond_check_status,
+              work_bond_check_received: updatedFamily.work_bond_check_received
+            }
+          };
+        }
+        return player;
+      }));
+    }
+
+    setShowWorkbondEditModal(false);
+    setEditingPlayer(null);
+  } catch (err) {
+    console.error('Error updating workbond status:', err);
+    alert('Failed to update workbond status. Check the console for details.');
+  } finally {
+    setSavingWorkbond(false);
+  }
+};
   // NEW: Function to link volunteer to family
   const linkVolunteerToFamily = async (volunteerId, familyId) => {
     try {
@@ -1392,32 +1456,43 @@ const formatBirthDate = (dateString) => {
                     )}
                   </td>
 
-                  {/* Workbond Check Status Column */}
-                  <td className="px-4 py-4">
-  {player.family?.work_bond_check_status && player.family.work_bond_check_status.trim() !== '' ? (
+                  {/* Workbond Check Status Column - UPDATED with Change button */}
+<td className="px-4 py-4">
+  <div className="flex items-center justify-between gap-2">
     <div>
-      {player.family.work_bond_check_status.includes('Exempt') ? (
-        <span className="inline-flex items-center px-2 py-1 text-xs bg-purple-100 text-purple-800 rounded-full mb-1">
-          Exempt
-        </span>
-      ) : player.family.work_bond_check_received ? (
-        <span className="inline-flex items-center px-2 py-1 text-xs bg-green-100 text-green-800 rounded-full mb-1">
-          Received
-        </span>
+      {player.family?.work_bond_check_status && player.family.work_bond_check_status.trim() !== '' ? (
+        <div>
+          {player.family.work_bond_check_status.includes('Exempt') ? (
+            <span className="inline-flex items-center px-2 py-1 text-xs bg-purple-100 text-purple-800 rounded-full mb-1">
+              Exempt
+            </span>
+          ) : player.family.work_bond_check_received ? (
+            <span className="inline-flex items-center px-2 py-1 text-xs bg-green-100 text-green-800 rounded-full mb-1">
+              Received
+            </span>
+          ) : (
+            <span className="inline-flex items-center px-2 py-1 text-xs bg-yellow-100 text-yellow-800 rounded-full mb-1">
+              Not Received
+            </span>
+          )}
+          <div className="text-xs text-gray-500 whitespace-pre-line">
+            {player.family.work_bond_check_status}
+          </div>
+        </div>
       ) : (
-        <span className="inline-flex items-center px-2 py-1 text-xs bg-yellow-100 text-yellow-800 rounded-full mb-1">
+        <span className="inline-flex items-center px-2 py-1 text-xs bg-yellow-100 text-yellow-800 rounded-full">
           Not Received
         </span>
       )}
-      <div className="text-xs text-gray-500 whitespace-pre-line">
-        {player.family.work_bond_check_status}
-      </div>
     </div>
-  ) : (
-    <span className="inline-flex items-center px-2 py-1 text-xs bg-yellow-100 text-yellow-800 rounded-full">
-      Not Received
-    </span>
-  )}
+    <button
+      type="button"
+      onClick={() => openWorkbondEdit(player)}
+      className="text-xs text-blue-600 hover:text-blue-800 underline whitespace-nowrap"
+    >
+      Change
+    </button>
+  </div>
 </td>
 
                   {/* Medical Conditions Column */}
@@ -1692,6 +1767,69 @@ const formatBirthDate = (dateString) => {
           </div>
         </Modal>
       )}
+	  {/* Workbond Status Edit Modal */}
+{showWorkbondEditModal && editingPlayer && (
+  <Modal
+    isOpen={showWorkbondEditModal}
+    onClose={() => {
+      setShowWorkbondEditModal(false);
+      setEditingPlayer(null);
+    }}
+    title="Update Workbond Status"
+  >
+    <div className="space-y-4">
+      <div className="text-sm text-gray-700">
+        <div className="font-medium text-gray-900">
+          {editingPlayer.first_name} {editingPlayer.last_name}
+        </div>
+        <div className="text-gray-600">
+          Family: {editingPlayer.family?.primary_contact_name || 'No contact name'}
+        </div>
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1">
+          Workbond Status
+        </label>
+        <textarea
+          className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+          value={editWorkbondStatus}
+          onChange={(e) => setEditWorkbondStatus(e.target.value)}
+          rows={4}
+          placeholder="Enter workbond status details (e.g., 'Check #1234 received 1/15/2024', 'Exempt - manager', 'Waived - hardship', etc.)"
+        />
+        <p className="text-xs text-gray-500 mt-1">
+          • Enter any text about workbond status<br/>
+          • Leave empty to mark as "Not Received"<br/>
+          • Use "Exempt" for exempt families<br/>
+          • The system will auto-detect "Exempt" or "Received" based on text
+        </p>
+      </div>
+
+      <div className="flex justify-end gap-2 pt-2">
+        <button
+          type="button"
+          onClick={() => {
+            setShowWorkbondEditModal(false);
+            setEditingPlayer(null);
+          }}
+          className="px-4 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-50"
+          disabled={savingWorkbond}
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={handleSaveWorkbondChange}
+          className="px-4 py-2 text-sm text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50"
+          disabled={savingWorkbond}
+        >
+          {savingWorkbond ? 'Saving...' : 'Save'}
+        </button>
+      </div>
+    </div>
+  </Modal>
+)}
     </div>
   );
 };

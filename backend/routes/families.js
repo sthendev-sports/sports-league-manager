@@ -53,6 +53,28 @@ router.get('/incomplete-workbond-shifts', async (req, res) => {
   }
 });
 
+// Update workbond status for a family
+router.put('/:familyId/workbond-status', async (req, res) => {
+  try {
+    const { familyId } = req.params;
+    const { work_bond_check_status, work_bond_check_received } = req.body;
+    
+    const { data, error } = await supabase
+      .from('families')
+      .update({
+        work_bond_check_status: work_bond_check_status || null,
+        work_bond_check_received: work_bond_check_received || false
+      })
+      .eq('id', familyId)
+      .select();
+
+    if (error) throw error;
+    res.json(data[0]);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Add extended family member
 router.post('/:familyId/extended-family', async (req, res) => {
   try {

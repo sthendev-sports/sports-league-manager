@@ -99,6 +99,11 @@ const Draft = () => {
       setDivisions([]);
     }
   };
+  
+    const getVolunteerRoles = (player) => {
+    if (!player.volunteers || player.volunteers.length === 0) return '';
+    return player.volunteers.map(v => v.derived_role || v.role || 'Volunteer').join(', ');
+  };
 
   const loadDraftData = async () => {
     try {
@@ -608,9 +613,10 @@ if (showPrintableSheet && printData) {
                     <th className="px-3 py-2 font-medium text-gray-700 text-left">Last Name</th>
                     <th className="px-3 py-2 font-medium text-gray-700 text-left">First Name</th>
                     <th className="px-3 py-2 font-medium text-gray-700 text-left">Age</th>
-                    <th className="px-3 py-2 font-medium text-gray-700 text-left">Program</th>
+                    <th className="px-3 py-2 font-medium text-gray-700 text-left">Travel</th>
+					<th className="px-3 py-2 font-medium text-gray-700 text-left">Volunteer</th>
                     {/*<th className="px-3 py-2 font-medium text-gray-700 text-left">School</th> */}
-                    <th className="px-3 py-2 font-medium text-gray-700 text-left">Status</th>
+                    {/*<th className="px-3 py-2 font-medium text-gray-700 text-left">Status</th> */}
                   </tr>
                 </thead>
                 <tbody>
@@ -622,9 +628,11 @@ if (showPrintableSheet && printData) {
                       <td className="px-3 py-2 text-center">
                         {player.birth_date ? calculateAge(player.birth_date) : 'N/A'}
                       </td>
-                      <td className="px-3 py-2">{player.program_title || ''}</td>
+                      {/*<td className="px-3 py-2">{player.program_title || ''}</td>  */}
+					  <td className="px-3 py-2">{player.is_travel_player ? '✓' : ''}</td>
+				      <td className="px-3 py-2">{getVolunteerRoles(player)}</td>							  
                       {/*<td className="px-3 py-2">{player.school || ''}</td> */}
-                      <td className="px-3 py-2 text-center">
+                      {/* <td className="px-3 py-2 text-center">
                         {player.team_id ? (
                           <span className="px-2 py-1 rounded-full text-xs bg-green-100 text-green-800">
                             Drafted
@@ -634,7 +642,7 @@ if (showPrintableSheet && printData) {
                             Available
                           </span>
                         )}
-                      </td>
+                      </td>*/}
                     </tr>
                   ))}
                 </tbody>

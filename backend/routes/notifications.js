@@ -40,6 +40,205 @@ router.use(authMiddleware);
 router.use(requireRole(ROLES.ADMINISTRATOR, ROLES.PRESIDENT));
 
 /**
+ * POST /api/notifications/send-late-add-equipment-manager
+ *
+ * Body: { season_id: string, team_id: string, player_id: string }
+ *
+ * Sends a targeted "late add" email to the Equipment Manager
+ * Includes team info, manager info, and player uniform details
+ */
+router.post('/send-late-add-equipment-manager', async (req, res) => {
+  try {
+    const { season_id, team_id, player_id } = req.body || {};
+
+    if (!season_id) return res.status(400).json({ error: 'season_id is required.' });
+    if (!team_id) return res.status(400).json({ error: 'team_id is required.' });
+    if (!player_id) return res.status(400).json({ error: 'player_id is required.' });
+
+    // 1) Get Equipment Manager contact from board_members
+    const { data: equipmentManager, error: emError } = await supabase
+      .from('board_members')
+      .select('id, name, first_name, last_name, email, phone')
+      .eq('role', 'Equipment Manager')
+      .eq('is_active', true)
+      .order('last_name', { ascending: true })
+      .limit(1)
+      .maybeSingle();
+
+    if (emError) throw emError;
+    if (!equipmentManager) {
+      return res.status(404).json({ 
+        error: 'No active Equipment Manager found. Please add an Equipment Manager in the Board Members section.' 
+      });
+    }
+
+    const equipmentManagerEmail = equipmentManager.email;
+    const equipmentManagerName = equipmentManager.name || `${equipmentManager.first_name || ''} ${equipmentManager.last_name || ''}`.trim();
+
+    // 2) Load team + division info
+    const { data: team, error: teamError } = await supabase
+      .from('teams')
+      .select(
+        `
+        id,
+        name,
+        color,
+        season_id,
+        division_id,
+        division:divisions (id, name)
+      `
+      )
+      .eq('id', team_id)
+      .maybeSingle();
+
+    if (teamError) throw teamError;
+    if (!team) return res.status(404).json({ error: 'Team not found.' });
+    if (team.season_id !== season_id) {
+      return res.status(400).json({ error: 'Team does not belong to the provided season_id.' });
+    }
+
+    const divisionName = team.division?.name || 'Unknown Division';
+
+    // 3) Load team manager info
+    const { data: teamVolunteers, error: volsError } = await supabase
+      .from('volunteers')
+      .select('id, name, email, phone, role')
+      .eq('season_id', season_id)
+      .eq('team_id', team_id);
+
+    if (volsError) throw volsError;
+
+    // Find manager(s)
+    const managers = (teamVolunteers || []).filter(
+      (v) => v.role && v.role.toLowerCase().includes('manager')
+    );
+
+    let managerName = 'Not assigned';
+    let managerEmail = 'Not assigned';
+    let managerPhone = 'Not assigned';
+    
+    if (managers.length > 0) {
+      const manager = managers[0];
+      managerName = manager.name || 'Not assigned';
+      managerEmail = manager.email || 'Not assigned';
+      managerPhone = manager.phone || 'Not assigned';
+    }
+
+    // 4) Load the new player with uniform info
+    const { data: newPlayer, error: newPlayerError } = await supabase
+      .from('players')
+      .select(
+        `
+        id,
+        first_name,
+        last_name,
+        uniform_shirt_size,
+        uniform_pants_size,
+        team_id
+      `
+      )
+      .eq('id', player_id)
+      .maybeSingle();
+
+    if (newPlayerError) throw newPlayerError;
+    if (!newPlayer) return res.status(404).json({ error: 'Player not found.' });
+    if (newPlayer.team_id !== team_id) {
+      return res.status(400).json({
+        error: 'This player is not currently assigned to the provided team_id. Please assign the player first, then send the late-add email.',
+      });
+    }
+
+    const playerName = `${newPlayer.first_name || ''} ${newPlayer.last_name || ''}`.trim();
+    const uniformShirt = newPlayer.uniform_shirt_size || 'Not specified';
+    const uniformPants = newPlayer.uniform_pants_size || 'Not specified';
+
+    // 5) Build email
+    const subject = `Equipment Order - New Player Added - ${divisionName} - ${team.name}`;
+
+    let text = '';
+    text += `Hello ${equipmentManagerName},\n\n`;
+    text += `A NEW PLAYER has been added and requires uniform equipment.\n\n`;
+    text += `NEW PLAYER ADDED\n\n`;
+    text += `Division: ${divisionName}\n`;
+    text += `Team: ${team.name}\n`;
+    if (team.color) text += `Color: ${team.color}\n`;
+    text += `Manager Name: ${managerName}\n`;
+    text += `Manager Email: ${managerEmail}\n`;
+    text += `Manager Phone Number: ${managerPhone}\n\n`;
+    text += `Player Name, Uniform Shirt, Uniform Pants\n`;
+    text += `----------------------------------------\n`;
+    text += `${playerName}, ${uniformShirt}, ${uniformPants}\n`;
+
+    let html = '';
+    html += `<p>Hello ${escapeHtml(equipmentManagerName)},</p>`;
+    html += `<p><strong>A NEW PLAYER has been added and requires uniform equipment.</strong></p>`;
+    html += `<h3 style="margin-top:16px; margin-bottom:8px;">NEW PLAYER ADDED</h3>`;
+    
+    html += `<table style="border-collapse: collapse; width: 100%; font-size: 14px; margin-top: 8px;">`;
+    html += `<tr><td style="padding: 4px 8px; font-weight: bold;">Division:</td><td style="padding: 4px 8px;">${escapeHtml(divisionName)}</td></tr>`;
+    html += `<tr><td style="padding: 4px 8px; font-weight: bold;">Team:</td><td style="padding: 4px 8px;">${escapeHtml(team.name)}</td></tr>`;
+    if (team.color) {
+      html += `<tr><td style="padding: 4px 8px; font-weight: bold;">Color:</td><td style="padding: 4px 8px;">${escapeHtml(team.color)}</td></tr>`;
+    }
+    html += `<tr><td style="padding: 4px 8px; font-weight: bold;">Manager Name:</td><td style="padding: 4px 8px;">${escapeHtml(managerName)}</td></tr>`;
+    html += `<tr><td style="padding: 4px 8px; font-weight: bold;">Manager Email:</td><td style="padding: 4px 8px;">${escapeHtml(managerEmail)}</td></tr>`;
+    html += `<tr><td style="padding: 4px 8px; font-weight: bold;">Manager Phone Number:</td><td style="padding: 4px 8px;">${escapeHtml(managerPhone)}</td></tr>`;
+    html += `</table>`;
+
+    html += `<h4 style="margin-top:20px; margin-bottom:8px;">Player Uniform Details</h4>`;
+    html += `<table style="border-collapse: collapse; width: 100%; font-size: 13px; margin-top: 8px; border: 1px solid #d1d5db;">`;
+    html += `<thead><tr>`;
+    html += `<th style="border: 1px solid #d1d5db; padding: 8px; background:#f9fafb; text-align:left;">Player Name</th>`;
+    html += `<th style="border: 1px solid #d1d5db; padding: 8px; background:#f9fafb; text-align:left;">Uniform Shirt</th>`;
+    html += `<th style="border: 1px solid #d1d5db; padding: 8px; background:#f9fafb; text-align:left;">Uniform Pants</th>`;
+    html += `</tr></thead>`;
+    html += `<tbody><tr style="background:#ecfeff;">`;
+    html += `<td style="border: 1px solid #e5e7eb; padding: 8px;"><strong>${escapeHtml(playerName)}</strong></td>`;
+    html += `<td style="border: 1px solid #e5e7eb; padding: 8px;">${escapeHtml(uniformShirt)}</td>`;
+    html += `<td style="border: 1px solid #e5e7eb; padding: 8px;">${escapeHtml(uniformPants)}</td>`;
+    html += `</tr></tbody>`;
+    html += `</table>`;
+
+    html += `<p style="margin-top: 16px; color: #6b7280; font-size: 12px;">`;
+    html += `Note: This player was added as a late registration and needs to be provided with team uniform equipment.`;
+    html += `</p>`;
+    html += `<p>Thank you,<br/>Sayreville Little League</p>`;
+
+    await sendEmail({ 
+      to: equipmentManagerEmail, 
+      subject, 
+      text, 
+      html 
+    });
+
+    return res.json({
+      success: true,
+      sent: {
+        equipment_manager_name: equipmentManagerName,
+        equipment_manager_email: equipmentManagerEmail,
+        division_id: team.division_id,
+        division_name: divisionName,
+        team_id: team.id,
+        team_name: team.name,
+        manager_name: managerName,
+        manager_email: managerEmail,
+        manager_phone: managerPhone,
+        player_id: newPlayer.id,
+        player_name: playerName,
+        uniform_shirt: uniformShirt,
+        uniform_pants: uniformPants,
+      },
+    });
+  } catch (error) {
+    console.error('Error in POST /api/notifications/send-late-add-equipment-manager:', error);
+    return res.status(500).json({
+      error: 'Failed to send equipment manager email',
+      details: error?.message || String(error),
+    });
+  }
+});
+
+/**
  * POST /api/notifications/send-manager-rosters
  *
  * Body: { season_id: string, division_id?: string }
@@ -390,7 +589,7 @@ router.post('/send-manager-rosters', async (req, res) => {
         <p style="margin-top: 16px;">
           If you notice any issues with your roster, please contact the league.
         </p>
-        <p>Thank you,<br/>Sports League Manager</p>
+        <p>Thank you,<br/>Sayreville Little League</p>
       `;
 
       await sendEmail({
@@ -720,7 +919,7 @@ router.post('/send-player-agent-rosters', async (req, res) => {
       <p style="margin-top: 16px; font-size: 12px; color: #6b7280;">
         Note: Volunteer Role is based on the assigned role from the draft (volunteers.role).
       </p>
-      <p>Thank you,<br/>Sports League Manager</p>
+      <p>Thank you,<br/>Sayreville Little League</p>
     `;
 
     await sendEmail({
@@ -1104,7 +1303,7 @@ router.post('/send-late-add-manager', async (req, res) => {
       <p style="margin-top: 16px;">
         If you notice any issues with your roster, please contact the league.
       </p>
-      <p>Thank you,<br/>Sports League Manager</p>
+      <p>Thank you,<br/>Sayreville Little League</p>
     `;
 
     await sendEmail({ to: manager.email, subject, text, html });
@@ -1464,7 +1663,7 @@ router.post('/send-late-add-player-agent', async (req, res) => {
         </tbody>
       </table>
       <p style="margin-top: 16px;">
-        Thank you,<br/>Sports League Manager
+        Thank you,<br/>Sayreville Little League
       </p>
     `;
 
@@ -1489,6 +1688,7 @@ router.post('/send-late-add-player-agent', async (req, res) => {
       error: 'Failed to send late-add player agent email',
       details: error?.message || String(error),
     });
+	
   }
 });
 

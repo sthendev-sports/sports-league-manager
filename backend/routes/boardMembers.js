@@ -221,7 +221,30 @@ router.get('/player-agents', async (req, res) => {
   }
 });
 
+// Get Equipment Manager contact info
+router.get('/equipment-manager', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('board_members')
+      .select('id, name, first_name, last_name, email, phone')
+      .eq('role', 'Equipment Manager')
+      .eq('is_active', true)
+      .order('last_name', { ascending: true })
+      .limit(1); // Get the first active Equipment Manager
 
+    if (error) throw error;
+    
+    if (!data || data.length === 0) {
+      return res.status(404).json({ 
+        error: 'No active Equipment Manager found. Please add an Equipment Manager in the Board Members section.' 
+      });
+    }
+    
+    res.json(data[0]); // Return the first Equipment Manager
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
 // Reset yearly compliance statuses (training/background check) for board members
 // POST /api/board-members/reset-compliance

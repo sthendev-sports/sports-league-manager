@@ -784,6 +784,7 @@ const LatePlayerAssignment = ({ draftData, divisionId, seasonId, onRefresh }) =>
   const [busy, setBusy] = useState(false);
   const [sendManagersEmail, setSendManagersEmail] = useState(true);
   const [sendPlayerAgentEmail, setSendPlayerAgentEmail] = useState(true);
+  const [sendEquipmentManagerEmail, setSendEquipmentManagerEmail] = useState(true);
 
   const teams = Array.isArray(draftData?.teams) ? draftData.teams : [];
   const undraftedPlayers = (Array.isArray(draftData?.players) ? draftData.players : [])
@@ -799,45 +800,48 @@ const LatePlayerAssignment = ({ draftData, divisionId, seasonId, onRefresh }) =>
     });
 
   const assignPlayer = async () => {
-    if (!selectedTeamId) {
-      alert('Please select a team.');
-      return;
+  if (!selectedTeamId) {
+    alert('Please select a team.');
+    return;
+  }
+  if (!selectedPlayerId) {
+    alert('Please select a player.');
+    return;
+  }
+
+  setBusy(true);
+  try {
+    // 1) Assign player to team
+    await api.put(`/players/${selectedPlayerId}`, { team_id: selectedTeamId });
+
+    // 2) Send targeted late-add emails (only the selected team)
+    const payload = { season_id: seasonId, team_id: selectedTeamId, player_id: selectedPlayerId };
+
+    if (sendManagersEmail) {
+      await api.post('/notifications/send-late-add-manager', payload);
     }
-    if (!selectedPlayerId) {
-      alert('Please select a player.');
-      return;
+    if (sendPlayerAgentEmail) {
+      await api.post('/notifications/send-late-add-player-agent', payload);
     }
-
-    setBusy(true);
-    try {
-      // 1) Assign player to team
-      await api.put(`/players/${selectedPlayerId}`, { team_id: selectedTeamId });
-
-      // 2) Send targeted late-add emails (only the selected team)
-      const payload = { season_id: seasonId, team_id: selectedTeamId, player_id: selectedPlayerId };
-
-      if (sendManagersEmail) {
-        await api.post('/notifications/send-late-add-manager', payload);
-      }
-      if (sendPlayerAgentEmail) {
-        await api.post('/notifications/send-late-add-player-agent', payload);
-      }
-      alert('Player added to team. Emails sent based on your selections.');
-
-      // Reset + refresh data so the player disappears from the undrafted list
-      setSelectedPlayerId('');
-      if (typeof onRefresh === 'function') {
-        await onRefresh();
-      }
-    } catch (err) {
-      console.error('Late player assignment error:', err);
-      const details = err?.response?.data?.details || err?.response?.data?.error;
-      const msg = details ? (typeof details === 'string' ? details : JSON.stringify(err.response.data)) : (err?.message || 'Failed to add player to team.');
-      alert(msg);
-    } finally {
-      setBusy(false);
+    if (sendEquipmentManagerEmail) {
+      await api.post('/notifications/send-late-add-equipment-manager', payload);
     }
-  };
+    alert('Player added to team. Emails sent based on your selections.');
+
+    // Reset + refresh data so the player disappears from the undrafted list
+    setSelectedPlayerId('');
+    if (typeof onRefresh === 'function') {
+      await onRefresh();
+    }
+  } catch (err) {
+    console.error('Late player assignment error:', err);
+    const details = err?.response?.data?.details || err?.response?.data?.error;
+    const msg = details ? (typeof details === 'string' ? details : JSON.stringify(err.response.data)) : (err?.message || 'Failed to add player to team.');
+    alert(msg);
+  } finally {
+    setBusy(false);
+  }
+};
 
   return (
     <div className="bg-white shadow rounded-lg p-6">
@@ -897,43 +901,54 @@ const LatePlayerAssignment = ({ draftData, divisionId, seasonId, onRefresh }) =>
           </div>
 
           <div className="md:col-span-2">
-            <div className="flex flex-wrap items-center gap-4">
-              <label className="inline-flex items-center text-sm text-gray-700">
-                <input
-                  type="checkbox"
-                  className="mr-2"
-                  checked={sendManagersEmail}
-                  onChange={(e) => setSendManagersEmail(e.target.checked)}
-                />
-                Email Managers
-              </label>
+  <div className="flex flex-wrap items-center gap-4">
+    <label className="inline-flex items-center text-sm text-gray-700">
+      <input
+        type="checkbox"
+        className="mr-2"
+        checked={sendManagersEmail}
+        onChange={(e) => setSendManagersEmail(e.target.checked)}
+      />
+      Email Managers
+    </label>
 
-              <label className="inline-flex items-center text-sm text-gray-700">
-                <input
-                  type="checkbox"
-                  className="mr-2"
-                  checked={sendPlayerAgentEmail}
-                  onChange={(e) => setSendPlayerAgentEmail(e.target.checked)}
-                />
-                Email Player Agent
-              </label>
-            </div>
+    <label className="inline-flex items-center text-sm text-gray-700">
+      <input
+        type="checkbox"
+        className="mr-2"
+        checked={sendPlayerAgentEmail}
+        onChange={(e) => setSendPlayerAgentEmail(e.target.checked)}
+      />
+      Email Player Agent
+    </label>
 
-            <div className="mt-4">
-              <button
-                type="button"
-                disabled={busy}
-                onClick={assignPlayer}
-                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700 disabled:bg-gray-400"
-              >
-                {busy ? 'Adding...' : 'Add Player To Team'}
-              </button>
-            </div>
+    {/* NEW: Equipment Manager email checkbox */}
+    <label className="inline-flex items-center text-sm text-gray-700">
+      <input
+        type="checkbox"
+        className="mr-2"
+        checked={sendEquipmentManagerEmail}
+        onChange={(e) => setSendEquipmentManagerEmail(e.target.checked)}
+      />
+      Email Equipment Manager
+    </label>
+  </div>
 
-            <div className="mt-3 text-xs text-gray-500">
-              Emails use the existing roster email endpoints. If Email Settings Test Mode is ON, messages go to the test email.
-            </div>
-          </div>
+  <div className="mt-4">
+    <button
+      type="button"
+      disabled={busy}
+      onClick={assignPlayer}
+      className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700 disabled:bg-gray-400"
+    >
+      {busy ? 'Adding...' : 'Add Player To Team'}
+    </button>
+  </div>
+
+  <div className="mt-3 text-xs text-gray-500">
+    Emails use the existing roster email endpoints. If Email Settings Test Mode is ON, messages go to the test email.
+  </div>
+</div>
         </div>
       )}
     </div>

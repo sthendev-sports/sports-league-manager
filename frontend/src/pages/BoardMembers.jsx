@@ -646,6 +646,8 @@ const result = response.data;
               <option value="Secretary">Secretary</option>
               <option value="Treasurer">Treasurer</option>
               <option value="Information Officer">Information Officer</option>
+			  <option value="Equipment Manager">Equipment Manager</option>
+			  <option value="Safety Officer">Safety Officer</option>
             </select>
           </div>
 

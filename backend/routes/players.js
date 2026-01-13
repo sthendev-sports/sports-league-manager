@@ -110,31 +110,47 @@ router.get('/draft/:divisionId', async (req, res) => {
 
     // Get players by program_title (which contains division names)
     const { data: players, error: playersError } = await supabase
-      .from('players')
-      .select(`
-        *,
-        family:families (
-          id,
-          family_id,
-          primary_contact_name,
-          primary_contact_email,
-          primary_contact_phone,
-          parent2_first_name,
-          parent2_last_name,
-          parent2_email,
-          parent2_phone
-        )
-      `)
-      .eq('season_id', season_id)
-      .ilike('program_title', `%${division.name}%`)
-      .order('last_name', { ascending: true });
+  .from('players')
+  .select(`
+    *,
+    family:families (*),
+    division:divisions (name),
+    team:teams (name, color)
+  `)
+  .eq('season_id', season_id); // Make sure we filter by season!
 
-    if (playersError) {
-      console.error('Supabase players error:', playersError);
-      throw playersError;
+if (playersError) throw playersError;
+
+// Get family IDs from these players
+const familyIds = players.map(p => p.family_id).filter(Boolean);
+
+// Get workbond records for these families in this season
+const { data: workbondRecords, error: workbondError } = await supabase
+  .from('family_season_workbond')
+  .select('*')
+  .eq('season_id', season_id)
+  .in('family_id', familyIds);
+
+if (workbondError) throw workbondError;
+
+// Create a lookup map: family_id -> workbond record
+const workbondMap = new Map();
+workbondRecords.forEach(record => {
+  workbondMap.set(record.family_id, record);
+});
+
+// Add workbond data to players
+const playersWithWorkbond = players.map(player => {
+  const workbond = workbondMap.get(player.family_id);
+  return {
+    ...player,
+    season_workbond: workbond || {
+      received: false,
+      notes: '',
+      // Add empty/default record if none exists
     }
-
-    console.log(`Players found for division "${division.name}":`, players?.length);
+  };
+});
 
     // Enhanced volunteer fetching with multiple strategies
     if (players && players.length > 0) {

@@ -42,6 +42,24 @@ const dashboardAPI = {
   },
 };
 
+// Family Season Workbond API - NEW
+export const familySeasonWorkbondAPI = {
+  // Get workbond records for multiple families in a season
+  getBatch: (seasonId, familyIds) => 
+    api.post('/family-season-workbond/batch', { 
+      season_id: seasonId, 
+      family_ids: familyIds 
+    }),
+  
+  // Create or update a workbond record for a family in a season
+  createOrUpdate: (data) => 
+    api.post('/family-season-workbond', data),
+  
+  // Get workbond status for a specific family in a season
+  getByFamilySeason: (familyId, seasonId) =>
+    api.get(`/families/${familyId}/season-workbond/${seasonId}`),
+};
+
 // API methods for seasons
 export const seasonsAPI = {
   getAll: () => api.get('/seasons'),
@@ -82,10 +100,15 @@ export const volunteersAPI = {
 };
 
 // Families API
+// UPDATED Families API - add new method
 export const familiesAPI = {
   getAll: (filters = {}) => api.get('/families', { params: filters }),
   getById: (id) => api.get(`/families/${id}`),
   updateFamilyLink: (familyId, data) => api.put(`/families/${familyId}/link`, data),
+  
+  // NEW: Update workbond status (maintains compatibility with old code)
+  updateWorkbondStatus: (familyId, data) => 
+    api.put(`/families/${familyId}/workbond-status`, data),
 };
 
 // Board Members API

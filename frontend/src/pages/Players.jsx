@@ -22,14 +22,8 @@ const Players = () => {
   
   //ADD: Workbond edit modal
   const [showWorkbondEditModal, setShowWorkbondEditModal] = useState(false);
-const [editWorkbondStatus, setEditWorkbondStatus] = useState('');
-const [savingWorkbond, setSavingWorkbond] = useState(false);
-// Add the function to open the workbond edit modal:
-const openWorkbondEdit = (player) => {
-  setEditingPlayer(player);
-  setEditWorkbondStatus(player.family?.work_bond_check_status || '');
-  setShowWorkbondEditModal(true);
-};
+  const [editWorkbondStatus, setEditWorkbondStatus] = useState('');
+  const [savingWorkbond, setSavingWorkbond] = useState(false);
   
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -101,7 +95,10 @@ const openWorkbondEdit = (player) => {
     for (const p of players) {
       if (p.payment_received) paid += 1;
       else unpaid += 1;
-      if (p.family?.work_bond_check_received) workbondCheck += 1;
+      
+      // CHANGED: Check season_workbond.received instead of family.work_bond_check_received
+      if (p.season_workbond?.received) workbondCheck += 1;
+      
       if (p.status === 'active') activePlayers += 1;
       if (p.status === 'withdrawn') withdrawnPlayers += 1;
     }
@@ -135,42 +132,121 @@ const openWorkbondEdit = (player) => {
     try {
       setLoading(true);
       setError(null);
+      
+      // CHANGED: We need to enhance players with season-specific workbond data
+      // First get players for the selected season
       const filters = {};
       if (selectedSeason) filters.season_id = selectedSeason;
       
       const response = await playersAPI.getAll(filters);
+      const basicPlayers = response.data || [];
       
-      // Use the improved volunteer data enhancement
-      const playersWithVolunteers = await enhancePlayersWithVolunteerData(response.data || []);
-      // DEBUG: Also load ALL volunteers to see what's available
-    try {
-      let volunteersUrl = '/api/volunteers';
-      if (selectedSeason) {
-        volunteersUrl += `?season_id=${selectedSeason}`;
+      // Now enhance with season-specific workbond data
+      const playersWithSeasonWorkbond = await enhancePlayersWithSeasonWorkbond(basicPlayers, selectedSeason);
+      
+      // Then enhance with volunteer data
+      const playersWithVolunteers = await enhancePlayersWithVolunteerData(playersWithSeasonWorkbond);
+      
+      // Ignore stale responses
+      if (seqId !== playersLoadSeq.current) return;
+      setPlayers(playersWithVolunteers);
+      
+    } catch (error) {
+      console.error('Error loading players:', error);
+      if (seqId !== playersLoadSeq.current) return;
+      setError('Failed to load players. ' + error.message);
+      setPlayers([]);
+    } finally {
+      if (seqId === playersLoadSeq.current) {
+        setLoading(false);
       }
-      const volunteersResponse = await fetch(volunteersUrl);
-      if (volunteersResponse.ok) {
-        const allVolunteers = await volunteersResponse.json();
-        console.log('DEBUG: All volunteers loaded:', allVolunteers.length);
-        console.log('DEBUG: Volunteers without family_id:', 
-          allVolunteers.filter(v => !v.family_id).map(v => ({ name: v.name, id: v.id })));
-      }
-    } catch (debugErr) {
-      console.log('Debug volunteer load error:', debugErr);
+    }
+  };
+
+// NEW FUNCTION: Enhance players with season-specific workbond data
+  const enhancePlayersWithSeasonWorkbond = async (playersData, seasonId) => {
+  try {
+    if (!playersData || playersData.length === 0) return playersData;
+    
+    // Get family IDs from these players
+    const familyIds = playersData.map(p => p.family_id).filter(Boolean);
+    
+    if (familyIds.length === 0) {
+      return playersData.map(player => ({
+        ...player,
+        season_workbond: {
+          received: false,
+          notes: ''
+        }
+      }));
     }
     
-    // Ignore stale responses
-    if (seqId !== playersLoadSeq.current) return;
-    setPlayers(playersWithVolunteers);
-  } catch (error) {
-    console.error('Error loading players:', error);
-    if (seqId !== playersLoadSeq.current) return;
-    setError('Failed to load players. ' + error.message);
-    setPlayers([]);
-  } finally {
-    if (seqId === playersLoadSeq.current) {
-      setLoading(false);
+    // 1. Get existing workbond records in batch
+    const workbondResponse = await fetch(`/api/family-season-workbond/batch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        family_ids: familyIds,
+        season_id: seasonId 
+      })
+    });
+    
+    const workbondRecords = await workbondResponse.json();
+    
+    // Create lookup map
+    const workbondMap = new Map();
+    workbondRecords.forEach(record => {
+      workbondMap.set(record.family_id, record);
+    });
+    
+    // 2. Check exemptions for families without workbond records in ONE BATCH
+    const familiesWithoutWorkbond = familyIds.filter(id => !workbondMap.has(id));
+    
+    if (familiesWithoutWorkbond.length > 0) {
+      const exemptionResponse = await fetch('/api/family-season-workbond/check-exemptions-batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          family_ids: familiesWithoutWorkbond,
+          season_id: seasonId
+        })
+      });
+      
+      if (exemptionResponse.ok) {
+        const exemptionResults = await exemptionResponse.json();
+        
+        // Add exempt records to our map
+        exemptionResults.forEach(result => {
+          if (result.is_exempt) {
+            workbondMap.set(result.family_id, {
+              family_id: result.family_id,
+              season_id: seasonId,
+              notes: result.exempt_reason ? `Exempt - ${result.exempt_reason}` : 'Exempt',
+              received: false
+            });
+          }
+        });
+      }
     }
+    
+    // 3. Map workbond data to players
+    return playersData.map(player => ({
+      ...player,
+      season_workbond: workbondMap.get(player.family_id) || {
+        received: false,
+        notes: ''
+      }
+    }));
+    
+  } catch (error) {
+    console.error('Error enhancing players with season workbond:', error);
+    return playersData.map(player => ({
+      ...player,
+      season_workbond: {
+        received: false,
+        notes: ''
+      }
+    }));
   }
 };
 
@@ -197,17 +273,25 @@ const openWorkbondEdit = (player) => {
   };
   
   // Add this helper function:
-const formatBirthDate = (dateString) => {
-  // Assuming date is stored as YYYY-MM-DD
-  const [year, month, day] = dateString.split('-');
-  return `${month}/${day}/${year}`;
-};
+  const formatBirthDate = (dateString) => {
+    // Assuming date is stored as YYYY-MM-DD
+    const [year, month, day] = dateString.split('-');
+    return `${month}/${day}/${year}`;
+  };
 
   // ADD: Open the "Change Status" modal for a player
   const openStatusEdit = (player) => {
     setEditingPlayer(player);
     setEditStatus(player?.status || 'active');
     setShowStatusEditModal(true);
+  };
+
+  // NEW: Open the workbond edit modal
+  const openWorkbondEdit = (player) => {
+    setEditingPlayer(player);
+    // Use season_workbond.notes instead of family.work_bond_check_status
+    setEditWorkbondStatus(player.season_workbond?.notes || '');
+    setShowWorkbondEditModal(true);
   };
 
   // Save only the team change for the selected player
@@ -254,6 +338,72 @@ const formatBirthDate = (dateString) => {
       alert('Failed to update player status. Check the console for details.');
     } finally {
       setSavingStatus(false);
+    }
+  };
+
+  // UPDATED: Save workbond status to season-specific table
+  const handleSaveWorkbondChange = async () => {
+    if (!editingPlayer) return;
+
+    try {
+      setSavingWorkbond(true);
+
+      // Get the player's family_id and season_id
+      const familyId = editingPlayer.family_id;
+      const seasonId = editingPlayer.season_id;
+
+      if (!familyId || !seasonId) {
+        throw new Error('Missing family_id or season_id');
+      }
+
+      // Parse the received status from the notes
+      const notes = editWorkbondStatus.trim();
+      const received = notes !== '' && !notes.toLowerCase().includes('exempt');
+
+      // Call API to update season-specific workbond AND families table for compatibility
+      const response = await fetch('/api/family-season-workbond', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          family_id: familyId,
+          season_id: seasonId,
+          notes: notes,
+          received: received,
+          // Also update families table for compatibility
+          update_families_table: true
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to update workbond status');
+      }
+
+      const updatedWorkbond = await response.json();
+      
+      // Update local state
+      setPlayers(prevPlayers => prevPlayers.map(player => {
+        if (player.family_id === familyId && player.season_id === seasonId) {
+          return {
+            ...player,
+            season_workbond: {
+              received: updatedWorkbond.received,
+              notes: updatedWorkbond.notes
+            }
+          };
+        }
+        return player;
+      }));
+
+      setShowWorkbondEditModal(false);
+      setEditingPlayer(null);
+    } catch (err) {
+      console.error('Error updating workbond status:', err);
+      alert('Failed to update workbond status. Check the console for details.');
+    } finally {
+      setSavingWorkbond(false);
     }
   };
 
@@ -471,23 +621,23 @@ const formatBirthDate = (dateString) => {
   };
 
   // Calculate age from birth date
- const calculateAge = (birthDate) => {
-  if (!birthDate) return 'N/A';
-  
-  // Parse the date string directly without timezone
-  const [year, month, day] = birthDate.split('-').map(Number);
-  const birth = new Date(year, month - 1, day); // Month is 0-indexed
-  
-  const today = new Date();
-  let age = today.getFullYear() - birth.getFullYear();
-  const monthDiff = today.getMonth() - birth.getMonth();
-  
-  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birth.getDate())) {
-    age--;
-  }
-  
-  return age;
-};
+  const calculateAge = (birthDate) => {
+    if (!birthDate) return 'N/A';
+    
+    // Parse the date string directly without timezone
+    const [year, month, day] = birthDate.split('-').map(Number);
+    const birth = new Date(year, month - 1, day); // Month is 0-indexed
+    
+    const today = new Date();
+    let age = today.getFullYear() - birth.getFullYear();
+    const monthDiff = today.getMonth() - birth.getMonth();
+    
+    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birth.getDate())) {
+      age--;
+    }
+    
+    return age;
+  };
 
   const getColorClass = (color) => {
     const colorMap = {
@@ -581,7 +731,7 @@ const formatBirthDate = (dateString) => {
     return Array.from(set).sort();
   }, [players]);
 
-  // Build a light-weight search index once per load for fast filtering
+  // UPDATED: Build search index to include season_workbond data
   const searchIndex = useMemo(() => {
     return (players || []).map((p) => {
       const first = String(p?.first_name || '').toLowerCase();
@@ -597,13 +747,17 @@ const formatBirthDate = (dateString) => {
       const gender = String(p?.gender || '').toLowerCase().trim();
       const reg = String(p?.registration_no || '').toLowerCase().trim();
       const familyId = String(p?.family?.family_id || p?.family_id || '').toLowerCase().trim();
-      const status = String(p?.status || 'active').toLowerCase().trim(); // ADD: status to search index
+      const status = String(p?.status || 'active').toLowerCase().trim();
+      
+      // CHANGED: Add workbond status to search index
+      const workbondNotes = String(p?.season_workbond?.notes || '').toLowerCase().trim();
+      const workbondReceived = p?.season_workbond?.received || false;
 
-      return { playerName, guardian, division, team, gender, reg, familyId, status };
+      return { playerName, guardian, division, team, gender, reg, familyId, status, workbondNotes, workbondReceived };
     });
   }, [players]);
 
-  // Memoized filtering for performance (avoid rebuilding strings on each keypress)
+  // UPDATED: Memoized filtering to use season_workbond
   const filteredPlayers = useMemo(() => {
     const nameTerm = String(debouncedSearchTerm || '').trim().toLowerCase();
     const guardianTerm = String(columnFilters.guardianName || '').trim().toLowerCase();
@@ -611,7 +765,7 @@ const formatBirthDate = (dateString) => {
     const divFilter = String(columnFilters.division || '').trim().toLowerCase();
     const teamFilter = String(columnFilters.team || '').trim().toLowerCase();
     const genderFilter = String(columnFilters.gender || '').trim().toLowerCase();
-    const statusFilter = String(columnFilters.status || '').trim().toLowerCase(); // ADD: status filter
+    const statusFilter = String(columnFilters.status || '').trim().toLowerCase();
 
     return (players || []).filter((player, idx) => {
       const s = searchIndex[idx] || {};
@@ -646,11 +800,11 @@ const formatBirthDate = (dateString) => {
         (columnFilters.registrationPaid === 'paid' && player.payment_received) ||
         (columnFilters.registrationPaid === 'pending' && !player.payment_received);
 
-      // Workbond Check
+      // Workbond Check - CHANGED to use season_workbond
       const matchesWorkbondCheck =
         !columnFilters.workbondCheck ||
-        (columnFilters.workbondCheck === 'received' && player.family?.work_bond_check_received) ||
-        (columnFilters.workbondCheck === 'not_received' && !player.family?.work_bond_check_received);
+        (columnFilters.workbondCheck === 'received' && player.season_workbond?.received) ||
+        (columnFilters.workbondCheck === 'not_received' && !player.season_workbond?.received);
 
       // Medical Conditions
       const medical = String(player.medical_conditions || '').trim().toLowerCase();
@@ -706,89 +860,36 @@ const formatBirthDate = (dateString) => {
 
   // Handle linking volunteer
   const handleLinkVolunteer = async () => {
-  if (!linkSelections.volunteerId || !linkSelections.playerId) {
-    alert('Please select both a volunteer and a player');
-    return;
-  }
-
-  // First, fetch the latest volunteer data
-  try {
-    const volunteersResponse = await fetch(`/api/volunteers${selectedSeason ? `?season_id=${selectedSeason}` : ''}`);
-    const allVolunteers = await volunteersResponse.json();
-    const volunteer = allVolunteers.find(v => v.id === linkSelections.volunteerId);
-    const player = players.find(p => p.id === linkSelections.playerId);
-
-    if (!volunteer || !player) {
-      alert('Invalid selection');
+    if (!linkSelections.volunteerId || !linkSelections.playerId) {
+      alert('Please select both a volunteer and a player');
       return;
     }
 
-    const success = await linkVolunteerToFamily(volunteer.id, player.family_id);
-    if (success) {
-      setLinkSelections({ volunteerId: '', playerId: '' });
-      setShowFamilyLinker(false);
-      // Refresh players to see updated volunteer data
-      await loadPlayers();
-    }
-  } catch (error) {
-    console.error('Error linking volunteer:', error);
-    alert(`Error linking volunteer: ${error.message}`);
-  }
-};
-// Add the function to save workbond status:
-const handleSaveWorkbondChange = async () => {
-  if (!editingPlayer) return;
+    // First, fetch the latest volunteer data
+    try {
+      const volunteersResponse = await fetch(`/api/volunteers${selectedSeason ? `?season_id=${selectedSeason}` : ''}`);
+      const allVolunteers = await volunteersResponse.json();
+      const volunteer = allVolunteers.find(v => v.id === linkSelections.volunteerId);
+      const player = players.find(p => p.id === linkSelections.playerId);
 
-  try {
-    setSavingWorkbond(true);
-
-    // Update the family's work_bond_check_status
-    const familyId = editingPlayer.family_id;
-    if (familyId) {
-      // Call API to update family workbond status
-      const response = await fetch(`/api/families/${familyId}/workbond-status`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          work_bond_check_status: editWorkbondStatus,
-          // Also update the boolean flag based on whether status is empty
-          work_bond_check_received: editWorkbondStatus.trim() !== ''
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to update workbond status');
+      if (!volunteer || !player) {
+        alert('Invalid selection');
+        return;
       }
 
-      const updatedFamily = await response.json();
-      
-      // Update local state
-      setPlayers(prevPlayers => prevPlayers.map(player => {
-        if (player.family_id === familyId) {
-          return {
-            ...player,
-            family: {
-              ...player.family,
-              work_bond_check_status: updatedFamily.work_bond_check_status,
-              work_bond_check_received: updatedFamily.work_bond_check_received
-            }
-          };
-        }
-        return player;
-      }));
+      const success = await linkVolunteerToFamily(volunteer.id, player.family_id);
+      if (success) {
+        setLinkSelections({ volunteerId: '', playerId: '' });
+        setShowFamilyLinker(false);
+        // Refresh players to see updated volunteer data
+        await loadPlayers();
+      }
+    } catch (error) {
+      console.error('Error linking volunteer:', error);
+      alert(`Error linking volunteer: ${error.message}`);
     }
+  };
 
-    setShowWorkbondEditModal(false);
-    setEditingPlayer(null);
-  } catch (err) {
-    console.error('Error updating workbond status:', err);
-    alert('Failed to update workbond status. Check the console for details.');
-  } finally {
-    setSavingWorkbond(false);
-  }
-};
   // NEW: Function to link volunteer to family
   const linkVolunteerToFamily = async (volunteerId, familyId) => {
     try {
@@ -881,12 +982,61 @@ const handleSaveWorkbondChange = async () => {
 
   // Family Linker Form Content
   const FamilyLinkerFormContent = (
-  <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-    <div>
-      <p className="text-sm text-gray-600 mb-4">
-        These volunteers don't have family associations. Link them to players to display their roles correctly.
-      </p>
-      
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+      <div>
+        <p className="text-sm text-gray-600 mb-4">
+          These volunteers don't have family associations. Link them to players to display their roles correctly.
+        </p>
+        
+        <div>
+          <label style={{
+            display: 'block',
+            fontSize: '14px',
+            fontWeight: '500',
+            color: '#374151',
+            marginBottom: '8px'
+          }}>
+            Select Volunteer *
+          </label>
+          <select
+            required
+            style={{
+              width: '100%',
+              padding: '10px 12px',
+              border: '1px solid #d1d5db',
+              borderRadius: '8px',
+              fontSize: '14px',
+              color: '#374151',
+              backgroundColor: 'white'
+            }}
+            value={linkSelections.volunteerId}
+            onChange={(e) => setLinkSelections(prev => ({ ...prev, volunteerId: e.target.value }))}
+            onClick={async () => {
+              // Fetch unlinked volunteers when dropdown is clicked
+              try {
+                const response = await fetch(`/api/volunteers${selectedSeason ? `?season_id=${selectedSeason}` : ''}`);
+                const allVolunteers = await response.json();
+                const unlinked = allVolunteers.filter(v => !v.family_id);
+                console.log('Fetched unlinked volunteers:', unlinked.length);
+                setUnlinkedVolunteers(unlinked);
+              } catch (error) {
+                console.error('Error fetching unlinked volunteers:', error);
+              }
+            }}
+          >
+            <option value="">Choose a volunteer...</option>
+            {unlinkedVolunteers.map(volunteer => (
+              <option key={volunteer.id} value={volunteer.id}>
+                {volunteer.name} - {volunteer.role} {volunteer.email ? `(${volunteer.email})` : ''}
+              </option>
+            ))}
+          </select>
+          <div className="text-xs text-gray-500 mt-1">
+            Found {unlinkedVolunteers.length} unlinked volunteers in {selectedSeason ? 'this season' : 'all seasons'}
+          </div>
+        </div>
+      </div>
+
       <div>
         <label style={{
           display: 'block',
@@ -895,7 +1045,7 @@ const handleSaveWorkbondChange = async () => {
           color: '#374151',
           marginBottom: '8px'
         }}>
-          Select Volunteer *
+          Select Player to Link To *
         </label>
         <select
           required
@@ -908,68 +1058,19 @@ const handleSaveWorkbondChange = async () => {
             color: '#374151',
             backgroundColor: 'white'
           }}
-          value={linkSelections.volunteerId}
-          onChange={(e) => setLinkSelections(prev => ({ ...prev, volunteerId: e.target.value }))}
-          onClick={async () => {
-            // Fetch unlinked volunteers when dropdown is clicked
-            try {
-              const response = await fetch(`/api/volunteers${selectedSeason ? `?season_id=${selectedSeason}` : ''}`);
-              const allVolunteers = await response.json();
-              const unlinked = allVolunteers.filter(v => !v.family_id);
-              console.log('Fetched unlinked volunteers:', unlinked.length);
-              setUnlinkedVolunteers(unlinked);
-            } catch (error) {
-              console.error('Error fetching unlinked volunteers:', error);
-            }
-          }}
+          value={linkSelections.playerId}
+          onChange={(e) => setLinkSelections(prev => ({ ...prev, playerId: e.target.value }))}
         >
-          <option value="">Choose a volunteer...</option>
-          {unlinkedVolunteers.map(volunteer => (
-            <option key={volunteer.id} value={volunteer.id}>
-              {volunteer.name} - {volunteer.role} {volunteer.email ? `(${volunteer.email})` : ''}
+          <option value="">Choose a player...</option>
+          {players.map(player => (
+            <option key={player.id} value={player.id}>
+              {player.first_name} {player.last_name} (Family ID: {player.family_id?.substring(0, 8)}...)
             </option>
           ))}
         </select>
-        <div className="text-xs text-gray-500 mt-1">
-          Found {unlinkedVolunteers.length} unlinked volunteers in {selectedSeason ? 'this season' : 'all seasons'}
-        </div>
       </div>
     </div>
-
-    <div>
-      <label style={{
-        display: 'block',
-        fontSize: '14px',
-        fontWeight: '500',
-        color: '#374151',
-        marginBottom: '8px'
-      }}>
-        Select Player to Link To *
-      </label>
-      <select
-        required
-        style={{
-          width: '100%',
-          padding: '10px 12px',
-          border: '1px solid #d1d5db',
-          borderRadius: '8px',
-          fontSize: '14px',
-          color: '#374151',
-          backgroundColor: 'white'
-        }}
-        value={linkSelections.playerId}
-        onChange={(e) => setLinkSelections(prev => ({ ...prev, playerId: e.target.value }))}
-      >
-        <option value="">Choose a player...</option>
-        {players.map(player => (
-          <option key={player.id} value={player.id}>
-            {player.first_name} {player.last_name} (Family ID: {player.family_id?.substring(0, 8)}...)
-          </option>
-        ))}
-      </select>
-    </div>
-  </div>
-);
+  );
 
   if (loading) {
     return (
@@ -1048,7 +1149,7 @@ const handleSaveWorkbondChange = async () => {
         {FamilyLinkerFormContent}
       </Modal>
 
-      {/* Stats Summary */}
+      {/* Stats Summary - UPDATED to use season_workbond */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-8">
         <div className="bg-white overflow-hidden shadow rounded-lg">
           <div className="px-4 py-5 sm:p-6">
@@ -1078,6 +1179,9 @@ const handleSaveWorkbondChange = async () => {
             <dd className="mt-1 text-3xl font-semibold text-gray-900">
               {playerStats.workbondCheck}
             </dd>
+            <p className="text-xs text-gray-500 mt-1">
+              For {selectedSeason ? 'selected season' : 'current season'}
+            </p>
           </div>
         </div>
       </div>
@@ -1193,7 +1297,7 @@ const handleSaveWorkbondChange = async () => {
                   onChange={(e) => handleFilterChange('guardianName', e.target.value)}
                 />
               </div>
-{/* Gender Filter */}
+              {/* Gender Filter */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Gender</label>
                 <select
@@ -1236,7 +1340,7 @@ const handleSaveWorkbondChange = async () => {
                 </select>
               </div>
 
-              {/* Workbond Check Filter */}
+              {/* Workbond Check Filter - UPDATED to use season_workbond */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Workbond Check</label>
                 <select
@@ -1316,7 +1420,7 @@ const handleSaveWorkbondChange = async () => {
           </div>
         </div>
 
-<div className="overflow-x-auto">
+        <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
@@ -1427,10 +1531,8 @@ const handleSaveWorkbondChange = async () => {
                     <div className="text-sm">
                       <div>Age: {calculateAge(player.birth_date)}</div>
                       <div className="text-gray-500">
-  {player.birth_date ? formatBirthDate(player.birth_date) : 'N/A'}
-</div>
-
-
+                        {player.birth_date ? formatBirthDate(player.birth_date) : 'N/A'}
+                      </div>
                       <div className="text-gray-500">{player.gender || 'N/A'}</div>
                     </div>
                   </td>
@@ -1456,44 +1558,44 @@ const handleSaveWorkbondChange = async () => {
                     )}
                   </td>
 
-                  {/* Workbond Check Status Column - UPDATED with Change button */}
-<td className="px-4 py-4">
-  <div className="flex items-center justify-between gap-2">
-    <div>
-      {player.family?.work_bond_check_status && player.family.work_bond_check_status.trim() !== '' ? (
-        <div>
-          {player.family.work_bond_check_status.includes('Exempt') ? (
-            <span className="inline-flex items-center px-2 py-1 text-xs bg-purple-100 text-purple-800 rounded-full mb-1">
-              Exempt
-            </span>
-          ) : player.family.work_bond_check_received ? (
-            <span className="inline-flex items-center px-2 py-1 text-xs bg-green-100 text-green-800 rounded-full mb-1">
-              Received
-            </span>
-          ) : (
-            <span className="inline-flex items-center px-2 py-1 text-xs bg-yellow-100 text-yellow-800 rounded-full mb-1">
-              Not Received
-            </span>
-          )}
-          <div className="text-xs text-gray-500 whitespace-pre-line">
-            {player.family.work_bond_check_status}
-          </div>
-        </div>
-      ) : (
-        <span className="inline-flex items-center px-2 py-1 text-xs bg-yellow-100 text-yellow-800 rounded-full">
-          Not Received
-        </span>
-      )}
-    </div>
-    <button
-      type="button"
-      onClick={() => openWorkbondEdit(player)}
-      className="text-xs text-blue-600 hover:text-blue-800 underline whitespace-nowrap"
-    >
-      Change
-    </button>
-  </div>
-</td>
+                  {/* UPDATED: Workbond Check Status Column - Now using season_workbond */}
+                  <td className="px-4 py-4">
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        {player.season_workbond?.notes && player.season_workbond.notes.trim() !== '' ? (
+                          <div>
+                            {player.season_workbond.notes.includes('Exempt') ? (
+                              <span className="inline-flex items-center px-2 py-1 text-xs bg-purple-100 text-purple-800 rounded-full mb-1">
+                                Exempt
+                              </span>
+                            ) : player.season_workbond.received ? (
+                              <span className="inline-flex items-center px-2 py-1 text-xs bg-green-100 text-green-800 rounded-full mb-1">
+                                Received
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center px-2 py-1 text-xs bg-yellow-100 text-yellow-800 rounded-full mb-1">
+                                Not Received
+                              </span>
+                            )}
+                            <div className="text-xs text-gray-500 whitespace-pre-line">
+                              {player.season_workbond.notes}
+                            </div>
+                          </div>
+                        ) : (
+                          <span className="inline-flex items-center px-2 py-1 text-xs bg-yellow-100 text-yellow-800 rounded-full">
+                            Not Received
+                          </span>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => openWorkbondEdit(player)}
+                        className="text-xs text-blue-600 hover:text-blue-800 underline whitespace-nowrap"
+                      >
+                        Change
+                      </button>
+                    </div>
+                  </td>
 
                   {/* Medical Conditions Column */}
                   <td className="px-4 py-4">
@@ -1509,7 +1611,7 @@ const handleSaveWorkbondChange = async () => {
                     )}
                   </td>
 
-                  {/* Primary Guardian Column - UPDATED */}
+                  {/* Primary Guardian Column */}
                   <td className="px-4 py-4">
                     {player.family?.primary_contact_name ? (
                       <div className="text-sm">
@@ -1565,7 +1667,7 @@ const handleSaveWorkbondChange = async () => {
                     )}
                   </td>
 
-                  {/* Secondary Guardian Column - UPDATED */}
+                  {/* Secondary Guardian Column */}
                   <td className="px-4 py-4">
                     {player.family?.parent2_first_name ? (
                       <div className="text-sm">
@@ -1639,6 +1741,7 @@ const handleSaveWorkbondChange = async () => {
           </div>
         )}
       </div>
+
       {/* Team Edit Modal (only team assignment) */}
       {showTeamEditModal && editingPlayer && (
         <Modal
@@ -1767,69 +1870,73 @@ const handleSaveWorkbondChange = async () => {
           </div>
         </Modal>
       )}
-	  {/* Workbond Status Edit Modal */}
-{showWorkbondEditModal && editingPlayer && (
-  <Modal
-    isOpen={showWorkbondEditModal}
-    onClose={() => {
-      setShowWorkbondEditModal(false);
-      setEditingPlayer(null);
-    }}
-    title="Update Workbond Status"
-  >
-    <div className="space-y-4">
-      <div className="text-sm text-gray-700">
-        <div className="font-medium text-gray-900">
-          {editingPlayer.first_name} {editingPlayer.last_name}
-        </div>
-        <div className="text-gray-600">
-          Family: {editingPlayer.family?.primary_contact_name || 'No contact name'}
-        </div>
-      </div>
 
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">
-          Workbond Status
-        </label>
-        <textarea
-          className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
-          value={editWorkbondStatus}
-          onChange={(e) => setEditWorkbondStatus(e.target.value)}
-          rows={4}
-          placeholder="Enter workbond status details (e.g., 'Check #1234 received 1/15/2024', 'Exempt - manager', 'Waived - hardship', etc.)"
-        />
-        <p className="text-xs text-gray-500 mt-1">
-          • Enter any text about workbond status<br/>
-          • Leave empty to mark as "Not Received"<br/>
-          • Use "Exempt" for exempt families<br/>
-          • The system will auto-detect "Exempt" or "Received" based on text
-        </p>
-      </div>
-
-      <div className="flex justify-end gap-2 pt-2">
-        <button
-          type="button"
-          onClick={() => {
+      {/* UPDATED: Workbond Status Edit Modal - Now for season-specific workbond */}
+      {showWorkbondEditModal && editingPlayer && (
+        <Modal
+          isOpen={showWorkbondEditModal}
+          onClose={() => {
             setShowWorkbondEditModal(false);
             setEditingPlayer(null);
           }}
-          className="px-4 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-50"
-          disabled={savingWorkbond}
+          title={`Update Workbond Status - ${selectedSeason ? `Season: ${seasons.find(s => s.id === selectedSeason)?.name || 'Unknown'}` : 'Current Season'}`}
         >
-          Cancel
-        </button>
-        <button
-          type="button"
-          onClick={handleSaveWorkbondChange}
-          className="px-4 py-2 text-sm text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50"
-          disabled={savingWorkbond}
-        >
-          {savingWorkbond ? 'Saving...' : 'Save'}
-        </button>
-      </div>
-    </div>
-  </Modal>
-)}
+          <div className="space-y-4">
+            <div className="text-sm text-gray-700">
+              <div className="font-medium text-gray-900">
+                {editingPlayer.first_name} {editingPlayer.last_name}
+              </div>
+              <div className="text-gray-600">
+                Family: {editingPlayer.family?.primary_contact_name || 'No contact name'}
+              </div>
+              <div className="text-gray-500 text-xs mt-1">
+                Season: {seasons.find(s => s.id === selectedSeason)?.name || 'Unknown'}
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Workbond Status for This Season
+              </label>
+              <textarea
+                className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+                value={editWorkbondStatus}
+                onChange={(e) => setEditWorkbondStatus(e.target.value)}
+                rows={4}
+                placeholder="Enter workbond status details for this season only (e.g., 'Check #1234 received 1/15/2024', 'Exempt - manager', 'Waived - hardship', etc.)"
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                • This status applies only to the selected season<br/>
+                • Leave empty to mark as "Not Received"<br/>
+                • Use "Exempt" for exempt families<br/>
+                • The system will auto-detect "Exempt" or "Received" based on text
+              </p>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowWorkbondEditModal(false);
+                  setEditingPlayer(null);
+                }}
+                className="px-4 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-50"
+                disabled={savingWorkbond}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveWorkbondChange}
+                className="px-4 py-2 text-sm text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50"
+                disabled={savingWorkbond}
+              >
+                {savingWorkbond ? 'Saving...' : 'Save'}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 };

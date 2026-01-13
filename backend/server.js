@@ -50,6 +50,7 @@ const dashboardRoutes = require('./routes/dashboard');
 const workbondRoutes = require('./routes/workbond');
 const requestsRoutes = require('./routes/requests');
 const publicCheckWorkbondRoutes = require('./routes/publicCheckWorkbond');
+const familySeasonWorkbondRoutes = require('./routes/familySeasonWorkbond');
 // const workbondImportRoutes = require('./routes/import-shifts');
 //app.use('/api/draft-new', require('./routes/draft-new'));
 app.use('/api/draft', require('./routes/draft-new')); // NEW - use the new code
@@ -74,6 +75,7 @@ app.use('/api/games', gamesRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/workbond', workbondRoutes);
 app.use('/api/requests', requestsRoutes);
+app.use('/api/family-season-workbond', familySeasonWorkbondRoutes);
 app.use('/api/public/checkworkbond', publicCheckWorkbondRoutes);
 app.use('/api/public/workbond-status', publicCheckWorkbondRoutes); // backward compat
 // app.use('/api/workbond', workbondImportRoutes); // enable later if needed
@@ -83,6 +85,40 @@ app.get('/api/health', (req, res) => {
   res.json({
     status: 'Server is running!',
     timestamp: new Date().toISOString(),
+  });
+});
+
+// In your server.js or app.js
+const WebSocket = require('ws');
+
+// Add WebSocket server if not already present
+const wss = new WebSocket.Server({ port: 8080 });
+
+wss.on('connection', (ws) => {
+  console.log('Client connected');
+  
+  ws.on('message', async (message) => {
+    try {
+      const data = JSON.parse(message);
+      
+      if (data.type === 'start-exemption-check' && data.season_id) {
+        // Start exemption check with progress reporting
+        await workbondExemptService.startExemptionCheckJob(data.season_id, {
+          emit: (event, data) => {
+            ws.send(JSON.stringify({ event, data }));
+          }
+        });
+        
+        ws.send(JSON.stringify({ event: 'complete', data: { success: true } }));
+      }
+    } catch (error) {
+      console.error('WebSocket error:', error);
+      ws.send(JSON.stringify({ event: 'error', data: { error: error.message } }));
+    }
+  });
+  
+  ws.on('close', () => {
+    console.log('Client disconnected');
   });
 });
 

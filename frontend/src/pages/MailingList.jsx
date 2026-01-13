@@ -117,58 +117,177 @@ export default function MailingList() {
     };
   }, [selectedSeasonId]);
 
-  // -------------------- LOAD DATA FOR SEASON/DIVISION --------------------
-  useEffect(() => {
-    if (!selectedSeasonId) return;
-    let mounted = true;
-    const requestKey = `${selectedSeasonId}`;
-    (async () => {
-      try {
-        setLoading(true);
-        setError('');
+// Update the season dropdown handler to properly reset
+const handleSeasonChange = (seasonId) => {
+  // Clear all data immediately
+  setPlayers([]);
+  setVolunteers([]);
+  setWorkbondSummary([]);
+  setSelectedDivisionId('all');
+  setSelectedSeasonId(seasonId);
+  setLoading(true);
+};
 
-        const params = {
+// -------------------- LOAD DATA FOR SEASON/DIVISION --------------------
+useEffect(() => {
+  if (!selectedSeasonId) return;
+  
+  let mounted = true;
+  
+  (async () => {
+    try {
+      console.log(`=== LOADING DATA FOR SEASON ${selectedSeasonId} ===`);
+      setLoading(true);
+      setError('');
+      
+      // Clear data
+      setPlayers([]);
+      setVolunteers([]);
+      setWorkbondSummary([]);
+      
+      // 1. Fetch players
+      console.log('Fetching players...');
+      const playersRes = await axios.get('/api/players', {
+        params: { season_id: selectedSeasonId }
+      });
+      
+      if (!mounted) return;
+      
+      const allPlayers = Array.isArray(playersRes.data) ? playersRes.data : [];
+      const activePlayers = allPlayers.filter(p => 
+        String(p.status || '').toLowerCase() !== 'withdrawn'
+      );
+      
+      console.log(`Found ${activePlayers.length} active players`);
+      
+      if (activePlayers.length === 0) {
+        setLoading(false);
+        return;
+      }
+      
+      // 2. Get family IDs
+      const activeFamilyIds = [...new Set(activePlayers.map(p => p.family_id).filter(Boolean))];
+      console.log(`Found ${activeFamilyIds.length} unique family IDs`);
+      
+      // 3. Fetch all other data in parallel
+      console.log('Fetching parallel data...');
+      const [volunteersRes, workbondRes, workbondBatchRes] = await Promise.allSettled([
+        axios.get('/api/volunteers', { params: { season_id: selectedSeasonId } }),
+        axios.get('/api/workbond/summary', { params: { season_id: selectedSeasonId } }),
+        axios.post('/api/family-season-workbond/batch', {
           season_id: selectedSeasonId,
+          family_ids: activeFamilyIds
+        })
+      ]);
+      
+      if (!mounted) return;
+      
+      // 4. Process workbond data
+      const familyWorkbondMap = new Map();
+      
+      if (workbondBatchRes.status === 'fulfilled' && 
+          workbondBatchRes.value.data && 
+          Array.isArray(workbondBatchRes.value.data)) {
+        
+        console.log(`Got ${workbondBatchRes.value.data.length} season workbond records`);
+        
+        workbondBatchRes.value.data.forEach(record => {
+          if (record.family_id) {
+            familyWorkbondMap.set(record.family_id, {
+              received: record.received || false,
+              notes: record.notes || '',
+              isExempt: record.notes?.toLowerCase().includes('exempt') || false
+            });
+          }
+        });
+      }
+      
+      // 5. Enhance players
+      const enhancedPlayers = activePlayers.map(player => {
+        const familyId = player.family_id;
+        const seasonWorkbond = familyWorkbondMap.get(familyId);
+        
+        const enhancedFamily = player.family ? { ...player.family } : {};
+        
+        if (seasonWorkbond) {
+          enhancedFamily.work_bond_check_received = seasonWorkbond.received;
+          enhancedFamily.work_bond_check_status = seasonWorkbond.notes;
+          enhancedFamily.is_exempt = seasonWorkbond.isExempt;
+        } else {
+          // No season-specific record
+          enhancedFamily.work_bond_check_received = false;
+          enhancedFamily.work_bond_check_status = '';
+          enhancedFamily.is_exempt = false;
+        }
+        
+        return {
+          ...player,
+          family: enhancedFamily
         };
-
-        const [playersRes, volunteersRes, workbondRes] = await Promise.all([
-          axios.get('/api/players', { params }),
-          axios.get('/api/volunteers', { params: { season_id: selectedSeasonId } }),
-          axios.get('/api/workbond/summary', { params: { season_id: selectedSeasonId } }),
-        ]);
-
-        if (!mounted) return;
-        // Guard against stale responses (rare but can happen on fast switching)
-        if (requestKey !== `${selectedSeasonId}`) return;
-
-        // Filter out withdrawn players from the mailing list
-        const allPlayers = Array.isArray(playersRes.data) ? playersRes.data : [];
-        const activePlayers = allPlayers.filter(player => 
-          String(player.status || '').toLowerCase() !== 'withdrawn'
+      });
+      
+      // 6. Set state
+      if (mounted) {
+        setPlayers(enhancedPlayers);
+        setVolunteers(
+          volunteersRes.status === 'fulfilled' && Array.isArray(volunteersRes.value.data) 
+            ? volunteersRes.value.data 
+            : []
+        );
+        setWorkbondSummary(
+          workbondRes.status === 'fulfilled' && Array.isArray(workbondRes.value.data)
+            ? workbondRes.value.data
+            : []
         );
         
-        // Log withdrawn count for debugging
-        const withdrawnCount = allPlayers.length - activePlayers.length;
-        if (withdrawnCount > 0) {
-          console.log(`Excluded ${withdrawnCount} withdrawn players from mailing list`);
-        }
-
-        setPlayers(activePlayers);
-        setVolunteers(Array.isArray(volunteersRes.data) ? volunteersRes.data : []);
-        setWorkbondSummary(Array.isArray(workbondRes.data) ? workbondRes.data : []);
-      } catch (e) {
-        console.error('Error loading mailing list data:', e);
-        if (!mounted) return;
-        setError('Failed to load mailing list data');
-      } finally {
-        if (mounted) setLoading(false);
+        console.log(`=== DATA LOADED FOR SEASON ${selectedSeasonId} ===`);
+        console.log(`Players: ${enhancedPlayers.length}`);
+        console.log(`Volunteers: ${volunteersRes.status === 'fulfilled' ? volunteersRes.value.data?.length || 0 : 0}`);
+        console.log(`Workbond Summary: ${workbondRes.status === 'fulfilled' ? workbondRes.value.data?.length || 0 : 0}`);
       }
-    })();
+      
+    } catch (error) {
+      console.error('Error loading mailing list data:', error);
+      if (mounted) {
+        setError(`Failed to load data: ${error.message}`);
+      }
+    } finally {
+      if (mounted) {
+        setLoading(false);
+      }
+    }
+  })();
+  
+  return () => {
+    mounted = false;
+  };
+}, [selectedSeasonId]);
 
-    return () => {
-      mounted = false;
-    };
-  }, [selectedSeasonId, selectedDivisionId]);
+const debugData = () => {
+  console.log('=== DEBUG DATA ===');
+  console.log('Selected Season ID:', selectedSeasonId);
+  console.log('Total Players:', players.length);
+  
+  // Sample first 5 players with workbond info
+  players.slice(0, 5).forEach((p, i) => {
+    console.log(`Player ${i+1}:`, {
+      name: `${p.first_name} ${p.last_name}`,
+      season_id: p.season_id,
+      family_id: p.family_id,
+      workbond_received: p.family?.work_bond_check_received,
+      workbond_status: p.family?.work_bond_check_status,
+      is_exempt: p.family?.is_exempt
+    });
+  });
+  
+  // Check workbond sources
+  const withSeasonWorkbond = players.filter(p => 
+    p.family?.work_bond_check_status && 
+    !p.family?.work_bond_check_status.includes('Legacy')
+  ).length;
+  
+  console.log(`Players with season-specific workbond: ${withSeasonWorkbond}/${players.length}`);
+};
 
   // -------------------- DERIVED: FAMILY IDS PARTICIPATING IN FILTER --------------------
   const filteredFamilyIds = useMemo(() => {
@@ -322,103 +441,116 @@ export default function MailingList() {
     return map;
   }, [volunteers, filteredFamilyIds]);
 
-  // -------------------- TAB 1: GUARDIANS --------------------
-  const guardianRows = useMemo(() => {
-    const rows = [];
-    const seen = new Set();
+// -------------------- TAB 1: GUARDIANS --------------------
+const guardianRows = useMemo(() => {
+  const rows = [];
+  const seen = new Set();
 
-    for (const p of players) {
-      // Double-check: skip withdrawn players
-      if (String(p.status || '').toLowerCase() === 'withdrawn') continue;
-      
-      const fam = p.family;
-      if (!fam?.id) continue;
-      const famId = String(fam.id);
-      if (!filteredFamilyIds.has(famId)) continue;
+  for (const p of players) {
+    // DOUBLE CHECK: Ensure player belongs to selected season
+    if (String(p.season_id) !== String(selectedSeasonId)) {
+      console.warn(`Player ${p.id} has season_id ${p.season_id}, expected ${selectedSeasonId}`);
+      continue;
+    }
+    
+    if (String(p.status || '').toLowerCase() === 'withdrawn') continue;
+    
+    const fam = p.family;
+    if (!fam?.id) continue;
+    
+    const famId = String(fam.id); // ADD THIS LINE - was missing!
+    
+    // Division filter
+    if (selectedDivisionId !== 'all' && !familyMatchesSelectedDivision(famId)) continue;
 
-      // ✅ Division filter by program_title (matches what we display)
-      if (selectedDivisionId !== 'all' && !familyMatchesSelectedDivision(famId)) continue;
+    const famVols = volunteerRolesByFamily.get(famId) || [];
+    const assignedRoles = Array.from(
+      new Set(
+        famVols
+          .map((v) => v?.role)
+          .filter((r) => ['Manager', 'Assistant Coach', 'Team Parent'].includes(r))
+      )
+    );
 
-      const famVols = volunteerRolesByFamily.get(famId) || [];
-      const assignedRoles = Array.from(
-        new Set(
-          famVols
-            .map((v) => v?.role)
-            .filter((r) => ['Manager', 'Assistant Coach', 'Team Parent'].includes(r))
-        )
-      );
-
-      // Role filter (if set)
-      if (
-        selectedVolunteerRole !== 'All Roles' &&
-        !assignedRoles.includes(selectedVolunteerRole)
-      ) {
-        continue;
-      }
-
-      const checkReceived = !!fam.work_bond_check_received;
-      if (selectedWorkbondCheck === 'Received' && !checkReceived) continue;
-      if (selectedWorkbondCheck === 'Not Received' && checkReceived) continue;
-
-      const guardians = [
-        {
-          label: 'Primary',
-          name: fam.primary_contact_name,
-          email: fam.primary_contact_email,
-        },
-        {
-          label: 'Parent 2',
-          name: `${fam.parent2_first_name || ''} ${fam.parent2_last_name || ''}`.trim() || null,
-          email: fam.parent2_email,
-        },
-      ].filter((g) => g.email);
-
-      for (const g of guardians) {
-        const key = `${famId}:${String(g.email).toLowerCase()}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        rows.push({
-          family_id: fam.family_id,
-          family_uuid: famId,
-          guardian_type: g.label,
-          guardian_name: g.name || '',
-          guardian_email: g.email,
-          division: getFamilyDivisionText(famId) || getFamilyDivisionText(fam?.family_id) || '',
-          work_bond_check_received: !!fam.work_bond_check_received,
-          assigned_roles: assignedRoles,
-        });
-      }
+    if (
+      selectedVolunteerRole !== 'All Roles' &&
+      !assignedRoles.includes(selectedVolunteerRole)
+    ) {
+      continue;
     }
 
-    // stable sort by guardian last name, then first name, then email
-    rows.sort((a, b) => {
-      const al = getLastName(a.guardian_name);
-      const bl = getLastName(b.guardian_name);
-      if (al < bl) return -1;
-      if (al > bl) return 1;
+    // UPDATED: Get workbond status from enhanced family object
+    const checkReceived = !!fam.work_bond_check_received;
+    const isExempt = fam.is_exempt || fam.work_bond_check_status?.includes('Exempt');
+    
+    // Apply workbond filter
+    if (selectedWorkbondCheck === 'Received' && !checkReceived && !isExempt) continue;
+    if (selectedWorkbondCheck === 'Not Received' && (checkReceived || isExempt)) continue;
 
-      const an = String(a.guardian_name || '').toLowerCase();
-      const bn = String(b.guardian_name || '').toLowerCase();
-      if (an < bn) return -1;
-      if (an > bn) return 1;
+    const guardians = [
+      {
+        label: 'Primary',
+        name: fam.primary_contact_name,
+        email: fam.primary_contact_email,
+		phone: fam.primary_contact_phone,
+      },
+      {
+        label: 'Parent 2',
+        name: `${fam.parent2_first_name || ''} ${fam.parent2_last_name || ''}`.trim() || null,
+        email: fam.parent2_email,
+		phone: fam.parent2_phone,
+      },
+    ].filter((g) => g.email);
 
-      return String(a.guardian_email || '')
-        .toLowerCase()
-        .localeCompare(String(b.guardian_email || '').toLowerCase());
-    });
+    for (const g of guardians) {
+      const key = `${famId}:${String(g.email).toLowerCase()}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      rows.push({
+        family_id: fam.family_id,
+        family_uuid: famId,
+        guardian_type: g.label,
+        guardian_name: g.name || '',
+        guardian_email: g.email,
+		guardian_phone: g.phone,
+        division: getFamilyDivisionText(famId) || getFamilyDivisionText(fam?.family_id) || '',
+        work_bond_check_received: checkReceived,
+        work_bond_check_status: fam.work_bond_check_status || '',
+        is_exempt: isExempt,
+        assigned_roles: assignedRoles,
+      });
+    }
+  }
 
-    return rows;
-  }, [
-    players,
-    filteredFamilyIds,
-    volunteerRolesByFamily,
-    selectedVolunteerRole,
-    selectedWorkbondCheck,
-    selectedDivisionId,
-    familyProgramTitlesById,
-    selectedDivisionName,
-    familyDivisionsById,
-  ]);
+  // stable sort by guardian last name, then first name, then email
+  rows.sort((a, b) => {
+    const al = getLastName(a.guardian_name);
+    const bl = getLastName(b.guardian_name);
+    if (al < bl) return -1;
+    if (al > bl) return 1;
+
+    const an = String(a.guardian_name || '').toLowerCase();
+    const bn = String(b.guardian_name || '').toLowerCase();
+    if (an < bn) return -1;
+    if (an > bn) return 1;
+
+    return String(a.guardian_email || '')
+      .toLowerCase()
+      .localeCompare(String(b.guardian_email || '').toLowerCase());
+  });
+
+  return rows;
+}, [
+  players, 
+  selectedSeasonId, 
+  selectedDivisionId,
+  volunteerRolesByFamily,
+  selectedVolunteerRole,
+  selectedWorkbondCheck,
+  familyMatchesSelectedDivision,
+  getFamilyDivisionText
+]);
+
 
   // -------------------- TAB 2: ASSIGNED VOLUNTEERS --------------------
   const assignedVolunteerRows = useMemo(() => {
@@ -441,6 +573,7 @@ export default function MailingList() {
       .map((v) => ({
         name: v.name,
         email: v.email,
+		phone: v.phone,
         role: v.role,
         team: v.team?.name || '',
         division: v.division?.name || '',
@@ -524,44 +657,108 @@ export default function MailingList() {
     }
   };
 
-  const handleExportCsv = () => {
-    if (activeTab === Tabs.GUARDIANS) {
-      downloadCsv('guardians.csv', [
-        ['Family ID', 'Guardian Type', 'Guardian Name', 'Guardian Email', 'Division', 'Workbond Check', 'Assigned Volunteer Roles'],
-        ...guardianRows.map((r) => [
-          r.family_id,
-          r.guardian_type,
-          r.guardian_name,
-          r.guardian_email,
-          r.division,
-          r.work_bond_check_received ? 'Received' : 'Not Received',
-          (r.assigned_roles || []).join(' | '),
-        ]),
-      ]);
-      return;
-    }
-    if (activeTab === Tabs.ASSIGNED_VOLUNTEERS) {
-      downloadCsv('assigned_volunteers.csv', [
-        ['Role', 'Name', 'Email', 'Team', 'Division'],
-        ...assignedVolunteerRows.map((r) => [r.role, r.name, r.email, r.team, r.division]),
-      ]);
-      return;
-    }
-    if (activeTab === Tabs.WORKBOND_INCOMPLETE) {
-      downloadCsv('workbond_incomplete.csv', [
-        ['Guardians', 'Division', 'Primary Email', 'Parent 2 Email', 'Required', 'Completed', 'Status'],
-        ...workbondIncompleteRows.map((r) => [
-          r.guardians,
-          r.division,
-          r.primary_email,
-          r.parent2_email,
-          r.required,
-          r.completed,
-          r.status,
-        ]),
-      ]);
-    }
-  };
+const handleExportCsv = () => {
+  if (activeTab === Tabs.GUARDIANS) {
+    downloadCsv('guardians.csv', [
+      [
+        //'Family ID', 
+        'Guardian Type', 
+        'Guardian Name', 
+        'Guardian Email', 
+		'Guardian Phone',
+        'Division', 
+        'Workbond Status', 
+        'Workbond Details', 
+        'Is Exempt', 
+        'Assigned Volunteer Roles',
+        //'Family UUID',
+        'Player Count'
+      ],
+      ...guardianRows.map((r) => [
+        //r.family_id || '',
+        r.guardian_type || '',
+        r.guardian_name || '',
+        r.guardian_email || '',
+		r.guardian_phone || '',
+        r.division || '',
+        // Workbond status - combine received and exempt
+        r.is_exempt 
+          ? 'Exempt' 
+          : (r.work_bond_check_received ? 'Received' : 'Not Received'),
+        r.work_bond_check_status || '',
+        r.is_exempt ? 'Yes' : 'No',
+        (r.assigned_roles || []).join(' | '),
+        //r.family_uuid || '',
+        // Count players in this family (optional)
+        players.filter(p => p.family_id === r.family_uuid).length
+      ]),
+    ]);
+    return;
+  }
+  
+  if (activeTab === Tabs.ASSIGNED_VOLUNTEERS) {
+    downloadCsv('assigned_volunteers.csv', [
+      [
+        'Role', 
+        'Name', 
+        'Email',
+        'Phone',		
+        'Team', 
+        'Division',
+        //'Family ID',
+        //'Is Approved',
+        
+        //'Created Date'
+      ],
+      ...assignedVolunteerRows.map((r) => [
+        r.role || '',
+        r.name || '',
+        r.email || '—',
+		r.phone || '—',
+        r.team || '—',
+        r.division || '—',
+        //r.family_id || '',
+        // These would need to be added to the row data if available
+        '', // is_approved placeholder
+        '', // phone placeholder
+        ''  // created_date placeholder
+      ]),
+    ]);
+    return;
+  }
+  
+  if (activeTab === Tabs.WORKBOND_INCOMPLETE) {
+    downloadCsv('workbond_incomplete.csv', [
+      [
+        'Family ID',
+        'Guardians', 
+        'Division', 
+        'Primary Email', 
+        'Parent 2 Email', 
+        'Required Shifts', 
+        'Completed Shifts', 
+        'Remaining Shifts',
+        'Status',
+        'Is Exempt',
+        'Exempt Reason'
+      ],
+      ...workbondIncompleteRows.map((r) => [
+        r.family_id || '',
+        r.guardians || '—',
+        r.division || '—',
+        r.primary_email || '—',
+        r.parent2_email || '—',
+        r.required || '0',
+        r.completed || '0',
+        Math.max(0, (parseInt(r.required) || 0) - (parseInt(r.completed) || 0)),
+        r.status || 'INCOMPLETE',
+        // These would need to be added to workbondIncompleteRows
+        '', // is_exempt placeholder
+        ''  // exempt_reason placeholder
+      ]),
+    ]);
+  }
+};
 
   // -------------------- UI --------------------
   const seasonOptions = seasons || [];
@@ -599,6 +796,36 @@ export default function MailingList() {
             <Download className="h-4 w-4 mr-2" />
             Export CSV
           </button>
+		  
+<button
+  onClick={() => {
+    console.log('=== DEBUG STATE ===');
+    console.log('Selected Season:', selectedSeasonId);
+    console.log('Players count:', players.length);
+    console.log('Players data:', players);
+    console.log('Volunteers count:', volunteers.length);
+    console.log('Workbond Summary count:', workbondSummary.length);
+    
+    // Test the API endpoints
+    console.log('Testing API endpoints...');
+    
+    // Test players endpoint
+    axios.get('/api/players', { params: { season_id: selectedSeasonId } })
+      .then(res => console.log('Players API response:', res.data?.length || 0, 'players'))
+      .catch(err => console.error('Players API error:', err));
+    
+    // Test workbond batch endpoint
+    axios.post('/api/family-season-workbond/batch', {
+      season_id: selectedSeasonId,
+      family_ids: players.map(p => p.family_id).filter(Boolean).slice(0, 10)
+    })
+      .then(res => console.log('Workbond batch response:', res.data))
+      .catch(err => console.error('Workbond batch error:', err));
+  }}
+  className="inline-flex items-center px-3 py-2 rounded-lg bg-yellow-100 border border-yellow-300 text-sm text-yellow-800 hover:bg-yellow-200"
+>
+  Debug API
+</button>
         </div>
       </div>
 
@@ -611,33 +838,36 @@ export default function MailingList() {
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">Season</label>
             <select
-              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-              value={selectedSeasonId || ''}
-              onChange={(e) => setSelectedSeasonId(e.target.value)}
-            >
-              {seasonOptions.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name} {s.is_active ? '(Active)' : ''}
-                </option>
-              ))}
-            </select>
+  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+  value={selectedSeasonId || ''}
+  onChange={(e) => handleSeasonChange(e.target.value)}
+>
+  {seasonOptions.map((s) => (
+    <option key={s.id} value={s.id}>
+      {s.name} {s.is_active ? '(Active)' : ''}
+    </option>
+  ))}
+</select>
           </div>
 
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">Division</label>
             <select
-              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-              value={selectedDivisionId}
-              onChange={(e) => setSelectedDivisionId(e.target.value)}
-              disabled={!selectedSeasonId}
-            >
-              <option value="all">All Divisions</option>
-              {divisionOptions.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.name}
-                </option>
-              ))}
-            </select>
+  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+  value={selectedDivisionId}
+  onChange={(e) => {
+    setSelectedDivisionId(e.target.value);
+    // Reset page state if needed
+  }}
+  disabled={!selectedSeasonId || loading}
+>
+  <option value="all">All Divisions</option>
+  {divisionOptions.map((d) => (
+    <option key={d.id} value={d.id}>
+      {d.name}
+    </option>
+  ))}
+</select>
           </div>
 
           <div>
@@ -743,16 +973,25 @@ export default function MailingList() {
                             </td>
                             <td className="px-4 py-3 text-gray-900">{r.guardian_email}</td>
                             <td className="px-4 py-3">
-                              <span
-                                className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-                                  r.work_bond_check_received
-                                    ? 'bg-green-100 text-green-800'
-                                    : 'bg-yellow-100 text-yellow-800'
-                                }`}
-                              >
-                                {r.work_bond_check_received ? 'Received' : 'Not Received'}
-                              </span>
-                            </td>
+  <div className="space-y-1">
+    <span
+      className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+        r.is_exempt
+          ? 'bg-purple-100 text-purple-800'
+          : r.work_bond_check_received
+          ? 'bg-green-100 text-green-800'
+          : 'bg-yellow-100 text-yellow-800'
+      }`}
+    >
+      {r.is_exempt ? 'Exempt' : r.work_bond_check_received ? 'Received' : 'Not Received'}
+    </span>
+    {r.work_bond_check_status && !r.is_exempt && (
+      <div className="text-xs text-gray-500 truncate max-w-xs">
+        {r.work_bond_check_status}
+      </div>
+    )}
+  </div>
+</td>
                             <td className="px-4 py-3 text-gray-700">
                               {(r.assigned_roles || []).length ? (r.assigned_roles || []).join(', ') : '—'}
                             </td>

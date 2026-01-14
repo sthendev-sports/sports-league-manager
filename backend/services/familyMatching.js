@@ -40,18 +40,20 @@ class FamilyMatchingService {
     }
     
     // 5. Fuzzy matching by last name and address (if available)
-    if (playerData.parent1_lastname && playerData.address_line_1) {
-      const { data: families, error } = await supabase
-        .from('families')
-        .select('*')
-        .ilike('primary_contact_name', `%${playerData.parent1_lastname}%`)
-        .ilike('address_line_1', `%${playerData.address_line_1}%`);
-      
-      if (families && families.length > 0 && !error) {
-        console.log(`Found existing family using fuzzy matching: ${playerData.parent1_lastname}, ${playerData.address_line_1}`);
-        return families[0]; // Return the first match
-      }
-    }
+// UPDATED: Use player_street for fuzzy matching if available
+const addressForMatching = playerData.player_street || playerData.address_line_1;
+if (playerData.parent1_lastname && addressForMatching) {
+  const { data: families, error } = await supabase
+    .from('families')
+    .select('*')
+    .ilike('primary_contact_name', `%${playerData.parent1_lastname}%`)
+    .ilike('address_line_1', `%${addressForMatching}%`);
+  
+  if (families && families.length > 0 && !error) {
+    console.log(`Found existing family using fuzzy matching: ${playerData.parent1_lastname}, ${addressForMatching}`);
+    return families[0]; // Return the first match
+  }
+}
     
     return null;
   }
@@ -199,17 +201,18 @@ class FamilyMatchingService {
     if (p2Phone) updates.parent2_phone = p2Phone;
 
     // Address fields (optional)
-    const addr1 = (playerData.address_line_1 || '').toString().trim();
-    const addr2 = (playerData.address_line_2 || '').toString().trim();
-    const city = (playerData.city || '').toString().trim();
-    const state = (playerData.state || '').toString().trim();
-    const zip = (playerData.zip_code || '').toString().trim();
+// UPDATED: Use player address columns first, then fall back to existing address columns
+const addr1 = (playerData.player_street || playerData.address_line_1 || '').toString().trim();
+const addr2 = (playerData.address_line_2 || '').toString().trim();
+const city = (playerData.player_city || playerData.city || '').toString().trim();
+const state = (playerData.player_state || playerData.state || '').toString().trim();
+const zip = (playerData.player_postal_code || playerData.zip_code || '').toString().trim();
 
-    if (addr1) updates.address_line_1 = addr1;
-    if (addr2) updates.address_line_2 = addr2;
-    if (city) updates.city = city;
-    if (state) updates.state = state;
-    if (zip) updates.zip_code = zip;
+if (addr1) updates.address_line_1 = addr1;
+if (addr2) updates.address_line_2 = addr2;
+if (city) updates.city = city;
+if (state) updates.state = state;
+if (zip) updates.zip_code = zip;
 
     // SIMPLE RULE: Always set workbond based on import file
     if (playerData.workbond_check_status !== undefined) {

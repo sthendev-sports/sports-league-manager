@@ -513,23 +513,25 @@ router.post('/import', jsonParser, async (req, res) => {
             // Create all NEW players for this family
             for (const { index, playerData } of familyPlayers) {
               const playerRecord = {
-                family_id: family.id,
-                season_id: season_id,
-                division_id: resolveDivisionId(playerData.program_title),
-                registration_no: playerData.registration_no,
-                first_name: playerData.first_name,
-                last_name: playerData.last_name,
-                birth_date: parseDate(playerData.birth_date),
-                gender: playerData.gender,
-                medical_conditions: playerData.medical_conditions,
-                is_new_player: parseBoolean(playerData.new_or_returning === 'New'),
-                is_returning: parseBoolean(playerData.new_or_returning === 'Returning'),
-                is_travel_player: parseBoolean(playerData.travel_player),
-                uniform_shirt_size: playerData.uniform_shirt_size,
-                uniform_pants_size: playerData.uniform_pants_size,
-                program_title: playerData.program_title,
-                payment_received: parsePaymentStatus(playerData.payment_status),
-              };
+  family_id: family.id,
+  season_id: season_id,
+  division_id: resolveDivisionId(playerData.program_title),
+  registration_no: playerData.registration_no,
+  first_name: playerData.first_name,
+  last_name: playerData.last_name,
+  birth_date: parseDate(playerData.birth_date),
+  gender: playerData.gender,
+  medical_conditions: playerData.medical_conditions,
+  is_new_player: parseBoolean(playerData.new_or_returning === 'New'),
+  is_returning: parseBoolean(playerData.new_or_returning === 'Returning'),
+  is_travel_player: parseBoolean(playerData.travel_player),
+  uniform_shirt_size: playerData.uniform_shirt_size,
+  uniform_pants_size: playerData.uniform_pants_size,
+  program_title: playerData.program_title,
+  payment_received: parsePaymentStatus(playerData.payment_status),
+  // NEW: Add registration_date from order_date
+  registration_date: parseRegistrationDate(playerData.order_date) || new Date().toISOString(), // Fallback to current date
+};
 
               processedPlayers.push(playerRecord);
               newPlayers.push(playerRecord);
@@ -670,6 +672,119 @@ function findExistingPlayer(existingPlayers, playerData, seasonId) {
   return null;
 }
 
+// NEW: Helper function to parse registration date from order_date
+function parseRegistrationDate(orderDateString) {
+  if (!orderDateString) return null;
+  
+  const cleanDateString = String(orderDateString).trim();
+  
+  // If empty, return null (don't update)
+  if (!cleanDateString) {
+    return null;
+  }
+  
+  // Try to parse various date formats
+  try {
+    // Handle ISO string (already includes time)
+    if (cleanDateString.includes('T')) {
+      return new Date(cleanDateString).toISOString();
+    }
+    
+    // Handle MM/DD/YYYY HH:mm format (like "1/5/2026 19:35")
+    if (cleanDateString.includes('/') && cleanDateString.includes(':')) {
+      // Split date and time
+      const [datePart, timePart] = cleanDateString.split(' ');
+      const [month, day, year] = datePart.split('/');
+      
+      if (month && day && year && timePart) {
+        const paddedMonth = month.padStart(2, '0');
+        const paddedDay = day.padStart(2, '0');
+        
+        // Parse time (handle both HH:mm and HH:mm:ss)
+        let hours, minutes;
+        if (timePart.includes(':')) {
+          const [h, m] = timePart.split(':');
+          hours = parseInt(h, 10);
+          minutes = parseInt(m, 10);
+        } else {
+          // If no colon, assume it's just hours
+          hours = parseInt(timePart, 10);
+          minutes = 0;
+        }
+        
+        // Create date with time
+        const date = new Date(Date.UTC(
+          parseInt(year, 10),
+          parseInt(paddedMonth, 10) - 1, // Month is 0-indexed
+          parseInt(paddedDay, 10),
+          hours,
+          minutes,
+          0 // Seconds
+        ));
+        
+        if (!isNaN(date.getTime())) {
+          return date.toISOString();
+        }
+      }
+    }
+    
+    // Handle MM/DD/YYYY format (without time)
+    if (cleanDateString.includes('/')) {
+      const parts = cleanDateString.split('/');
+      if (parts.length === 3) {
+        const month = parts[0].padStart(2, '0');
+        const day = parts[1].padStart(2, '0');
+        const year = parts[2];
+        
+        // Create date at noon UTC to avoid timezone issues
+        const date = new Date(Date.UTC(
+          parseInt(year, 10),
+          parseInt(month, 10) - 1, // Month is 0-indexed
+          parseInt(day, 10),
+          12, // Noon UTC
+          0,  // Minutes
+          0   // Seconds
+        ));
+        
+        if (!isNaN(date.getTime())) {
+          return date.toISOString();
+        }
+      }
+    }
+    
+    // Handle YYYY-MM-DD format (without time)
+    if (cleanDateString.match(/^\d{4}-\d{2}-\d{2}$/)) {
+      // Create date at noon UTC to avoid timezone issues
+      const [year, month, day] = cleanDateString.split('-');
+      const date = new Date(Date.UTC(
+        parseInt(year, 10),
+        parseInt(month, 10) - 1, // Month is 0-indexed
+        parseInt(day, 10),
+        12, // Noon UTC
+        0,  // Minutes
+        0   // Seconds
+      ));
+      
+      if (!isNaN(date.getTime())) {
+        return date.toISOString();
+      }
+    }
+    
+    // Try to parse as a date object directly
+    const parsedDate = new Date(cleanDateString);
+    if (!isNaN(parsedDate.getTime())) {
+      return parsedDate.toISOString();
+    }
+    
+    console.warn('Could not parse date string:', cleanDateString);
+    return null;
+    
+  } catch (error) {
+    console.warn('Error parsing registration date:', error, 'value:', cleanDateString);
+    return null;
+  }
+}
+
 // NEW: Helper function to update existing player
 async function updateExistingPlayer(existingPlayer, newPlayerData, resolveDivisionId) {
   const updates = {};
@@ -683,6 +798,18 @@ async function updateExistingPlayer(existingPlayer, newPlayerData, resolveDivisi
     const parsedBirthDate = parseDate(newPlayerData.birth_date);
     if (parsedBirthDate && parsedBirthDate !== existingPlayer.birth_date) {
       updates.birth_date = parsedBirthDate;
+    }
+  }
+  
+  // NEW: Handle registration_date from order_date
+  if (newPlayerData.order_date) {
+    const parsedRegistrationDate = parseRegistrationDate(newPlayerData.order_date);
+    // Compare ISO strings to check if dates are different
+    const existingRegistrationDate = existingPlayer.registration_date ? new Date(existingPlayer.registration_date).toISOString() : null;
+    
+    if (parsedRegistrationDate && parsedRegistrationDate !== existingRegistrationDate) {
+      updates.registration_date = parsedRegistrationDate;
+      console.log(`Updating registration_date for ${existingPlayer.first_name} ${existingPlayer.last_name} from order_date: ${newPlayerData.order_date}`);
     }
   }
   
@@ -817,11 +944,12 @@ async function createNewFamily(playerData, familyId) {
     parent2_last_name: playerData.parent2_lastname,
     parent2_email: playerData.parent2_email,
     parent2_phone: playerData.parent2_phone1,
-    address_line_1: playerData.address_line_1,
-    address_line_2: playerData.address_line_2,
-    city: playerData.city,
-    state: playerData.state,
-    zip_code: playerData.zip_code,
+    // UPDATED: Map new player address columns to family address columns
+    address_line_1: playerData.player_street || playerData.address_line_1,
+    address_line_2: playerData.address_line_2, // Keep existing if available
+    city: playerData.player_city || playerData.city,
+    state: playerData.player_state || playerData.state,
+    zip_code: playerData.player_postal_code || playerData.zip_code,
     // IMPORTANT: Only set work_bond_check_received if explicitly provided
     work_bond_check_received: parseWorkbondStatus(playerData.workbond_check_status)
   };

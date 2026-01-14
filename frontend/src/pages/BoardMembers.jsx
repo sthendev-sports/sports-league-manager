@@ -445,7 +445,8 @@ const result = response.data;
 
       {/* Board Members Table */}
       <div className="bg-white shadow overflow-hidden rounded-lg">
-        <table className="min-w-full divide-y divide-gray-200">
+  <div className="overflow-x-auto"> {/* ADD THIS DIV FOR HORIZONTAL SCROLLING */}
+    <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -593,6 +594,7 @@ const result = response.data;
           </div>
         )}
       </div>
+	   </div>
 
       {/* Board Member Form Modal */}
       <Modal

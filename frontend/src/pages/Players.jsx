@@ -1108,31 +1108,33 @@ const Players = () => {
             <p className="text-gray-600 mt-1">Manage player registrations and information</p>
           </div>
           <div className="flex flex-col sm:flex-row gap-3">
-            <CSVTemplate />
-            <CSVImport 
-              onImport={handleImportPlayers}
-              importType="players"
-              seasons={seasons}
-            />
-            <button className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700">
-              <Plus className="h-4 w-4 mr-2" />
-              Add Player
-            </button>
-            {/* Debug buttons */}
-            <button 
-              onClick={debugVolunteerData}
-              className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
-            >
-              Debug Volunteers
-            </button>
-            <button 
-              onClick={() => setShowFamilyLinker(true)}
-              className="inline-flex items-center px-4 py-2 border border-yellow-300 rounded-md shadow-sm text-sm font-medium text-yellow-700 bg-yellow-50 hover:bg-yellow-100"
-            >
-              <Link className="h-4 w-4 mr-2" />
-              Fix Family Links
-            </button>
-          </div>
+  <CSVTemplate />
+  <CSVImport 
+    onImport={handleImportPlayers}
+    importType="players"
+    seasons={seasons}
+  />
+  {/* Add Player button commented out for future implementation
+  <button className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700">
+    <Plus className="h-4 w-4 mr-2" />
+    Add Player
+  </button>
+  */}
+  {/* Debug buttons */}
+  <button 
+    onClick={debugVolunteerData}
+    className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+  >
+    Debug Volunteers
+  </button>
+  <button 
+    onClick={() => setShowFamilyLinker(true)}
+    className="inline-flex items-center px-4 py-2 border border-yellow-300 rounded-md shadow-sm text-sm font-medium text-yellow-700 bg-yellow-50 hover:bg-yellow-100"
+  >
+    <Link className="h-4 w-4 mr-2" />
+    Fix Family Links
+  </button>
+</div>
         </div>
       </div>
 

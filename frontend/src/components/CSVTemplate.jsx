@@ -29,7 +29,7 @@ const CSVTemplate = ({ templateType = 'players', headers }) => {
   };
 
   const getPlayerTemplate = () => {
-    // Your existing player template logic
+    // Updated headers to include new columns
     const playerHeaders = headers || [
       'registration_no',
       'program_title',
@@ -52,20 +52,43 @@ const CSVTemplate = ({ templateType = 'players', headers }) => {
       'parent2_email',
       'parent2_phone1',
       'payment_status',
-      'workbond_check_status'
+      'workbond_check_status',
+      'order_date',           // NEW: Order Date column
+      'player_street',        // NEW: Player Street column
+      'player_city',          // NEW: Player City column
+      'player_state',         // NEW: Player State column
+      'player_postal_code'    // NEW: Player Postal Code column
     ];
     
+    // Updated sample data with new columns
     const sampleData = [
+      '12345',
+      'Baseball - Majors Division',
       'John',
       'Doe',
       '2015-03-15',
       'Male',
+      'None',
       'true',
+      'New',
       'false',
-      'Baseball - Majors Division',
-      'Jane Doe',
+      'Youth Medium',
+      'Youth Medium',
+      'Jane',
+      'Doe',
       'jane.doe@email.com',
-      '555-123-4567'
+      '555-123-4567',
+      'Bob',
+      'Doe',
+      'bob.doe@email.com',
+      '555-987-6543',
+      'Paid',
+      'Not Received',
+      '2024-01-15',          // NEW: Order Date sample
+      '123 Main St',         // NEW: Player Street sample
+      'Anytown',             // NEW: Player City sample
+      'CA',                  // NEW: Player State sample
+      '12345'                // NEW: Player Postal Code sample
     ];
     
     return [playerHeaders, sampleData].map(row => 

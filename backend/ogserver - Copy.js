@@ -51,7 +51,6 @@ const workbondRoutes = require('./routes/workbond');
 const requestsRoutes = require('./routes/requests');
 const publicCheckWorkbondRoutes = require('./routes/publicCheckWorkbond');
 const familySeasonWorkbondRoutes = require('./routes/familySeasonWorkbond');
-const trainingsRouter = require('./routes/trainings');
 // const workbondImportRoutes = require('./routes/import-shifts');
 //app.use('/api/draft-new', require('./routes/draft-new'));
 app.use('/api/draft', require('./routes/draft-new')); // NEW - use the new code
@@ -67,7 +66,6 @@ app.use('/api', configurationRoutes);      // Handles /api/divisions
 app.use('/api/teams', teamRoutes);         // Handles /api/teams
 app.use('/api/families', familyRoutes);
 app.use('/api/payment-data', paymentDataRoutes);
-app.use('/api/trainings', trainingsRouter);
 app.use('/api/volunteers', volunteerRoutes);
 app.use('/api/volunteer-import', volunteerImportRoutes); // NEW route base
 app.use('/api/board-members', boardMemberRoutes);

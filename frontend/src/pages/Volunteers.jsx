@@ -25,6 +25,8 @@ const Volunteers = () => {
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingVolunteer, setEditingVolunteer] = useState(null);
   const [activeTab, setActiveTab] = useState('manage');
+  const [volunteerTrainings, setVolunteerTrainings] = useState([]);
+const [availableVolunteerTrainings, setAvailableVolunteerTrainings] = useState([]);
   const [newVolunteer, setNewVolunteer] = useState({
     name: '',
     email: '',
@@ -41,6 +43,7 @@ const Volunteers = () => {
 
   useEffect(() => {
     loadInitialData();
+	loadAvailableVolunteerTrainings();
   }, []);
 
   useEffect(() => {
@@ -112,6 +115,18 @@ const Volunteers = () => {
       setVolunteers([]);
     }
   };
+
+const loadAvailableVolunteerTrainings = async () => {
+  try {
+    const response = await fetch('/api/trainings?category=volunteer');
+    if (response.ok) {
+      const data = await response.json();
+      setAvailableVolunteerTrainings(data || []);
+    }
+  } catch (error) {
+    console.error('Error loading volunteer trainings:', error);
+  }
+};
 
   const loadDivisions = async () => {
     try {
@@ -334,17 +349,71 @@ const Volunteers = () => {
     setShowAddForm(false);
   };
 
-  const handleEditVolunteer = (volunteer) => {
-    console.log('Editing volunteer:', volunteer);
-    setEditingVolunteer({
-      ...volunteer,
-      division_id: volunteer.division_id || '',
-      season_id: volunteer.season_id || seasons[0]?.id || '',
-      team_id: volunteer.team_id || '',
-      training_completed: volunteer.training_completed || false
+const handleEditVolunteer = async (volunteer) => {
+  console.log('Editing volunteer:', volunteer);
+  setEditingVolunteer({
+    ...volunteer,
+    division_id: volunteer.division_id || '',
+    season_id: volunteer.season_id || seasons[0]?.id || '',
+    team_id: volunteer.team_id || '',
+    training_completed: volunteer.training_completed || false
+  });
+  
+  // Load volunteer's trainings
+  if (volunteer.id) {
+    try {
+      const response = await fetch(`/api/trainings/volunteer/${volunteer.id}`);
+      if (response.ok) {
+        const data = await response.json();
+        setVolunteerTrainings(data || []);
+      }
+    } catch (error) {
+      console.error('Error loading volunteer trainings:', error);
+    }
+  }
+  
+  setShowAddForm(true);
+};
+
+const handleVolunteerTrainingChange = async (trainingId, completed, date) => {
+  try {
+    const response = await fetch(`/api/trainings/volunteer/${editingVolunteer.id}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        trainings: availableVolunteerTrainings.map(training => {
+          const existing = volunteerTrainings.find(t => t.training_id === training.id);
+          if (training.id === trainingId) {
+            return {
+              training_id: trainingId,
+              completed_date: completed ? (date || new Date().toISOString().split('T')[0]) : null,
+              status: completed ? 'completed' : 'pending'
+            };
+          }
+          return existing ? {
+            training_id: existing.training_id,
+            completed_date: existing.completed_date,
+            status: existing.status
+          } : {
+            training_id: training.id,
+            completed_date: null,
+            status: 'pending'
+          };
+        })
+      })
     });
-    setShowAddForm(true);
-  };
+
+    if (response.ok) {
+      const updatedTrainings = await response.json();
+      setVolunteerTrainings(updatedTrainings);
+    }
+  } catch (error) {
+    console.error('Error updating volunteer training:', error);
+    setError('Failed to update training: ' + error.message);
+  }
+};
 
   const handleDeleteVolunteer = async (volunteerId) => {
     if (!confirm('Are you sure you want to delete this volunteer?')) return;
@@ -858,40 +927,112 @@ const Volunteers = () => {
         </p>
       </div>
 
+{/* Trainings Section */}
 <div>
-        <div style={{ display: 'flex', alignItems: 'center' }}>
-          <input
-            type="checkbox"
-            id="training_completed"
-            checked={editingVolunteer ? editingVolunteer.training_completed : newVolunteer.training_completed}
-            onChange={(e) => editingVolunteer
-              ? setEditingVolunteer(prev => ({ ...prev, training_completed: e.target.checked }))
-              : setNewVolunteer(prev => ({ ...prev, training_completed: e.target.checked }))
-            }
-            style={{
-              height: '16px',
-              width: '16px',
-              color: '#2563eb',
-              borderColor: '#d1d5db',
-              borderRadius: '4px',
-              marginRight: '8px'
-            }}
-          />
-          <label
-            htmlFor="training_completed"
-            style={{
-              fontSize: '14px',
-              fontWeight: '500',
-              color: '#374151'
-            }}
-          >
-            Training Completed
-          </label>
+  <h3 className="text-md font-medium text-gray-900 mb-4">Volunteer Trainings</h3>
+  <div className="space-y-3">
+    {availableVolunteerTrainings.map(training => {
+      const volunteerTraining = volunteerTrainings.find(t => t.training_id === training.id);
+      const isCompleted = volunteerTraining?.status === 'completed';
+      const isExpired = volunteerTraining?.status === 'expired';
+      const completionDate = volunteerTraining?.completed_date;
+      
+      return (
+        <div key={training.id} className="flex items-center justify-between p-3 border border-gray-200 rounded-lg hover:bg-gray-50">
+          <div className="flex-1">
+            <div className="flex items-center">
+              <div className="font-medium text-gray-900">{training.name}</div>
+              {training.is_required && (
+                <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                   *Required 
+                </span>
+              )}
+            </div>
+            {training.description && (
+              <div className="text-sm text-gray-500 mt-1">{training.description}</div>
+            )}
+            {training.expires_in_days && (
+  <div className="text-xs text-gray-400 mt-1">
+    Expires {training.expires_in_days} days after completion
+  </div>
+)}
+{training.expires_on_date && (
+  <div className="text-xs text-gray-400 mt-1">
+    All completions expire on: {training.expires_on_date}
+  </div>
+)}
+            
+            {completionDate && (
+              <div className={`text-xs mt-1 ${isExpired ? 'text-red-600' : 'text-green-600'}`}>
+                {isExpired ? 'Expired: ' : 'Completed: '}{completionDate}
+              </div>
+            )}
+          </div>
+          
+          <div className="flex items-center space-x-2">
+            {isCompleted && !isExpired && (
+              <span className="text-xs text-green-600">✓</span>
+            )}
+            {isExpired && (
+              <span className="text-xs text-red-600">✗</span>
+            )}
+            <input
+              type="checkbox"
+              checked={isCompleted && !isExpired}
+              onChange={(e) => {
+  if (editingVolunteer && editingVolunteer.id) {
+    if (e.target.checked) {
+      // Ask for completion date in MM/DD/YYYY format
+      const today = new Date();
+      const mm = String(today.getMonth() + 1).padStart(2, '0');
+      const dd = String(today.getDate()).padStart(2, '0');
+      const yyyy = today.getFullYear();
+      const defaultDate = `${mm}/${dd}/${yyyy}`;
+      
+      const dateInput = window.prompt(
+        `Enter completion date for "${training.name}" (MM/DD/YYYY):`,
+        defaultDate
+      );
+      
+      if (dateInput !== null) {
+        // Validate date format MM/DD/YYYY
+        const dateRegex = /^(0[1-9]|1[0-2])\/(0[1-9]|[12][0-9]|3[01])\/\d{4}$/;
+        if (!dateRegex.test(dateInput)) {
+          alert('Please enter date in MM/DD/YYYY format (e.g., 01/15/2024)');
+          return;
+        }
+        
+        // Convert MM/DD/YYYY to YYYY-MM-DD for database
+        const [month, day, year] = dateInput.split('/');
+        const dbDate = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+        
+        handleVolunteerTrainingChange(training.id, true, dbDate);
+      }
+    } else {
+      if (window.confirm(`Mark "${training.name}" as not completed?`)) {
+        handleVolunteerTrainingChange(training.id, false);
+      }
+    }
+  } else {
+    alert('Please save the volunteer first before managing trainings');
+  }
+}}
+              className="h-4 w-4 text-blue-600 rounded focus:ring-blue-500"
+              disabled={!editingVolunteer || !editingVolunteer.id}
+              title={!editingVolunteer || !editingVolunteer.id ? "Save volunteer first" : `Mark ${training.name} as completed`}
+            />
+          </div>
         </div>
-        <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px', marginLeft: '24px' }}>
-          Check this box when the volunteer has completed all required training
-        </p>
+      );
+    })}
+    
+    {availableVolunteerTrainings.length === 0 && (
+      <div className="text-center py-4 text-gray-500 border border-gray-200 rounded-lg">
+        No volunteer trainings configured. Add trainings in the Configuration page.
       </div>
+    )}
+  </div>
+</div>
     </form>
   );
 
@@ -1212,21 +1353,35 @@ const Volunteers = () => {
                       <td className="px-6 py-4 text-sm text-gray-900">
                         {volunteer.season?.name || 'N/A'}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="flex items-center">
-                          {volunteer.training_completed ? (
-                            <div className="flex items-center text-green-600">
-                              <CheckCircle className="h-4 w-4 mr-1" />
-                              <span className="text-sm">Completed</span>
-                            </div>
-                          ) : (
-                            <div className="flex items-center text-red-600">
-                              <XCircle className="h-4 w-4 mr-1" />
-                              <span className="text-sm">Pending</span>
-                            </div>
-                          )}
-                        </div>
-                      </td>
+                      <td className="px-6 py-4">
+  <div className="space-y-1">
+    {volunteer.trainings_summary && volunteer.trainings_summary.total > 0 ? (
+      <>
+        <div className="flex items-center">
+          <div className={`inline-flex items-center px-2 py-1 text-xs rounded-full ${
+            volunteer.trainings_summary.all_required_completed 
+              ? 'bg-green-100 text-green-800' 
+              : 'bg-yellow-100 text-yellow-800'
+          }`}>
+            {volunteer.trainings_summary.completed}/{volunteer.trainings_summary.total} trainings
+          </div>
+        </div>
+        {volunteer.trainings_summary.required > 0 && (
+          <div className="text-xs text-gray-600">
+            Required: {volunteer.trainings_summary.completed_required}/{volunteer.trainings_summary.required}
+          </div>
+        )}
+        {volunteer.trainings_summary.expired > 0 && (
+          <div className="text-xs text-red-600">
+            {volunteer.trainings_summary.expired} expired
+          </div>
+        )}
+      </>
+    ) : (
+      <div className="text-xs text-gray-500">No trainings</div>
+    )}
+  </div>
+</td>
                       <td className="px-6 py-4 text-sm text-gray-900">
                         {volunteer.background_check_completed || 'pending'}
                       </td>

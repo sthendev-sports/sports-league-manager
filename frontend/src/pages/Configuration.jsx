@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Edit, Trash2, Save, Users, Settings, Shield, Calendar, Copy, Mail, Phone, Download, Trash } from 'lucide-react';
+import { Plus, Edit, Trash2, Save, Users, Settings, Shield, Calendar, Copy, Mail, Phone, Download, Trash, GraduationCap } from 'lucide-react';
 import Modal from '../components/Modal';
 
 const Configuration = () => {
@@ -21,6 +21,24 @@ const Configuration = () => {
   const [editingTeam, setEditingTeam] = useState(null);
   const [editingDivision, setEditingDivision] = useState(null);
   const [editingSeason, setEditingSeason] = useState(null);
+  
+  // Form trainings
+  const [trainings, setTrainings] = useState([]);
+const [showTrainingForm, setShowTrainingForm] = useState(false);
+const [editingTraining, setEditingTraining] = useState(null);
+const [trainingForm, setTrainingForm] = useState({
+  name: '',
+  description: '',
+  expiration_type: 'none', // 'none', 'days', 'date'
+  expires_in_days: '',
+  expires_on_date: '',
+  category: 'both',
+  is_required: false
+});
+const [clearTrainingForm, setClearTrainingForm] = useState({
+  training_id: '',
+  target_type: 'all'
+});
   
   // Form data
   const [teamForm, setTeamForm] = useState({
@@ -54,11 +72,26 @@ const Configuration = () => {
     loadData();
   }, []);
 
+
+	  // Training
+	  const loadTrainings = async () => {
+  try {
+    const response = await fetch('/api/trainings');
+    if (!response.ok) throw new Error('Trainings API failed');
+    const data = await response.json();
+    setTrainings(Array.isArray(data) ? data : []);
+  } catch (error) {
+    console.error('Error loading trainings:', error);
+    setError(prev => prev ? prev + ' | ' + error.message : 'Failed to load trainings: ' + error.message);
+  }
+};
+
+
   const loadData = async () => {
     try {
       setLoading(true);
       setError(null);
-      
+	  
       const seasonsResponse = await fetch('/api/seasons');
       if (!seasonsResponse.ok) throw new Error('Seasons API failed');
       const seasonsData = await seasonsResponse.json();
@@ -81,6 +114,9 @@ const Configuration = () => {
         setBoardMembers(boardMembersData);
       }
       
+	      // ADD THIS LINE - Load trainings
+    await loadTrainings();
+	  
       // Default the configuration season filter to the ACTIVE season (fallback: first season)
       if (!selectedSeason && seasonsData.length > 0) {
         const active = seasonsData.find(s => s.is_active);
@@ -390,6 +426,230 @@ const handleExportSeason = async (seasonId) => {
     setLoading(false);
   }
 };
+
+
+const handleTrainingSubmit = async (e) => {
+  if (e) e.preventDefault();
+  try {
+    // Prepare expiration data based on type
+    let expirationData = {};
+    if (trainingForm.expiration_type === 'days') {
+      expirationData = {
+        expires_in_days: trainingForm.expires_in_days ? parseInt(trainingForm.expires_in_days) : null,
+        expires_on_date: null
+      };
+    } else if (trainingForm.expiration_type === 'date') {
+      expirationData = {
+        expires_in_days: null,
+        expires_on_date: trainingForm.expires_on_date || null
+      };
+    } else {
+      expirationData = {
+        expires_in_days: null,
+        expires_on_date: null
+      };
+    }
+
+    const trainingData = {
+      name: trainingForm.name,
+      description: trainingForm.description || null,
+      ...expirationData,
+      category: trainingForm.category,
+      is_required: trainingForm.is_required
+    };
+
+    const url = editingTraining ? `/api/trainings/${editingTraining.id}` : '/api/trainings';
+    const method = editingTraining ? 'PUT' : 'POST';
+
+    const response = await fetch(url, {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(trainingData)
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`HTTP ${response.status}: ${errorText}`);
+    }
+    
+    await loadTrainings();
+    resetTrainingForm();
+  } catch (error) {
+    console.error('Error saving training:', error);
+    setError('Failed to save training: ' + error.message);
+  }
+};
+
+const handleEditTraining = (training) => {
+  setEditingTraining(training);
+  
+  // Determine expiration type
+  let expiration_type = 'none';
+  if (training.expires_in_days) expiration_type = 'days';
+  if (training.expires_on_date) expiration_type = 'date';
+  
+  setTrainingForm({
+    name: training.name,
+    description: training.description || '',
+    expiration_type: expiration_type,
+    expires_in_days: training.expires_in_days || '',
+    expires_on_date: training.expires_on_date || '',
+    category: training.category || 'both',
+    is_required: training.is_required || false
+  });
+  setShowTrainingForm(true);
+};
+
+const handleDeleteTraining = async (trainingId) => {
+  if (window.confirm('Are you sure you want to delete this training? This will remove it from all volunteers and board members.')) {
+    try {
+      const response = await fetch(`/api/trainings/${trainingId}`, { method: 'DELETE' });
+      if (!response.ok) throw new Error('Failed to delete training');
+      await loadTrainings();
+    } catch (error) {
+      console.error('Error deleting training:', error);
+      setError('Failed to delete training. ' + error.message);
+    }
+  }
+};
+
+const handleClearTraining = async () => {
+  if (!clearTrainingForm.training_id) {
+    alert('Please select a training to clear');
+    return;
+  }
+
+  const training = trainings.find(t => t.id === clearTrainingForm.training_id);
+  if (!training) return;
+
+  const confirmMessage = `This will remove "${training.name}" training from ALL ${clearTrainingForm.target_type === 'all' ? 'volunteers and board members' : clearTrainingForm.target_type}. Continue?`;
+  
+  if (!window.confirm(confirmMessage)) return;
+
+  try {
+    const response = await fetch('/api/trainings/clear-training', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        training_id: clearTrainingForm.training_id,
+        target_type: clearTrainingForm.target_type
+      })
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`HTTP ${response.status}: ${errorText}`);
+    }
+
+    const result = await response.json();
+    alert(`Successfully cleared training from ${result.cleared_count} records`);
+    setClearTrainingForm({ training_id: '', target_type: 'all' });
+  } catch (error) {
+    console.error('Error clearing training:', error);
+    setError('Failed to clear training: ' + error.message);
+  }
+};
+
+const handleCheckExpirations = async () => {
+  if (!window.confirm('Check and update expired trainings for all volunteers and board members?')) {
+    return;
+  }
+
+  try {
+    const response = await fetch('/api/trainings/check-expirations', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        target_type: 'all'
+      })
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`HTTP ${response.status}: ${errorText}`);
+    }
+
+    alert('Expiration check completed. Expired trainings have been updated.');
+  } catch (error) {
+    console.error('Error checking expirations:', error);
+    setError('Failed to check expirations: ' + error.message);
+  }
+};
+
+const resetTrainingForm = () => {
+  setTrainingForm({
+    name: '',
+    description: '',
+    expiration_type: 'none',
+    expires_in_days: '',
+    expires_on_date: '',
+    category: 'both',
+    is_required: false
+  });
+  setEditingTraining(null);
+  setShowTrainingForm(false);
+};
+
+// Add Training Modal Footer
+const TrainingModalFooter = (
+  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+    <button
+      onClick={resetTrainingForm}
+      style={{
+        padding: '10px 20px',
+        fontSize: '14px',
+        fontWeight: '500',
+        color: '#374151',
+        backgroundColor: 'white',
+        border: '1px solid #d1d5db',
+        borderRadius: '6px',
+        cursor: 'pointer'
+      }}
+      onMouseOver={(e) => e.target.style.backgroundColor = '#f9fafb'}
+      onMouseOut={(e) => e.target.style.backgroundColor = 'white'}
+    >
+      Cancel
+    </button>
+    <button
+      onClick={handleTrainingSubmit}
+      disabled={!trainingForm.name || !trainingForm.category}
+      style={{
+        padding: '10px 20px',
+        fontSize: '14px',
+        fontWeight: '500',
+        color: 'white',
+        backgroundColor: (!trainingForm.name || !trainingForm.category) ? '#9ca3af' : '#2563eb',
+        border: 'none',
+        borderRadius: '6px',
+        cursor: (!trainingForm.name || !trainingForm.category) ? 'not-allowed' : 'pointer',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '8px'
+      }}
+      onMouseOver={(e) => {
+        if (trainingForm.name && trainingForm.category) {
+          e.target.style.backgroundColor = '#1d4ed8';
+        }
+      }}
+      onMouseOut={(e) => {
+        if (trainingForm.name && trainingForm.category) {
+          e.target.style.backgroundColor = '#2563eb';
+        }
+      }}
+    >
+      <Save style={{ width: '16px', height: '16px' }} />
+      {editingTraining ? 'Update Training' : 'Create Training'}
+    </button>
+  </div>
+);
+
+
 
   const handleTeamSubmit = async (e) => {
     if (e) e.preventDefault();
@@ -878,22 +1138,23 @@ const handleExportSeason = async (seasonId) => {
       {/* Tabs */}
       <div className="mb-6 border-b border-gray-200">
         <nav className="-mb-px flex space-x-8">
-          {['seasons', 'teams', 'divisions'].map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className={`whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm capitalize ${
-                activeTab === tab
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
-            >
-              {tab === 'seasons' && <Calendar className="w-4 h-4 inline mr-2" />}
-              {tab === 'teams' && <Users className="w-4 h-4 inline mr-2" />}
-              {tab === 'divisions' && <Shield className="w-4 h-4 inline mr-2" />}
-              {tab}
-            </button>
-          ))}
+          {['seasons', 'teams', 'divisions', 'trainings'].map((tab) => (  // Added 'trainings'
+  <button
+    key={tab}
+    onClick={() => setActiveTab(tab)}
+    className={`whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm capitalize ${
+      activeTab === tab
+        ? 'border-blue-500 text-blue-600'
+        : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+    }`}
+  >
+    {tab === 'seasons' && <Calendar className="w-4 h-4 inline mr-2" />}
+    {tab === 'teams' && <Users className="w-4 h-4 inline mr-2" />}
+    {tab === 'divisions' && <Shield className="w-4 h-4 inline mr-2" />}
+    {tab === 'trainings' && <GraduationCap className="w-4 h-4 inline mr-2" />} {/* Added */}
+    {tab}
+  </button>
+))}
         </nav>
       </div>
 
@@ -1374,6 +1635,233 @@ const handleExportSeason = async (seasonId) => {
           </div>
         </form>
       </Modal>
+{/* Training Modal */}
+<Modal
+  isOpen={showTrainingForm}
+  onClose={resetTrainingForm}
+  title={editingTraining ? 'Edit Training' : 'Add New Training'}
+  footer={TrainingModalFooter}
+>
+  <form onSubmit={handleTrainingSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+    {/* Training Name - KEEP THIS */}
+    <div>
+      <label style={{
+        display: 'block',
+        fontSize: '14px',
+        fontWeight: '500',
+        color: '#374151',
+        marginBottom: '8px'
+      }}>
+        Training Name *
+      </label>
+      <input
+        type="text"
+        required
+        style={{
+          width: '100%',
+          padding: '10px 12px',
+          border: '1px solid #d1d5db',
+          borderRadius: '8px',
+          fontSize: '14px',
+          color: '#374151',
+          backgroundColor: 'white'
+        }}
+        value={trainingForm.name}
+        onChange={(e) => setTrainingForm({ ...trainingForm, name: e.target.value })}
+        placeholder="e.g., Abuse Awareness, Safety Training"
+      />
+    </div>
+    
+    {/* Training Description - KEEP THIS */}
+    <div>
+      <label style={{
+        display: 'block',
+        fontSize: '14px',
+        fontWeight: '500',
+        color: '#374151',
+        marginBottom: '8px'
+      }}>
+        Description
+      </label>
+      <textarea
+        style={{
+          width: '100%',
+          padding: '10px 12px',
+          border: '1px solid #d1d5db',
+          borderRadius: '8px',
+          fontSize: '14px',
+          color: '#374151',
+          backgroundColor: 'white',
+          minHeight: '80px',
+          resize: 'vertical'
+        }}
+        value={trainingForm.description}
+        onChange={(e) => setTrainingForm({ ...trainingForm, description: e.target.value })}
+        placeholder="Describe the training requirements..."
+      />
+    </div>
+    
+    {/* NEW: Expiration Type Section - ADD THIS */}
+    <div>
+      <label style={{
+        display: 'block',
+        fontSize: '14px',
+        fontWeight: '500',
+        color: '#374151',
+        marginBottom: '8px'
+      }}>
+        Expiration Type
+      </label>
+      <div className="space-y-2">
+        <div className="flex items-center">
+          <input
+            type="radio"
+            id="expire_none"
+            name="expiration_type"
+            value="none"
+            checked={trainingForm.expiration_type === 'none'}
+            onChange={(e) => setTrainingForm({ ...trainingForm, expiration_type: e.target.value })}
+            className="h-4 w-4 text-blue-600"
+          />
+          <label htmlFor="expire_none" className="ml-2 text-sm text-gray-700">
+            Never expires
+          </label>
+        </div>
+        
+        <div className="flex items-center">
+          <input
+            type="radio"
+            id="expire_days"
+            name="expiration_type"
+            value="days"
+            checked={trainingForm.expiration_type === 'days'}
+            onChange={(e) => setTrainingForm({ ...trainingForm, expiration_type: e.target.value })}
+            className="h-4 w-4 text-blue-600"
+          />
+          <label htmlFor="expire_days" className="ml-2 text-sm text-gray-700">
+            Expires after X days from completion
+          </label>
+        </div>
+        {trainingForm.expiration_type === 'days' && (
+          <div className="ml-6">
+            <input
+              type="number"
+              min="1"
+              style={{
+                width: '100%',
+                padding: '8px 12px',
+                border: '1px solid #d1d5db',
+                borderRadius: '6px',
+                fontSize: '14px',
+                color: '#374151',
+                backgroundColor: 'white'
+              }}
+              value={trainingForm.expires_in_days}
+              onChange={(e) => setTrainingForm({ ...trainingForm, expires_in_days: e.target.value })}
+              placeholder="Enter number of days (e.g., 365 for 1 year)"
+            />
+            <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px' }}>
+              Training will expire X days after the completion date
+            </p>
+          </div>
+        )}
+        
+        <div className="flex items-center">
+          <input
+            type="radio"
+            id="expire_date"
+            name="expiration_type"
+            value="date"
+            checked={trainingForm.expiration_type === 'date'}
+            onChange={(e) => setTrainingForm({ ...trainingForm, expiration_type: e.target.value })}
+            className="h-4 w-4 text-blue-600"
+          />
+          <label htmlFor="expire_date" className="ml-2 text-sm text-gray-700">
+            Expires on a specific calendar date
+          </label>
+        </div>
+        {trainingForm.expiration_type === 'date' && (
+          <div className="ml-6">
+            <input
+              type="date"
+              style={{
+                width: '100%',
+                padding: '8px 12px',
+                border: '1px solid #d1d5db',
+                borderRadius: '6px',
+                fontSize: '14px',
+                color: '#374151',
+                backgroundColor: 'white'
+              }}
+              value={trainingForm.expires_on_date}
+              onChange={(e) => setTrainingForm({ ...trainingForm, expires_on_date: e.target.value })}
+            />
+            <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px' }}>
+              All completions of this training will expire on this date (e.g., "All 2024 trainings expire on 12/31/2024")
+            </p>
+          </div>
+        )}
+      </div>
+    </div>
+    
+    {/* Category - KEEP THIS */}
+    <div>
+      <label style={{
+        display: 'block',
+        fontSize: '14px',
+        fontWeight: '500',
+        color: '#374151',
+        marginBottom: '8px'
+      }}>
+        Category *
+      </label>
+      <select
+        required
+        style={{
+          width: '100%',
+          padding: '10px 12px',
+          border: '1px solid #d1d5db',
+          borderRadius: '8px',
+          fontSize: '14px',
+          color: '#374151',
+          backgroundColor: 'white'
+        }}
+        value={trainingForm.category}
+        onChange={(e) => setTrainingForm({ ...trainingForm, category: e.target.value })}
+      >
+        <option value="both">Both Volunteers & Board Members</option>
+        <option value="volunteer">Volunteers Only</option>
+        <option value="board_member">Board Members Only</option>
+      </select>
+    </div>
+    
+    {/* Required Training - KEEP THIS */}
+    <div>
+      <label style={{
+        display: 'flex',
+        alignItems: 'center',
+        fontSize: '14px',
+        fontWeight: '500',
+        color: '#374151',
+        marginBottom: '8px',
+        cursor: 'pointer'
+      }}>
+        <input
+          type="checkbox"
+          style={{
+            marginRight: '8px'
+          }}
+          checked={trainingForm.is_required}
+          onChange={(e) => setTrainingForm({ ...trainingForm, is_required: e.target.checked })}
+        />
+        Required Training
+      </label>
+      <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px' }}>
+        Required trainings must be completed by all applicable volunteers/board members
+      </p>
+    </div>
+  </form>
+</Modal>
 
       {/* Seasons Tab */}
       {activeTab === 'seasons' && (
@@ -1670,7 +2158,191 @@ const handleExportSeason = async (seasonId) => {
           </div>
         </div>
       )}
+{/* Trainings Tab */}
+{activeTab === 'trainings' && (
+  <div>
+    <div className="flex justify-between items-center mb-6">
+      <h2 className="text-lg font-medium text-gray-900">Training Management</h2>
+      <div className="flex items-center space-x-3">
+        <button
+          onClick={handleCheckExpirations}
+          className="inline-flex items-center px-4 py-2 border border-orange-300 rounded-md shadow-sm text-sm font-medium text-orange-700 bg-white hover:bg-orange-50"
+        >
+          <Calendar className="h-4 w-4 mr-2" />
+          Check Expirations
+        </button>
+        <button
+          onClick={() => setShowTrainingForm(true)}
+          className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700"
+        >
+          <Plus className="h-4 w-4 mr-2" />
+          Add Training
+        </button>
+      </div>
+    </div>
 
+    {/* Clear Training Tool */}
+    <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">
+      <h3 className="text-md font-medium text-yellow-800 mb-2">Clear Training Tool</h3>
+      <p className="text-sm text-yellow-700 mb-3">
+        Remove a specific training from all volunteers and/or board members (useful when trainings expire or change).
+      </p>
+      <div className="flex flex-col sm:flex-row gap-3">
+        <select
+          className="border border-gray-300 rounded-md px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+          value={clearTrainingForm.training_id}
+          onChange={(e) => setClearTrainingForm({ ...clearTrainingForm, training_id: e.target.value })}
+        >
+          <option value="">Select Training to Clear</option>
+          {trainings.map(training => (
+            <option key={training.id} value={training.id}>
+              {training.name} ({training.category})
+            </option>
+          ))}
+        </select>
+        
+        <select
+          className="border border-gray-300 rounded-md px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+          value={clearTrainingForm.target_type}
+          onChange={(e) => setClearTrainingForm({ ...clearTrainingForm, target_type: e.target.value })}
+        >
+          <option value="all">All Volunteers & Board Members</option>
+          <option value="volunteers">Volunteers Only</option>
+          <option value="board_members">Board Members Only</option>
+        </select>
+        
+        <button
+          onClick={handleClearTraining}
+          disabled={!clearTrainingForm.training_id}
+          className={`px-4 py-2 rounded-md text-sm font-medium ${
+            !clearTrainingForm.training_id 
+              ? 'bg-gray-300 text-gray-500 cursor-not-allowed' 
+              : 'bg-red-600 text-white hover:bg-red-700'
+          }`}
+        >
+          Clear Training
+        </button>
+      </div>
+    </div>
+
+    {/* Trainings Table */}
+    <div className="bg-white shadow overflow-hidden rounded-lg">
+      <table className="min-w-full divide-y divide-gray-200">
+        <thead className="bg-gray-50">
+          <tr>
+            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              Training Name
+            </th>
+            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              Description
+            </th>
+            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              Expiration
+            </th>
+            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              Category
+            </th>
+            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              Required
+            </th>
+            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              Actions
+            </th>
+          </tr>
+        </thead>
+        <tbody className="bg-white divide-y divide-gray-200">
+          {trainings.map((training) => (
+            <tr key={training.id}>
+              <td className="px-6 py-4 whitespace-nowrap">
+                <div className="text-sm font-medium text-gray-900">{training.name}</div>
+              </td>
+              <td className="px-6 py-4">
+                <div className="text-sm text-gray-900">{training.description || '—'}</div>
+              </td>
+              <td className="px-6 py-4 whitespace-nowrap">
+  <div className="text-sm text-gray-900">
+    {training.expires_in_days ? (
+      <div>
+        <span className="inline-flex items-center px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded-full mb-1">
+          {training.expires_in_days} days after completion
+        </span>
+        <div className="text-xs text-gray-500">Days-based expiration</div>
+      </div>
+    ) : training.expires_on_date ? (
+      <div>
+        <span className="inline-flex items-center px-2 py-1 text-xs bg-purple-100 text-purple-800 rounded-full mb-1">
+          Expires on: {new Date(training.expires_on_date).toLocaleDateString()}
+        </span>
+        <div className="text-xs text-gray-500">Calendar date expiration</div>
+      </div>
+    ) : (
+      <span className="inline-flex items-center px-2 py-1 text-xs bg-gray-100 text-gray-800 rounded-full">
+        Never expires
+      </span>
+    )}
+  </div>
+</td>
+              <td className="px-6 py-4 whitespace-nowrap">
+                <div className="text-sm text-gray-900">
+                  {training.category === 'both' ? (
+                    <span className="inline-flex items-center px-2 py-1 text-xs bg-purple-100 text-purple-800 rounded-full">
+                      Both
+                    </span>
+                  ) : training.category === 'volunteer' ? (
+                    <span className="inline-flex items-center px-2 py-1 text-xs bg-green-100 text-green-800 rounded-full">
+                      Volunteers
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center px-2 py-1 text-xs bg-indigo-100 text-indigo-800 rounded-full">
+                      Board Members
+                    </span>
+                  )}
+                </div>
+              </td>
+              <td className="px-6 py-4 whitespace-nowrap">
+                <div className="text-sm text-gray-900">
+                  {training.is_required ? (
+                    <span className="inline-flex items-center px-2 py-1 text-xs bg-red-100 text-red-800 rounded-full">
+                      Required
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center px-2 py-1 text-xs bg-gray-100 text-gray-800 rounded-full">
+                      Optional
+                    </span>
+                  )}
+                </div>
+              </td>
+              <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                <button
+                  onClick={() => handleEditTraining(training)}
+                  className="text-blue-600 hover:text-blue-900 mr-4"
+                >
+                  Edit
+                </button>
+                <button
+                  onClick={() => handleDeleteTraining(training.id)}
+                  className="text-red-600 hover:text-red-900"
+                >
+                  Delete
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      {trainings.length === 0 && (
+        <div className="text-center py-12">
+          <GraduationCap className="mx-auto h-12 w-12 text-gray-400" />
+          <h3 className="mt-2 text-sm font-medium text-gray-900">No trainings configured</h3>
+          <p className="mt-1 text-sm text-gray-500">
+            Get started by creating your first training
+          </p>
+        </div>
+      )}
+    </div>
+  </div>
+)}
       {/* Settings Tab */}
       {/*{activeTab === 'settings' && (
         <div className="bg-white shadow rounded-lg p-6">

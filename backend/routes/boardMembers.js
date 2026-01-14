@@ -11,7 +11,17 @@ router.get('/', async (req, res) => {
       .from('board_members')
       .select(`
         *,
-        family:families (family_id, primary_contact_name, primary_contact_email)
+        family:families (family_id, primary_contact_name, primary_contact_email),
+        board_member_trainings!left (
+          id,
+          status,
+          completed_date,
+          training:trainings!inner (
+            id,
+            name,
+            is_required
+          )
+        )
       `)
       .order('last_name', { ascending: true })
       .order('first_name', { ascending: true });
@@ -23,7 +33,35 @@ router.get('/', async (req, res) => {
     const { data, error } = await query;
 
     if (error) throw error;
-    res.json(data);
+    
+    // Transform data to include training summary
+    const transformedData = (data || []).map(member => {
+      const trainings = member.board_member_trainings || [];
+      const completedTrainings = trainings.filter(t => t.status === 'completed');
+      const expiredTrainings = trainings.filter(t => t.status === 'expired');
+      const requiredTrainings = trainings.filter(t => t.training?.is_required);
+      const completedRequired = requiredTrainings.filter(t => t.status === 'completed');
+      
+      return {
+        ...member,
+        trainings_summary: {
+          total: trainings.length,
+          completed: completedTrainings.length,
+          expired: expiredTrainings.length,
+          required: requiredTrainings.length,
+          completed_required: completedRequired.length,
+          all_required_completed: requiredTrainings.length > 0 && 
+                                 completedRequired.length === requiredTrainings.length,
+          details: trainings.map(t => ({
+            name: t.training?.name,
+            status: t.status,
+            completed_date: t.completed_date
+          }))
+        }
+      };
+    });
+
+    res.json(transformedData);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

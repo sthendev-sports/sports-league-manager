@@ -22,7 +22,17 @@ router.get('/', async (req, res) => {
         *,
         division:divisions (id, name),
         season:seasons (id, name),
-        team:teams!volunteers_team_id_fkey (id, name, color)
+        team:teams!volunteers_team_id_fkey (id, name, color),
+        volunteer_trainings!left (
+          id,
+          status,
+          completed_date,
+          training:trainings!inner (
+            id,
+            name,
+            is_required
+          )
+        )
       `);
 
     if (division_id) {
@@ -33,7 +43,6 @@ router.get('/', async (req, res) => {
       query = query.eq('season_id', season_id);
     }
 
-    // Order by name by default
     query = query.order('name', { ascending: true });
 
     const { data, error } = await query;
@@ -43,8 +52,35 @@ router.get('/', async (req, res) => {
       throw error;
     }
 
-    console.log(`Found ${data?.length || 0} volunteers`);
-    res.json(data || []);
+    // Transform data to include training summary
+    const transformedData = (data || []).map(volunteer => {
+      const trainings = volunteer.volunteer_trainings || [];
+      const completedTrainings = trainings.filter(t => t.status === 'completed');
+      const expiredTrainings = trainings.filter(t => t.status === 'expired');
+      const requiredTrainings = trainings.filter(t => t.training?.is_required);
+      const completedRequired = requiredTrainings.filter(t => t.status === 'completed');
+      
+      return {
+        ...volunteer,
+        trainings_summary: {
+          total: trainings.length,
+          completed: completedTrainings.length,
+          expired: expiredTrainings.length,
+          required: requiredTrainings.length,
+          completed_required: completedRequired.length,
+          all_required_completed: requiredTrainings.length > 0 && 
+                                 completedRequired.length === requiredTrainings.length,
+          details: trainings.map(t => ({
+            name: t.training?.name,
+            status: t.status,
+            completed_date: t.completed_date
+          }))
+        }
+      };
+    });
+
+    console.log(`Found ${transformedData?.length || 0} volunteers with training summaries`);
+    res.json(transformedData || []);
   } catch (error) {
     console.error('Error in volunteers API:', error);
     res.status(500).json({ error: error.message });

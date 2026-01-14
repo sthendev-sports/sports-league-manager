@@ -299,39 +299,40 @@ const loadAvailableVolunteerTrainings = async () => {
       console.log('Complete volunteer data (cleaned):', completeVolunteerData);
 
       const response = await fetch(url, {
-        method,
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(completeVolunteerData)
-      });
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(completeVolunteerData)
+    });
 
-      console.log('Response status:', response.status);
+    console.log('Response status:', response.status);
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Server error response:', errorText);
-        throw new Error(`HTTP ${response.status}: ${errorText}`);
-      }
-
-      const result = await response.json();
-      console.log('Success response:', result);
-
-      // Reload the volunteers list
-      await loadVolunteers();
-
-      // Reset the form
-      resetVolunteerForm();
-
-      // Show success message
-      setError(null);
-      alert(isEditing ? 'Volunteer updated successfully!' : 'Volunteer added successfully!');
-
-    } catch (error) {
-      console.error('Error saving volunteer:', error);
-      setError('Failed to save volunteer: ' + error.message);
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Server error response:', errorText);
+      throw new Error(`HTTP ${response.status}: ${errorText}`);
     }
-  };
+
+    const result = await response.json();
+    console.log('Success response:', result);
+
+    // Reload the volunteers list
+    await loadVolunteers();
+
+    // Reset the form AND close the modal
+    resetVolunteerForm();
+    setShowAddForm(false); // ADD THIS LINE
+
+    // Show success message
+    setError(null);
+    alert(isEditing ? 'Volunteer updated successfully!' : 'Volunteer added successfully!');
+
+  } catch (error) {
+    console.error('Error saving volunteer:', error);
+    setError('Failed to save volunteer: ' + error.message);
+  }
+};
 
   const resetVolunteerForm = () => {
     setNewVolunteer({

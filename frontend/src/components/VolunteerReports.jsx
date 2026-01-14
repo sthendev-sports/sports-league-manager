@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Download, Users, Mail, Phone, CheckCircle, XCircle } from 'lucide-react';
+import { Download, Users, Mail, Phone, CheckCircle, XCircle, AlertCircle, GraduationCap, Filter } from 'lucide-react';
 import api, { divisionsAPI, teamsAPI, seasonsAPI } from '../services/api';
 
 const DIVISION_SORT_ORDER = [
@@ -42,12 +42,16 @@ const VolunteerReports = () => {
   const [selectedDivision, setSelectedDivision] = useState('');
   const [selectedTeam, setSelectedTeam] = useState('');
   const [selectedSeason, setSelectedSeason] = useState('');
+  const [selectedRole, setSelectedRole] = useState('');
+  const [selectedTrainingStatus, setSelectedTrainingStatus] = useState('');
   const [loading, setLoading] = useState(false);
+  const [availableTrainings, setAvailableTrainings] = useState([]);
 
   useEffect(() => {
     loadDivisions();
     loadTeams();
     loadSeasons();
+    loadAvailableTrainings();
   }, []);
 
   useEffect(() => {
@@ -112,6 +116,80 @@ const VolunteerReports = () => {
     }
   };
 
+  const loadAvailableTrainings = async () => {
+    try {
+      const response = await fetch('/api/trainings?category=volunteer');
+      if (response.ok) {
+        const data = await response.json();
+        setAvailableTrainings(data || []);
+      }
+    } catch (error) {
+      console.error('Error loading trainings:', error);
+    }
+  };
+
+  // Get unique roles for filter dropdown
+  const uniqueRoles = useMemo(() => {
+    const roles = new Set();
+    volunteers.forEach(v => {
+      if (v.role) roles.add(v.role);
+    });
+    return Array.from(roles).sort();
+  }, [volunteers]);
+
+  // Filter volunteers based on selected filters
+  const filteredVolunteers = useMemo(() => {
+    return volunteers.filter(volunteer => {
+      // Role filter
+      if (selectedRole && volunteer.role !== selectedRole) return false;
+      
+      // Training status filter
+      if (selectedTrainingStatus) {
+        const summary = volunteer.trainings_summary || {};
+        switch (selectedTrainingStatus) {
+          case 'compliant':
+            if (!summary.all_required_completed) return false;
+            break;
+          case 'non_compliant':
+            if (summary.all_required_completed) return false;
+            break;
+          case 'completed_any':
+            if (!summary.completed || summary.completed === 0) return false;
+            break;
+          case 'completed_none':
+            if (summary.completed && summary.completed > 0) return false;
+            break;
+          default:
+            break;
+        }
+      }
+      
+      return true;
+    });
+  }, [volunteers, selectedRole, selectedTrainingStatus]);
+
+  // Helper function to get missing required trainings for a volunteer
+  const getMissingTrainings = (volunteer) => {
+    const trainingSummary = volunteer.trainings_summary || {};
+    const volunteerTrainings = volunteer.trainings || [];
+    
+    if (trainingSummary.required === 0) {
+      return [];
+    }
+    
+    const requiredTrainings = availableTrainings.filter(t => t.is_required);
+    const missing = requiredTrainings.filter(requiredTraining => {
+      const volunteerTraining = volunteerTrainings.find(t => 
+        t.training && t.training.id === requiredTraining.id
+      );
+      
+      // Missing if no training record or status is not 'completed'
+      return !volunteerTraining || volunteerTraining.status !== 'completed';
+    });
+    
+    return missing.map(t => t.name);
+  };
+
   const exportToCSV = () => {
     const headers = [
       'Name',
@@ -120,26 +198,42 @@ const VolunteerReports = () => {
       'Team',
       'Email',
       'Phone',
-      'Address',
-      'City',
-      'State',
-      'Zip Code',
-      'Training Completed'
+      'Total Trainings',
+      'Completed Trainings',
+      'Expired Trainings',
+      'Required Trainings',
+      'Completed Required Trainings',
+      'All Required Completed',
+      'Missing Required Trainings',
+      'Training Details'
     ];
 
-    const csvData = volunteers.map(volunteer => [
-      volunteer.name,
-      volunteer.role,
-      volunteer.division?.name || 'Any Division',
-      volunteer.team?.name || 'Unallocated',
-      volunteer.email || '',
-      volunteer.phone || '',
-      volunteer.address_line_1 || '',
-      volunteer.city || '',
-      volunteer.state || '',
-      volunteer.zip_code || '',
-      volunteer.training_completed ? 'Yes' : 'No'
-    ]);
+    const csvData = filteredVolunteers.map(volunteer => {
+      const trainingSummary = volunteer.trainings_summary || {};
+      const volunteerTrainings = volunteer.trainings || [];
+      const missingTrainings = getMissingTrainings(volunteer);
+      
+      const trainingDetails = volunteerTrainings.map(t => 
+        `${t.training?.name || 'Unknown'}: ${t.status}${t.completed_date ? ` (${t.completed_date})` : ''}`
+      ).join('; ');
+      
+      return [
+        volunteer.name,
+        volunteer.role,
+        volunteer.division?.name || 'Any Division',
+        volunteer.team?.name || 'Unallocated',
+        volunteer.email || '',
+        volunteer.phone || '',
+        trainingSummary.total || 0,
+        trainingSummary.completed || 0,
+        trainingSummary.expired || 0,
+        trainingSummary.required || 0,
+        trainingSummary.completed_required || 0,
+        trainingSummary.all_required_completed ? 'Yes' : 'No',
+        missingTrainings.join('; '),
+        trainingDetails
+      ];
+    });
 
     const csvContent = [headers, ...csvData]
       .map(row => row.map(field => `"${String(field ?? '').replace(/"/g, '""')}"`).join(','))
@@ -158,11 +252,27 @@ const VolunteerReports = () => {
 
   const getRoleStats = () => {
     const stats = {};
-    volunteers.forEach(volunteer => {
+    filteredVolunteers.forEach(volunteer => {
       const role = volunteer.role || 'Parent';
       stats[role] = (stats[role] || 0) + 1;
     });
     return stats;
+  };
+
+  const getTrainingComplianceStats = () => {
+    let compliant = 0;
+    let nonCompliant = 0;
+    
+    filteredVolunteers.forEach(volunteer => {
+      const summary = volunteer.trainings_summary || {};
+      if (summary.all_required_completed) {
+        compliant++;
+      } else if (summary.required > 0) {
+        nonCompliant++;
+      }
+    });
+    
+    return { compliant, nonCompliant };
   };
 
   // Division table: Division | Parents | Team Parent | Assistant Coach | Manager | Coach | Board Member
@@ -198,8 +308,8 @@ const VolunteerReports = () => {
       });
     }
 
-    // Count
-    volunteers.forEach(v => {
+    // Count using filtered volunteers
+    filteredVolunteers.forEach(v => {
       const divName = v.division?.name || 'Any Division';
       if (!byDivision.has(divName)) {
         byDivision.set(divName, {
@@ -221,21 +331,11 @@ const VolunteerReports = () => {
       else if (role === roleKeys.manager) row.manager += 1;
       else if (role === roleKeys.coach) row.coach += 1;
       else if (role === roleKeys.boardMember) row.boardMember += 1;
-      else {
-        // If you have other roles, they aren't part of the requested table.
-        // Keeping them out maintains the exact requested layout.
-      }
     });
 
-    // Only show the divisions you listed (in that order), plus any others if they exist and are relevant.
-    // For your requested view, we prioritize the DIVISION_SORT_ORDER list.
     const ordered = Array.from(byDivision.values()).sort((a, b) => sortDivisionName(a.division, b.division));
-
-    // If you only want the explicit list and nothing else, uncomment:
-    // return ordered.filter(r => DIVISION_SORT_ORDER.includes(r.division));
-
     return ordered;
-  }, [volunteers, divisions]);
+  }, [filteredVolunteers, divisions]);
 
   // Teams table: Division | Team | Parents | Team Parent | Assistant Coach | Manager
   const teamTableRows = useMemo(() => {
@@ -243,7 +343,7 @@ const VolunteerReports = () => {
 
     const keyOf = (divName, teamName) => `${divName}|||${teamName}`;
 
-    volunteers.forEach(v => {
+    filteredVolunteers.forEach(v => {
       const divName = v.division?.name || 'Any Division';
       const teamName = v.team?.name || ''; // blank cell like your example for unallocated
       const key = keyOf(divName, teamName);
@@ -266,7 +366,6 @@ const VolunteerReports = () => {
       else if (role === 'Team Parent') row.teamParent += 1;
       else if (role === 'Assistant Coach') row.assistantCoach += 1;
       else if (role === 'Manager') row.manager += 1;
-      // (Coach/Board/etc not included per your requested team table)
     });
 
     const rows = Array.from(byDivTeam.values());
@@ -278,7 +377,7 @@ const VolunteerReports = () => {
     });
 
     return rows;
-  }, [volunteers]);
+  }, [filteredVolunteers]);
 
   const roleColors = {
     'Manager': 'bg-blue-100 text-blue-800',
@@ -293,6 +392,7 @@ const VolunteerReports = () => {
   };
 
   const roleStats = getRoleStats();
+  const trainingStats = getTrainingComplianceStats();
 
   return (
     <div className="space-y-6">
@@ -301,7 +401,7 @@ const VolunteerReports = () => {
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-xl font-semibold text-gray-900">Volunteer Reports</h2>
-            <p className="text-gray-600">View and export volunteer information</p>
+            <p className="text-gray-600">View and export volunteer information including training compliance</p>
           </div>
           <button
             onClick={exportToCSV}
@@ -313,9 +413,9 @@ const VolunteerReports = () => {
         </div>
       </div>
 
-      {/* Filters */}
+      {/* Filters - UPDATED WITH ROLE AND TRAINING FILTERS */}
       <div className="bg-white rounded-lg shadow p-4">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Season</label>
             <select
@@ -355,10 +455,78 @@ const VolunteerReports = () => {
               ))}
             </select>
           </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
+            <select
+              className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+              value={selectedRole}
+              onChange={(e) => setSelectedRole(e.target.value)}
+            >
+              <option value="">All Roles</option>
+              {uniqueRoles.map(role => (
+                <option key={role} value={role}>{role}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Training Status</label>
+            <select
+              className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+              value={selectedTrainingStatus}
+              onChange={(e) => setSelectedTrainingStatus(e.target.value)}
+            >
+              <option value="">All Statuses</option>
+              <option value="compliant">Compliant (All Required Completed)</option>
+              <option value="non_compliant">Non-Compliant (Missing Required)</option>
+              <option value="completed_any">Any Training Completed</option>
+              <option value="completed_none">No Trainings Completed</option>
+            </select>
+          </div>
+        </div>
+        
+        {/* Clear filters button */}
+        {(selectedRole || selectedTrainingStatus) && (
+          <div className="mt-4">
+            <button
+              onClick={() => {
+                setSelectedRole('');
+                setSelectedTrainingStatus('');
+              }}
+              className="inline-flex items-center px-3 py-1 text-sm text-gray-600 bg-gray-100 rounded-md hover:bg-gray-200"
+            >
+              <Filter className="h-3 w-3 mr-1" />
+              Clear Role/Training Filters
+            </button>
+            <span className="ml-3 text-sm text-gray-500">
+              Showing {filteredVolunteers.length} of {volunteers.length} volunteers
+            </span>
+          </div>
+        )}
+      </div>
+
+      {/* Training Compliance Summary */}
+      <div className="bg-white rounded-lg shadow p-6">
+        <h3 className="text-lg font-semibold text-gray-900 mb-4">Training Compliance Summary</h3>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+            <div className="text-2xl font-bold text-green-700">{trainingStats.compliant}</div>
+            <div className="text-sm font-medium text-green-800">Compliant Volunteers</div>
+            <div className="text-xs text-green-600 mt-1">All required trainings completed</div>
+          </div>
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+            <div className="text-2xl font-bold text-red-700">{trainingStats.nonCompliant}</div>
+            <div className="text-sm font-medium text-red-800">Non-Compliant Volunteers</div>
+            <div className="text-xs text-red-600 mt-1">Missing required trainings</div>
+          </div>
+          <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+            <div className="text-2xl font-bold text-gray-700">{filteredVolunteers.length}</div>
+            <div className="text-sm font-medium text-gray-800">Total Volunteers</div>
+            <div className="text-xs text-gray-600 mt-1">In current view</div>
+          </div>
         </div>
       </div>
 
-      {/* Role Statistics (kept exactly like your existing section) */}
+      {/* Role Statistics */}
       <div className="bg-white rounded-lg shadow p-6">
         <h3 className="text-lg font-semibold text-gray-900 mb-4">Volunteers by Role</h3>
         <div className="space-y-3">
@@ -372,6 +540,131 @@ const VolunteerReports = () => {
               <span className="text-sm font-medium text-gray-900">- {count}</span>
             </div>
           ))}
+        </div>
+      </div>
+
+      {/* Training Compliance Details - UPDATED WITH MISSING TRAININGS */}
+      <div className="bg-white rounded-lg shadow">
+        <div className="px-6 py-4 border-b border-gray-200">
+          <h3 className="text-lg font-semibold text-gray-900">Training Compliance Details</h3>
+          <p className="text-sm text-gray-500 mt-1">
+            Volunteers with their training completion status and missing required trainings
+          </p>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Volunteer
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Role
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Division
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Required Trainings
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Completed Trainings
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Compliance Status
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Missing Required Trainings
+                </th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {filteredVolunteers.map((volunteer) => {
+                const trainingSummary = volunteer.trainings_summary || {};
+                const isCompliant = trainingSummary.all_required_completed;
+                const missingTrainings = getMissingTrainings(volunteer);
+                
+                return (
+                  <tr key={volunteer.id} className="hover:bg-gray-50">
+                    <td className="px-6 py-4">
+                      <div className="text-sm font-medium text-gray-900">
+                        {volunteer.name}
+                      </div>
+                      <div className="text-xs text-gray-500">
+                        {volunteer.email || 'No email'}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${roleColors[volunteer.role] || 'bg-gray-100 text-gray-800'}`}>
+                        {volunteer.role}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="text-sm text-gray-900">
+                        {volunteer.division?.name || 'Any Division'}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="text-sm text-gray-900">
+                        {trainingSummary.required || 0} required
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="text-sm text-gray-900">
+                        {trainingSummary.completed || 0}/{trainingSummary.total || 0} completed
+                      </div>
+                      {trainingSummary.expired > 0 && (
+                        <div className="text-xs text-red-600">
+                          {trainingSummary.expired} expired
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-6 py-4">
+                      {isCompliant ? (
+                        <span className="inline-flex items-center px-2 py-1 rounded-md text-xs font-medium bg-green-100 text-green-800">
+                          <CheckCircle className="h-3 w-3 mr-1" />
+                          Compliant
+                        </span>
+                      ) : missingTrainings.length > 0 ? (
+                        <span className="inline-flex items-center px-2 py-1 rounded-md text-xs font-medium bg-yellow-100 text-yellow-800">
+                          <AlertCircle className="h-3 w-3 mr-1" />
+                          Missing {missingTrainings.length}
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center px-2 py-1 rounded-md text-xs font-medium bg-gray-100 text-gray-800">
+                          No required trainings
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-6 py-4">
+                      {missingTrainings.length > 0 ? (
+                        <div className="space-y-1">
+                          {missingTrainings.map((trainingName, index) => (
+                            <div key={index} className="text-xs text-red-600 bg-red-50 px-2 py-1 rounded">
+                              • {trainingName}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="text-xs text-gray-500">None</div>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+
+          {filteredVolunteers.length === 0 && !loading && (
+            <div className="text-center py-12">
+              <Users className="mx-auto h-12 w-12 text-gray-400" />
+              <h3 className="mt-2 text-sm font-medium text-gray-900">No volunteers found</h3>
+              <p className="mt-1 text-sm text-gray-500">
+                Try adjusting your filters or import volunteer data
+              </p>
+            </div>
+          )}
         </div>
       </div>
 
@@ -484,15 +777,12 @@ const VolunteerReports = () => {
         </div>
       </div>
 
-      {/* Special Volunteers Report - Managers, Team Parents, Assistant Coaches */}
+      {/* All Volunteers List - SIMPLIFIED VERSION */}
       <div className="bg-white rounded-lg shadow">
         <div className="px-6 py-4 border-b border-gray-200">
           <h3 className="text-lg font-semibold text-gray-900">
-            Special Volunteers (Managers, Team Parents, Assistant Coaches)
+            All Volunteer Details ({filteredVolunteers.length} total)
           </h3>
-          <p className="text-sm text-gray-500 mt-1">
-            Volunteers with assigned roles other than "Parent"
-          </p>
         </div>
 
         <div className="overflow-x-auto">
@@ -520,9 +810,11 @@ const VolunteerReports = () => {
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {volunteers
-                .filter(v => v.role !== 'Parent' && ['Manager', 'Team Parent', 'Assistant Coach'].includes(v.role))
-                .map((volunteer) => (
+              {filteredVolunteers.map((volunteer) => {
+                const trainingSummary = volunteer.trainings_summary || {};
+                const missingTrainings = getMissingTrainings(volunteer);
+                
+                return (
                   <tr key={volunteer.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4">
                       <div className="text-sm font-medium text-gray-900">
@@ -545,17 +837,22 @@ const VolunteerReports = () => {
                       </div>
                     </td>
                     <td className="px-6 py-4">
-                      {volunteer.training_completed ? (
-                        <span className="inline-flex items-center px-2 py-1 rounded-md text-xs font-medium bg-green-100 text-green-800">
-                          <CheckCircle className="h-3 w-3 mr-1" />
-                          Completed
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center px-2 py-1 rounded-md text-xs font-medium bg-yellow-100 text-yellow-800">
-                          <XCircle className="h-3 w-3 mr-1" />
-                          Pending
-                        </span>
-                      )}
+                      <div className="space-y-1">
+                        <div className={`inline-flex items-center px-2 py-1 text-xs rounded-full ${
+                          trainingSummary.all_required_completed 
+                            ? 'bg-green-100 text-green-800' 
+                            : missingTrainings.length > 0
+                            ? 'bg-red-100 text-red-800'
+                            : 'bg-gray-100 text-gray-800'
+                        }`}>
+                          {trainingSummary.completed || 0}/{trainingSummary.total || 0} trainings
+                        </div>
+                        {missingTrainings.length > 0 && (
+                          <div className="text-xs text-red-600">
+                            Missing: {missingTrainings.length}
+                          </div>
+                        )}
+                      </div>
                     </td>
                     <td className="px-6 py-4">
                       {volunteer.email && (
@@ -572,89 +869,12 @@ const VolunteerReports = () => {
                       )}
                     </td>
                   </tr>
-                ))}
+                );
+              })}
             </tbody>
           </table>
 
-          {volunteers.filter(v => v.role !== 'Parent' && ['Manager', 'Team Parent', 'Assistant Coach'].includes(v.role)).length === 0 && (
-            <div className="text-center py-12">
-              <Users className="mx-auto h-12 w-12 text-gray-400" />
-              <h3 className="mt-2 text-sm font-medium text-gray-900">No special volunteers found</h3>
-              <p className="mt-1 text-sm text-gray-500">
-                No volunteers with Manager, Team Parent, or Assistant Coach roles
-              </p>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* All Volunteers List (unchanged) */}
-      <div className="bg-white rounded-lg shadow">
-        <div className="px-6 py-4 border-b border-gray-200">
-          <h3 className="text-lg font-semibold text-gray-900">
-            All Volunteer Details ({volunteers.length} total)
-          </h3>
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Volunteer
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Role & Division
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Team
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Contact
-                </th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {volunteers.map((volunteer) => (
-                <tr key={volunteer.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4">
-                    <div className="text-sm font-medium text-gray-900">
-                      {volunteer.name}
-                    </div>
-                  </td>
-                  <td className="px-6 py-4">
-                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${roleColors[volunteer.role] || 'bg-gray-100 text-gray-800'}`}>
-                      {volunteer.role}
-                    </span>
-                    <div className="text-sm text-gray-600 mt-1">
-                      {volunteer.division?.name || 'Any Division'}
-                    </div>
-                  </td>
-                  <td className="px-6 py-4">
-                    <div className="text-sm text-gray-900">
-                      {volunteer.team?.name || 'Unallocated'}
-                    </div>
-                  </td>
-                  <td className="px-6 py-4">
-                    {volunteer.email && (
-                      <div className="flex items-center text-sm text-gray-600 mb-1">
-                        <Mail className="h-3 w-3 mr-2" />
-                        {volunteer.email}
-                      </div>
-                    )}
-                    {volunteer.phone && (
-                      <div className="flex items-center text-sm text-gray-600">
-                        <Phone className="h-3 w-3 mr-2" />
-                        {volunteer.phone}
-                      </div>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-
-          {volunteers.length === 0 && !loading && (
+          {filteredVolunteers.length === 0 && !loading && (
             <div className="text-center py-12">
               <Users className="mx-auto h-12 w-12 text-gray-400" />
               <h3 className="mt-2 text-sm font-medium text-gray-900">No volunteers found</h3>

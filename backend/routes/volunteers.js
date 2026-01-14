@@ -16,23 +16,14 @@ router.get('/', async (req, res) => {
 
     console.log('Fetching volunteers with filters:', { division_id, season_id });
 
+    // First, get volunteers with basic relationships
     let query = supabase
       .from('volunteers')
       .select(`
         *,
         division:divisions (id, name),
         season:seasons (id, name),
-        team:teams!volunteers_team_id_fkey (id, name, color),
-        volunteer_trainings!left (
-          id,
-          status,
-          completed_date,
-          training:trainings!inner (
-            id,
-            name,
-            is_required
-          )
-        )
+        team:teams!volunteers_team_id_fkey (id, name, color)
       `);
 
     if (division_id) {
@@ -45,42 +36,60 @@ router.get('/', async (req, res) => {
 
     query = query.order('name', { ascending: true });
 
-    const { data, error } = await query;
+    const { data: volunteers, error } = await query;
 
     if (error) {
       console.error('Supabase error fetching volunteers:', error);
       throw error;
     }
 
-    // Transform data to include training summary
-    const transformedData = (data || []).map(volunteer => {
-      const trainings = volunteer.volunteer_trainings || [];
+    // Then, get trainings for each volunteer
+    const volunteersWithTrainings = [];
+    
+    for (const volunteer of volunteers || []) {
+      // Get trainings for this volunteer
+      const { data: volunteerTrainings, error: trainingsError } = await supabase
+        .from('volunteer_trainings')
+        .select(`
+          id,
+          status,
+          completed_date,
+          training:trainings!inner (
+            id,
+            name,
+            is_required
+          )
+        `)
+        .eq('volunteer_id', volunteer.id);
+
+      if (trainingsError) {
+        console.error(`Error loading trainings for volunteer ${volunteer.id}:`, trainingsError);
+      }
+
+      const trainings = volunteerTrainings || [];
       const completedTrainings = trainings.filter(t => t.status === 'completed');
       const expiredTrainings = trainings.filter(t => t.status === 'expired');
       const requiredTrainings = trainings.filter(t => t.training?.is_required);
       const completedRequired = requiredTrainings.filter(t => t.status === 'completed');
-      
-      return {
+
+      volunteersWithTrainings.push({
         ...volunteer,
-        trainings_summary: {
+        trainings: trainings, // Keep as separate field
+        training_completed: completedTrainings.length > 0, // Legacy field for compatibility
+        trainings_summary: { // Simplified summary
           total: trainings.length,
           completed: completedTrainings.length,
           expired: expiredTrainings.length,
           required: requiredTrainings.length,
           completed_required: completedRequired.length,
           all_required_completed: requiredTrainings.length > 0 && 
-                                 completedRequired.length === requiredTrainings.length,
-          details: trainings.map(t => ({
-            name: t.training?.name,
-            status: t.status,
-            completed_date: t.completed_date
-          }))
+                                 completedRequired.length === requiredTrainings.length
         }
-      };
-    });
+      });
+    }
 
-    console.log(`Found ${transformedData?.length || 0} volunteers with training summaries`);
-    res.json(transformedData || []);
+    console.log(`Found ${volunteersWithTrainings?.length || 0} volunteers`);
+    res.json(volunteersWithTrainings || []);
   } catch (error) {
     console.error('Error in volunteers API:', error);
     res.status(500).json({ error: error.message });
@@ -127,21 +136,25 @@ router.put('/:id', async (req, res) => {
 
     console.log(`Updating volunteer ${id}:`, volunteerData);
 
+    // Clean the data - remove training-related fields that shouldn't be in volunteers table
+    const { trainings, trainings_summary, division, season, team, ...dataToUpdate } = volunteerData;
+
     const { data, error } = await supabase
       .from('volunteers')
-      .update(volunteerData)
+      .update(dataToUpdate)
       .eq('id', id)
-      .select(`
-        *,
-        division:divisions (id, name),
-        season:seasons (id, name),
-        team:teams!volunteers_team_id_fkey (id, name, color)
-      `)
+      .select()
       .single();
 
     if (error) throw error;
 
-    res.json(data);
+    // Return simple success response
+    res.json({
+      success: true,
+      message: 'Volunteer updated successfully',
+      id: data.id,
+      name: data.name
+    });
   } catch (error) {
     console.error('Error updating volunteer:', error);
     res.status(500).json({ error: error.message });

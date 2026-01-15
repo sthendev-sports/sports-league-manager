@@ -48,17 +48,35 @@ const VolunteerReports = () => {
   const [availableTrainings, setAvailableTrainings] = useState([]);
 
   useEffect(() => {
-    loadDivisions();
-    loadTeams();
+    // Don't load divisions and teams here - they'll be loaded when season is selected
     loadSeasons();
     loadAvailableTrainings();
   }, []);
 
   useEffect(() => {
-    if (selectedSeason) {
-      loadVolunteers();
-    }
-  }, [selectedDivision, selectedSeason, selectedTeam]);
+  if (selectedSeason) {
+    // Reset division and team filters when season changes
+    setSelectedDivision('');
+    setSelectedTeam('');
+    // Load volunteers for the new season
+    loadVolunteers();
+  }
+}, [selectedSeason]);
+
+useEffect(() => {
+  if (selectedSeason) {
+    // Load divisions and teams for the new season
+    loadDivisions();
+    loadTeams();
+  }
+}, [selectedSeason]);
+
+// This effect handles division and team filter changes
+useEffect(() => {
+  if (selectedSeason) {
+    loadVolunteers();
+  }
+}, [selectedDivision, selectedTeam]);
 
   const loadVolunteers = async () => {
     try {
@@ -85,23 +103,48 @@ const VolunteerReports = () => {
     }
   };
 
-  const loadDivisions = async () => {
+   const loadDivisions = async () => {
     try {
-      const response = await divisionsAPI.getAll();
-      const data = response.data;
-      setDivisions(Array.isArray(data) ? data : []);
+      let url = '/api/divisions';
+      // Add season filter if a season is selected
+      if (selectedSeason) {
+        url += `?season_id=${selectedSeason}`;
+      }
+      
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: Failed to load divisions`);
+      }
+      const data = await response.json();
+      setDivisions(data || []);
     } catch (error) {
       console.error('Error loading divisions:', error);
+      setDivisions([]);
     }
   };
 
   const loadTeams = async () => {
     try {
-      const response = await teamsAPI.getAll();
-      const data = response.data;
-      setTeams(Array.isArray(data) ? data : []);
+      // For teams, we need to filter by season through the API
+      // or we can get all teams and filter client-side
+      const response = await fetch('/api/teams');
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: Failed to load teams`);
+      }
+      const allTeams = await response.json();
+      
+      // Filter teams by selected season if a season is selected
+      let filteredTeams = allTeams || [];
+      if (selectedSeason) {
+        filteredTeams = filteredTeams.filter(team => 
+          team.season_id === selectedSeason
+        );
+      }
+      
+      setTeams(filteredTeams);
     } catch (error) {
       console.error('Error loading teams:', error);
+      setTeams([]);
     }
   };
 

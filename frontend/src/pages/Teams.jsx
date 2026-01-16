@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Edit, Trash2, Save, Users, Shield, AlertCircle, Mail, Phone, ChevronDown, ChevronUp } from 'lucide-react';
+import { Plus, Edit, Trash2, Save, Users, Shield, AlertCircle, Mail, Phone, ChevronDown, ChevronUp, Download } from 'lucide-react'; // Added Download import
 import Modal from '../components/Modal';
 import api, { teamsAPI, divisionsAPI, seasonsAPI } from '../services/api';
 
@@ -79,6 +79,99 @@ const Teams = () => {
       setLoading(false);
     }
   };
+
+ const generateSCImportFile = () => {
+    try {
+      console.log('Generating SC Team Import File...');
+      
+      // Filter teams that have managers
+      const teamsWithManagers = teams.filter(team => {
+        if (!team.volunteers || !Array.isArray(team.volunteers)) return false;
+        
+        // Check if team has at least one manager
+        const hasManager = team.volunteers.some(volunteer => 
+          volunteer.role === 'Manager'
+        );
+        
+        return hasManager;
+      });
+
+      if (teamsWithManagers.length === 0) {
+        alert('No teams with managers found. Please ensure teams have managers assigned before exporting.');
+        return;
+      }
+
+      console.log(`Found ${teamsWithManagers.length} teams with managers`);
+
+      // Prepare CSV data
+      const csvData = [];
+      
+      // Add header row
+      csvData.push('TeamName,PlayerID,VolunteerID,VolunteerTypeID,Player Name,Team Personnel Name,Team Personnel Role,Division');
+
+      // Process each team
+      teamsWithManagers.forEach(team => {
+        // Get managers for this team
+        const managers = team.volunteers.filter(volunteer => 
+          volunteer.role === 'Manager'
+        );
+
+        // Get division name
+        const divisionName = team.division?.name || getDivisionName(team.division_id);
+
+        // For each manager, create a row
+        managers.forEach(manager => {
+          // Get manager's last name
+          const managerLastName = getLastName(manager.name);
+          
+          // Create team name with manager's last name: "TeamName - LastName"
+          const teamNameWithManager = managerLastName 
+            ? `${team.name || ''} - ${managerLastName}`
+            : team.name || '';
+
+          const row = [
+            teamNameWithManager, // TeamName with manager's last name
+            '', // PlayerID (leave blank)
+            manager.volunteer_id || '', // VolunteerID
+            manager.volunteer_type_id || '', // VolunteerTypeID
+            '', // Player Name (leave blank)
+            manager.name || '', // Team Personnel Name
+            manager.role || '', // Team Personnel Role
+            divisionName || '' // Division
+          ].map(field => {
+            // Escape fields with commas or quotes
+            if (typeof field === 'string' && (field.includes(',') || field.includes('"') || field.includes('\n'))) {
+              return `"${field.replace(/"/g, '""')}"`;
+            }
+            return field;
+          }).join(',');
+
+          csvData.push(row);
+        });
+      });
+
+      // Create CSV blob
+      const csvContent = csvData.join('\n');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      
+      // Create download link
+      const link = document.createElement('a');
+      link.setAttribute('href', url);
+      link.setAttribute('download', `sc-team-import-${new Date().toISOString().split('T')[0]}.csv`);
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      console.log(`Exported ${teamsWithManagers.length} teams with managers`);
+      alert(`SC Team Import File created! Exported ${teamsWithManagers.length} teams with managers.`);
+    } catch (error) {
+      console.error('Error generating SC Team Import File:', error);
+      alert('Error generating export file: ' + error.message);
+    }
+  };
+
 
   const handleTeamFormChange = (e) => {
     const { name, value } = e.target;
@@ -206,6 +299,12 @@ const Teams = () => {
     }
     
     return age;
+  };
+  
+   const getLastName = (fullName) => {
+    if (!fullName) return '';
+    const parts = fullName.trim().split(/\s+/);
+    return parts[parts.length - 1] || '';
   };
 
   // Get divisions filtered by selected season
@@ -581,15 +680,22 @@ const Teams = () => {
             </p>
           </div>
           
-          <div className="flex space-x-3">
-            <button
-              onClick={handleAddTeamClick}
-              className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700"
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              Add Team
-            </button>
-          </div>
+         <div className="flex space-x-3">
+  <button
+    onClick={generateSCImportFile}
+    className="inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
+  >
+    <Download className="h-4 w-4 mr-2" />
+    SC Team Import File
+  </button>
+  <button
+    onClick={handleAddTeamClick}
+    className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700"
+  >
+    <Plus className="h-4 w-4 mr-2" />
+    Add Team
+  </button>
+</div>
         </div>
 
         {/* Filters */}

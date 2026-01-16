@@ -3,30 +3,34 @@ import { Download } from 'lucide-react';
 
 const CSVTemplate = ({ templateType = 'players', headers }) => {
   const getVolunteerTemplate = () => {
-    const volunteerHeaders = [
-      'Division Name', 
-      'Volunteer Role',
-      'Team Name',
-      'Volunteer First Name',
-      'Volunteer Last Name', 
-      'Volunteer Email Address',
-      'Volunteer Cellphone'
-    ];
-    
-    const sampleData = [
-      'Baseball - Majors Division',
-      'Assistant Coach',
-      'Unallocated',
-      'John',
-      'Doe',
-      'john.doe@email.com',
-      '732-555-1234'
-    ];
-    
-    return [volunteerHeaders, sampleData].map(row => 
-      row.map(field => `"${field}"`).join(',')
-    ).join('\n');
-  };
+  const volunteerHeaders = [
+    'Division Name', 
+    'Volunteer Role',
+    'Team Name',
+    'Volunteer First Name',
+    'Volunteer Last Name', 
+    'Volunteer Email Address',
+    'Volunteer Cellphone',
+    'Volunteer Id', // ADDED
+    'Volunteer Type Id' // ADDED
+  ];
+  
+  const sampleData = [
+    'Baseball - Majors Division',
+    'Assistant Coach',
+    'Unallocated',
+    'John',
+    'Doe',
+    'john.doe@email.com',
+    '732-555-1234',
+    'V12345', // ADDED: Sample Volunteer ID
+    'VT001' // ADDED: Sample Volunteer Type ID
+  ];
+  
+  return [volunteerHeaders, sampleData].map(row => 
+    row.map(field => `"${field}"`).join(',')
+  ).join('\n');
+};
 
   const getPlayerTemplate = () => {
     // Updated headers to include new columns

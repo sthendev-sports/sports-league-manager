@@ -60,6 +60,8 @@ function cleanHeaderName(header) {
     'roles': 'interested_roles',
     'volunteer roles': 'interested_roles',
     'interested roles': 'interested_roles',
+	'volunteer id': 'volunteer_id', // ADDED
+    'volunteer type id': 'volunteer_type_id', // ADDED
   };
 
   const normalized = header.trim().toLowerCase();
@@ -150,6 +152,8 @@ router.post(
         const email = (row.email || '').trim();
         const phone = (row.phone || '').trim();
         const interestedRoles = (row.interested_roles || '').trim();
+		const volunteerId = (row.volunteer_id || '').trim(); // ADDED
+		const volunteerTypeId = (row.volunteer_type_id || '').trim(); // ADDED
 
         if (!email && !phone) {
           errors.push(
@@ -201,6 +205,9 @@ router.post(
           if (!volunteer.name && name) updatePayload.name = name;
           if (!volunteer.email && email) updatePayload.email = email;
           if (!volunteer.phone && phone) updatePayload.phone = phone;
+		  // ADDED: Capture volunteer_id and volunteer_type_id if provided
+		if (volunteerId) updatePayload.volunteer_id = volunteerId;
+		if (volunteerTypeId) updatePayload.volunteer_type_id = volunteerTypeId;
 
           const { error: updateError } = await supabase
             .from('volunteers')
@@ -227,6 +234,8 @@ router.post(
             email: email || null,
             phone: phone || null,
             interested_roles: interestedRoles || null,
+			volunteer_id: volunteerId || null, // ADDED
+			volunteer_type_id: volunteerTypeId || null, // ADDED
             // role (assigned role) is left null; will be set by draft or manual assignment
           };
 

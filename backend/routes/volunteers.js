@@ -374,47 +374,50 @@ const getCachedFamilyId = async ({ email, phone }, seasonId) => {
         }
 
         // === NEW R1 BEHAVIOR HERE ===
-        // rawInterestedRoles = whatever the CSV says ("Manager, Assistant Coach, Team Parent")
-        const rawInterestedRoles = volunteerData['volunteer role'] || null;
+// rawInterestedRoles = whatever the CSV says ("Manager, Assistant Coach, Team Parent")
+const rawInterestedRoles = volunteerData['volunteer role'] || null;
 
-        const volunteerRecord = {
-          name: `${volunteerData['volunteer first name']} ${volunteerData['volunteer last name']}`.trim(),
-          email: volunteerData['volunteer email address'] || null,
-          phone: volunteerData['volunteer cellphone'] || null,
+const volunteerRecord = {
+  name: `${volunteerData['volunteer first name']} ${volunteerData['volunteer last name']}`.trim(),
+  email: volunteerData['volunteer email address'] || null,
+  phone: volunteerData['volunteer cellphone'] || null,
 
-          // PRIMARY assigned role (for now still stored in "role")
-          // Derived as first role from CSV string.
-          role: 'Parent', // keep system default; import role goes to interested_roles
-        
+  // PRIMARY assigned role (for now still stored in "role")
+  // Derived as first role from CSV string.
+  role: 'Parent', // keep system default; import role goes to interested_roles
 
-          // Raw interested roles exactly as provided in CSV
-          // e.g. "Manager, Assistant Coach, Team Parent"
-          interested_roles: rawInterestedRoles || null,
+  // Raw interested roles exactly as provided in CSV
+  // e.g. "Manager, Assistant Coach, Team Parent"
+  interested_roles: rawInterestedRoles || null,
 
-          division_id: divisionId,
-          season_id: season_id,
-          team_id: teamId,
-          notes: `Imported from volunteer signup. Original team: ${
-            volunteerData['team name'] || 'Unallocated'
-          }`,
-          training_completed: false, // Default to false for imports
+  // ADDED: New columns for import
+  volunteer_id: volunteerData['volunteer id'] || null,
+  volunteer_type_id: volunteerData['volunteer type id'] || null,
 
-          // Defaults required by schema
-          background_check_completed: volunteerData['verification status'] || 'pending',
-          background_check_complete: false,
-          is_approved: false,
-          shifts_completed: 0,
-          shifts_required: 0,
-          can_pickup: false,
-          family_id: await getCachedFamilyId(
-  { 
-    email: volunteerData['volunteer email address'], 
-    phone: volunteerData['volunteer cellphone'] 
-  },
-  season_id  // PASS THE SEASON ID!
-),
-          player_id: null,
-        };
+  division_id: divisionId,
+  season_id: season_id,
+  team_id: teamId,
+  notes: `Imported from volunteer signup. Original team: ${
+    volunteerData['team name'] || 'Unallocated'
+  }`,
+  training_completed: false, // Default to false for imports
+
+  // Defaults required by schema
+  background_check_completed: volunteerData['verification status'] || 'pending',
+  background_check_complete: false,
+  is_approved: false,
+  shifts_completed: 0,
+  shifts_required: 0,
+  can_pickup: false,
+  family_id: await getCachedFamilyId(
+    { 
+      email: volunteerData['volunteer email address'], 
+      phone: volunteerData['volunteer cellphone'] 
+    },
+    season_id  // PASS THE SEASON ID!
+  ),
+  player_id: null,
+};
 
         // Try to find an existing volunteer to update
         const existingVolunteer = findExistingVolunteer(
@@ -672,6 +675,24 @@ if (
     updates.interested_roles = newVolunteerData.interested_roles;
     hasChanges = true;
   }
+  
+  // ADDED: Update volunteer_id if provided
+if (
+  newVolunteerData.volunteer_id &&
+  newVolunteerData.volunteer_id !== existingVolunteer.volunteer_id
+) {
+  updates.volunteer_id = newVolunteerData.volunteer_id;
+  hasChanges = true;
+}
+
+// ADDED: Update volunteer_type_id if provided
+if (
+  newVolunteerData.volunteer_type_id &&
+  newVolunteerData.volunteer_type_id !== existingVolunteer.volunteer_type_id
+) {
+  updates.volunteer_type_id = newVolunteerData.volunteer_type_id;
+  hasChanges = true;
+}
 
   // If nothing changed, just return
   if (!hasChanges) {

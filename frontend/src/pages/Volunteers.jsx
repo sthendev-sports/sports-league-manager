@@ -36,7 +36,9 @@ const [availableVolunteerTrainings, setAvailableVolunteerTrainings] = useState([
     season_id: '',
     team_id: '',
     notes: '',
-    training_completed: false
+    training_completed: false,
+	volunteer_id: '', // ADDED
+	volunteer_type_id: '' // ADDED
   });
   // Add import results state
   const [importResults, setImportResults] = useState(null);
@@ -344,7 +346,9 @@ const loadAvailableVolunteerTrainings = async () => {
       season_id: seasons[0]?.id || '',
       team_id: '',
       notes: '',
-      training_completed: false
+      training_completed: false,
+	  volunteer_id: '', // ADDED
+	  volunteer_type_id: '' // ADDED
     });
     setEditingVolunteer(null);
     setShowAddForm(false);
@@ -737,6 +741,67 @@ const handleVolunteerTrainingChange = async (trainingId, completed, date) => {
   <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px' }}>
     Enter comma-separated roles (e.g., "Manager, Assistant Coach, Team Parent")
   </p>
+</div>
+{/* ADDED: Volunteer ID Field */}
+<div>
+  <label style={{
+    display: 'block',
+    fontSize: '14px',
+    fontWeight: '500',
+    color: '#374151',
+    marginBottom: '8px'
+  }}>
+    Volunteer ID
+  </label>
+  <input
+    type="text"
+    style={{
+      width: '100%',
+      padding: '10px 12px',
+      border: '1px solid #d1d5db',
+      borderRadius: '8px',
+      fontSize: '14px',
+      color: '#374151',
+      backgroundColor: 'white'
+    }}
+    value={editingVolunteer ? editingVolunteer.volunteer_id || '' : newVolunteer.volunteer_id || ''}
+    onChange={(e) => editingVolunteer
+      ? setEditingVolunteer(prev => ({ ...prev, volunteer_id: e.target.value }))
+      : setNewVolunteer(prev => ({ ...prev, volunteer_id: e.target.value }))
+    }
+    placeholder="Volunteer ID from external system"
+  />
+</div>
+
+{/* ADDED: Volunteer Type ID Field */}
+<div>
+  <label style={{
+    display: 'block',
+    fontSize: '14px',
+    fontWeight: '500',
+    color: '#374151',
+    marginBottom: '8px'
+  }}>
+    Volunteer Type ID
+  </label>
+  <input
+    type="text"
+    style={{
+      width: '100%',
+      padding: '10px 12px',
+      border: '1px solid #d1d5db',
+      borderRadius: '8px',
+      fontSize: '14px',
+      color: '#374151',
+      backgroundColor: 'white'
+    }}
+    value={editingVolunteer ? editingVolunteer.volunteer_type_id || '' : newVolunteer.volunteer_type_id || ''}
+    onChange={(e) => editingVolunteer
+      ? setEditingVolunteer(prev => ({ ...prev, volunteer_type_id: e.target.value }))
+      : setNewVolunteer(prev => ({ ...prev, volunteer_type_id: e.target.value }))
+    }
+    placeholder="Volunteer Type ID from external system"
+  />
 </div>
       <div>
         <label style={{

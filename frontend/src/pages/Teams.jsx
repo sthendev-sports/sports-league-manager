@@ -80,7 +80,7 @@ const Teams = () => {
     }
   };
 
- const generateSCImportFile = () => {
+     const generateSCImportFile = () => {
     try {
       console.log('Generating SC Team Import File...');
       
@@ -116,28 +116,40 @@ const Teams = () => {
           volunteer.role === 'Manager'
         );
 
-        // Get division name
-        const divisionName = team.division?.name || getDivisionName(team.division_id);
-
         // For each manager, create a row
         managers.forEach(manager => {
-          // Get manager's last name
-          const managerLastName = getLastName(manager.name);
+          // Get division name - try multiple sources
+          let divisionName = 'Unassigned';
           
-          // Create team name with manager's last name: "TeamName - LastName"
-          const teamNameWithManager = managerLastName 
-            ? `${team.name || ''} - ${managerLastName}`
-            : team.name || '';
+          // 1. First try: team.division object (if relationship is loaded)
+          if (team.division && team.division.name) {
+            divisionName = team.division.name;
+          }
+          // 2. Second try: manager's division (if manager has division data)
+          else if (manager.division && manager.division.name) {
+            divisionName = manager.division.name;
+          }
+          // 3. Third try: getDivisionName helper
+          else if (team.division_id) {
+            divisionName = getDivisionName(team.division_id);
+          }
+          // 4. Fourth try: check if division is in the divisions array
+          else if (divisions && divisions.length > 0 && team.division_id) {
+            const division = divisions.find(d => d.id === team.division_id);
+            if (division) {
+              divisionName = division.name;
+            }
+          }
 
           const row = [
-            teamNameWithManager, // TeamName with manager's last name
+            team.name || '', // TeamName
             '', // PlayerID (leave blank)
             manager.volunteer_id || '', // VolunteerID
             manager.volunteer_type_id || '', // VolunteerTypeID
             '', // Player Name (leave blank)
             manager.name || '', // Team Personnel Name
             manager.role || '', // Team Personnel Role
-            divisionName || '' // Division
+            divisionName // Division
           ].map(field => {
             // Escape fields with commas or quotes
             if (typeof field === 'string' && (field.includes(',') || field.includes('"') || field.includes('\n'))) {

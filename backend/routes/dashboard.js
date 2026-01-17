@@ -41,13 +41,15 @@ router.get('/statistics', async (req, res) => {
       divisionStats,
       volunteerStats,
       workBondStats,
-      volunteerByDivision
+      volunteerByDivision,
+	  monthlyTrends
     ] = await Promise.all([
       getRegistrationStatistics(season_id, comparisonSeason?.id),
       getDivisionStatistics(season_id, comparisonSeason?.id),
       getVolunteerStatistics(season_id),
       getWorkBondStatistics(season_id),
-      getVolunteerByDivision(season_id) // FIXED: Changed seasonId to season_id
+      getVolunteerByDivision(season_id), // FIXED: Changed seasonId to season_id
+	  getMonthlyRegistrationTrends(season_id, comparisonSeason?.id)
     ]);
 
     const dashboardData = {
@@ -74,6 +76,9 @@ router.get('/statistics', async (req, res) => {
       
       // Volunteer breakdown by division
       volunteerByDivision: volunteerByDivision,
+	  
+	  // Monthly Registration Trends
+	  monthlyTrends: monthlyTrends,
       
       // Season Info
       currentSeason: currentSeason,
@@ -176,6 +181,120 @@ async function getRegistrationStatistics(currentSeasonId, comparisonSeasonId) {
     returningPlayers: returningPlayers,
     totalTeams: teams.length
   };
+}
+
+// Get monthly registration trends
+// Get monthly registration trends
+async function getMonthlyRegistrationTrends(currentSeasonId, comparisonSeasonId) {
+  // Get current season monthly registrations
+  const { data: currentRegistrations, error: currentError } = await supabase
+    .from('players')
+    .select('id, registration_date, status')
+    .eq('season_id', currentSeasonId);
+
+  if (currentError) throw currentError;
+
+  // Get comparison season monthly registrations
+  let comparisonRegistrations = [];
+  if (comparisonSeasonId) {
+    const { data: compData, error: compError } = await supabase
+      .from('players')
+      .select('id, registration_date, status')
+      .eq('season_id', comparisonSeasonId);
+
+    if (compError) throw compError;
+    comparisonRegistrations = compData || [];
+  }
+
+  // Helper function to group registrations by month
+  const groupByMonth = (registrations, seasonYear) => {
+    const months = Array(12).fill(0).map((_, i) => ({ month: i + 1, count: 0 }));
+    
+    registrations.forEach(registration => {
+      // Skip withdrawn players from active counts
+      if (registration.status === 'withdrawn') return;
+      
+      if (registration.registration_date) {
+        try {
+          const date = new Date(registration.registration_date);
+          const month = date.getMonth() + 1; // 1-12
+          
+          // Only include dates from the season year
+          if (date.getFullYear() === seasonYear) {
+            const monthIndex = months.findIndex(m => m.month === month);
+            if (monthIndex !== -1) {
+              months[monthIndex].count += 1;
+            }
+          }
+        } catch (e) {
+          console.log('Invalid registration date:', registration.registration_date);
+        }
+      }
+    });
+    
+    return months;
+  };
+
+  // Get season years
+  const { data: currentSeasonData } = await supabase
+    .from('seasons')
+    .select('year')
+    .eq('id', currentSeasonId)
+    .single();
+
+  const currentYear = currentSeasonData?.year || new Date().getFullYear();
+  let comparisonYear = null;
+  
+  if (comparisonSeasonId) {
+    const { data: comparisonSeasonData } = await supabase
+      .from('seasons')
+      .select('year')
+      .eq('id', comparisonSeasonId)
+      .single();
+    
+    comparisonYear = comparisonSeasonData?.year || currentYear - 1;
+  } else {
+    comparisonYear = currentYear - 1;
+  }
+
+  // Group registrations by month
+  const currentMonthly = groupByMonth(currentRegistrations, currentYear);
+  const comparisonMonthly = groupByMonth(comparisonRegistrations, comparisonYear);
+
+  // Map month numbers to names
+  const monthNames = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'
+  ];
+
+  // Format the data for response
+  const monthlyData = monthNames.map((name, index) => {
+    const currentCount = currentMonthly.find(m => m.month === index + 1)?.count || 0;
+    const previousCount = comparisonMonthly.find(m => m.month === index + 1)?.count || 0;
+    
+    // Calculate trend directly (not as a function)
+    let trend = 'neutral';
+    if (currentCount > previousCount) {
+      trend = 'up';
+    } else if (currentCount < previousCount) {
+      trend = 'down';
+    }
+    
+    return {
+      month: name,
+      monthNumber: index + 1,
+      current: currentCount,
+      previous: previousCount,
+      trend: trend
+    };
+  });
+
+  // Filter out months where BOTH current and previous are 0
+  const filteredMonthlyData = monthlyData.filter(month => 
+    month.current > 0 || month.previous > 0
+  );
+
+  return filteredMonthlyData;
 }
 
 // Get division statistics with trends - using program_title

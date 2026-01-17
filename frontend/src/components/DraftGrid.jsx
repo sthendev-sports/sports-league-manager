@@ -1153,29 +1153,64 @@ const DraftGrid = ({ draftData, divisionId, seasonId, onPicksUpdate, onDraftStar
         }
 
         for (const coach of manager.volunteers.assistantCoaches) {
-          await fetch(`/api/volunteers/${coach.id}`, {
-            method: 'PUT',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              team_id: teamId,
-              role: 'Assistant Coach'
-            })
-          });
+          const managerFullName = manager.name.trim();
+const managerLastName = managerFullName.split(' ').pop(); // Get last word as last name
+const team = draftData.teams.find(t => t.id === teamId);
+const baseTeamName = team?.name || '';
+
+let updatedTeamName = baseTeamName;
+if (baseTeamName.includes(' - ')) {
+  updatedTeamName = baseTeamName.split(' - ')[0] + ` - ${managerLastName}`;
+} else {
+  updatedTeamName = `${baseTeamName} - ${managerLastName}`;
+}
+
+// Update team with manager information and updated team name
+await fetch(`/api/teams/${teamId}`, {
+  method: 'PUT',
+  headers: {
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({
+    manager_name: manager.name,
+    volunteer_manager_id: manager.volunteers.manager?.id || null,
+    name: updatedTeamName
+  })
+});
         }
 
-        // Update team with manager information
-        await fetch(`/api/teams/${teamId}`, {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            manager_name: manager.name,
-            volunteer_manager_id: manager.volunteers.manager?.id || null
-          })
-        });
+        // Extract manager's last name and update team name
+const managerFullName = manager.name.trim();
+const managerLastName = managerFullName.split(' ').pop(); // Get last word as last name
+
+// Get the team from draftData
+const team = draftData.teams.find(t => t.id === teamId);
+if (!team) {
+  throw new Error(`Team ${teamId} not found in draft data`);
+}
+
+// Update the team name
+const baseTeamName = team.name || '';
+let updatedTeamName = baseTeamName;
+if (baseTeamName.includes(' - ')) {
+  updatedTeamName = baseTeamName.split(' - ')[0] + ` - ${managerLastName}`;
+} else {
+  updatedTeamName = `${baseTeamName} - ${managerLastName}`;
+}
+
+// Update team with ALL team data from draftData plus new manager info and updated name
+await fetch(`/api/teams/${teamId}`, {
+  method: 'PUT',
+  headers: {
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({
+    ...team, // Include all team data from draftData
+    manager_name: manager.name,
+    volunteer_manager_id: manager.volunteers.manager?.id || null,
+    name: updatedTeamName
+  })
+});
       }
 
       console.log('Draft commit completed successfully');

@@ -41,10 +41,13 @@ const Dashboard = () => {
     volunteerBreakdown: {
       teamManagers: 0,
       assistantCoaches: 0,
-      teamParents: 0
+      teamParents: 0,
     },
+	monthlyTrends: [],
     volunteerByDivision: []
   });
+  
+  const [selectedMonthView, setSelectedMonthView] = useState('all'); // 'all', 'quarter', or specific range
   
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -54,6 +57,16 @@ const Dashboard = () => {
   const [currentSeason, setCurrentSeason] = useState(null);
   const [editingDivision, setEditingDivision] = useState(null);
   const [editValue, setEditValue] = useState('');
+
+// Calculate totals for monthly trends
+const monthlyTotals = stats.monthlyTrends?.reduce(
+  (totals, month) => {
+    totals.current += month.current;
+    totals.previous += month.previous;
+    return totals;
+  },
+  { current: 0, previous: 0 }
+) || { current: 0, previous: 0 };
 
   // Load seasons on component mount
   useEffect(() => {
@@ -469,7 +482,144 @@ const loadDashboardData = async () => {
             )}
           </div>
         </div>
-
+{/* Monthly Registration Trends */}
+<div className="bg-white shadow rounded-lg">
+  <div className="px-6 py-4 border-b border-gray-200">
+    <div className="flex justify-between items-center">
+      <h2 className="text-lg font-semibold text-gray-900">Monthly Registration Trends</h2>
+      <div className="flex space-x-2">
+        <button
+          onClick={() => setSelectedMonthView('all')}
+          className={`px-3 py-1 text-sm rounded ${selectedMonthView === 'all' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+        >
+          All Months
+        </button>
+        <button
+          onClick={() => setSelectedMonthView('quarter')}
+          className={`px-3 py-1 text-sm rounded ${selectedMonthView === 'quarter' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+        >
+          Jan-Mar
+        </button>
+      </div>
+    </div>
+  </div>
+  <div className="p-4">
+    {stats.monthlyTrends && stats.monthlyTrends.length > 0 ? (
+      <div className="overflow-x-auto">
+        <table className="min-w-full divide-y divide-gray-200">
+          <thead className="bg-gray-50">
+            <tr>
+              <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Month</th>
+              <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Current Season</th>
+              <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap" title={getComparisonSeasonName()}>
+                {getComparisonColumnHeader()}
+              </th>
+              <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Change</th>
+              <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Trend</th>
+            </tr>
+          </thead>
+          <tbody className="bg-white divide-y divide-gray-200">
+            {stats.monthlyTrends
+              .filter(month => {
+                if (selectedMonthView === 'quarter') {
+                  return month.monthNumber <= 3; // Jan-Mar
+                }
+                return true;
+              })
+              .map((month) => {
+                const change = month.current - month.previous;
+                const trend = month.trend;
+                const trendStyles = getTrendStyles(trend);
+                
+                return (
+                  <tr key={month.month} className="hover:bg-gray-50">
+                    <td className="px-2 py-2 text-sm font-medium text-gray-900 whitespace-nowrap">
+                      {month.month}
+                    </td>
+                    <td className="px-2 py-2 text-sm text-gray-900 text-center whitespace-nowrap font-bold">
+                      {month.current}
+                    </td>
+                    <td className="px-2 py-2 text-sm text-gray-500 text-center whitespace-nowrap">
+                      {month.previous}
+                    </td>
+                    <td className="px-2 py-2 text-sm text-center whitespace-nowrap">
+                      <span className={`font-medium ${change > 0 ? 'text-green-600' : change < 0 ? 'text-red-600' : 'text-gray-500'}`}>
+                        {change > 0 ? '+' : ''}{change}
+                      </span>
+                    </td>
+                    <td className="px-2 py-2 text-sm text-center whitespace-nowrap">
+                      <div className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium ${trendStyles.bg} ${trendStyles.text}`}>
+                        <span className={trendStyles.arrow}>
+                          {trendStyles.symbol}
+                        </span>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            {/* Total Row for Quarterly View */}
+            {selectedMonthView === 'quarter' && (
+              <tr className="bg-gray-50 font-semibold border-t-2 border-gray-300">
+                <td className="px-2 py-2 text-sm text-gray-900 whitespace-nowrap">Q1 Total</td>
+                <td className="px-2 py-2 text-sm text-gray-900 text-center whitespace-nowrap">
+                  {stats.monthlyTrends
+                    .filter(month => month.monthNumber <= 3)
+                    .reduce((sum, month) => sum + month.current, 0)}
+                </td>
+                <td className="px-2 py-2 text-sm text-gray-500 text-center whitespace-nowrap">
+                  {stats.monthlyTrends
+                    .filter(month => month.monthNumber <= 3)
+                    .reduce((sum, month) => sum + month.previous, 0)}
+                </td>
+                <td className="px-2 py-2 text-sm text-center whitespace-nowrap">
+                  {(() => {
+                    const currentTotal = stats.monthlyTrends
+                      .filter(month => month.monthNumber <= 3)
+                      .reduce((sum, month) => sum + month.current, 0);
+                    const previousTotal = stats.monthlyTrends
+                      .filter(month => month.monthNumber <= 3)
+                      .reduce((sum, month) => sum + month.previous, 0);
+                    const change = currentTotal - previousTotal;
+                    return (
+                      <span className={`font-medium ${change > 0 ? 'text-green-600' : change < 0 ? 'text-red-600' : 'text-gray-500'}`}>
+                        {change > 0 ? '+' : ''}{change}
+                      </span>
+                    );
+                  })()}
+                </td>
+                <td className="px-2 py-2 text-sm text-center whitespace-nowrap">
+                  {(() => {
+                    const currentTotal = stats.monthlyTrends
+                      .filter(month => month.monthNumber <= 3)
+                      .reduce((sum, month) => sum + month.current, 0);
+                    const previousTotal = stats.monthlyTrends
+                      .filter(month => month.monthNumber <= 3)
+                      .reduce((sum, month) => sum + month.previous, 0);
+                    const trend = currentTotal > previousTotal ? 'up' : currentTotal < previousTotal ? 'down' : 'neutral';
+                    const trendStyles = getTrendStyles(trend);
+                    
+                    return (
+                      <div className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium ${trendStyles.bg} ${trendStyles.text}`}>
+                        <span className={trendStyles.arrow}>
+                          {trendStyles.symbol}
+                        </span>
+                      </div>
+                    );
+                  })()}
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    ) : (
+      <div className="text-center py-8 text-gray-500">
+        <p>No monthly registration data available</p>
+        <p className="text-sm mt-1">(No registrations found for either season in any month)</p>
+      </div>
+    )}
+  </div>
+</div>
         {/* Volunteer Breakdown by Division */}
         <div className="bg-white shadow rounded-lg">
           <div className="px-6 py-4 border-b border-gray-200">

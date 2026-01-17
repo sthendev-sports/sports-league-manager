@@ -502,6 +502,20 @@ class WorkbondExemptService {
       throw error;
     }
   }
+  
+  async isFamilyExempt(familyId, seasonId) {
+  try {
+    const result = await this.quickCheckFamilyExemption(familyId, seasonId);
+    // Ensure we return the expected structure
+    return {
+      exempt: result.exempt || false,
+      reason: result.reason || ''
+    };
+  } catch (error) {
+    console.error('Error in isFamilyExempt:', error);
+    return { exempt: false, reason: 'Error checking exemption' };
+  }
+}
 
   // Keep existing methods for backward compatibility
   async updateExemptionsAfterImport(seasonId) {

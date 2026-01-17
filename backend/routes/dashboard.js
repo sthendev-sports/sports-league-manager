@@ -603,25 +603,100 @@ async function getVolunteerByDivision(seasonId) {
   }
 }
 
-// Get work bond statistics
+// Get work bond statistics - USING NEW SEASON-SPECIFIC SYSTEM
 async function getWorkBondStatistics(seasonId) {
-  // Get families with players in current season that are missing work bonds
-  const { data: families, error } = await supabase
-    .from('families')
-    .select(`
-      id,
-      work_bond_check_received,
-      players:players!inner (id)
-    `)
-    .eq('players.season_id', seasonId)
-    .eq('work_bond_check_received', false);
+  try {
+    console.log('Getting work bond stats for season:', seasonId, 'using season_workbond table');
+    
+    // Get all families with players in this season
+    const { data: familiesWithPlayers, error: familiesError } = await supabase
+      .from('players')
+      .select('family_id')
+      .eq('season_id', seasonId);
 
-  if (error) throw error;
+    if (familiesError) throw familiesError;
 
-  return {
-    pendingCount: families?.length || 0,
-    families: families || []
-  };
+    // Get unique family IDs
+    const familyIds = [...new Set(familiesWithPlayers.map(p => p.family_id).filter(Boolean))];
+    console.log('DEBUG: Total unique families in season:', familyIds.length);
+
+    if (familyIds.length === 0) {
+      return {
+        pendingCount: 0,
+        families: [],
+        debug: { totalFamilies: 0 }
+      };
+    }
+
+    // Get season work bond records for these families
+    const { data: workbondRecords, error: workbondError } = await supabase
+      .from('family_season_workbond')
+      .select('family_id, received, notes')
+      .eq('season_id', seasonId)
+      .in('family_id', familyIds);
+
+    if (workbondError) throw workbondError;
+
+    // Create a map of family_id -> workbond status
+    const workbondMap = new Map();
+    workbondRecords.forEach(record => {
+      workbondMap.set(record.family_id, record);
+    });
+
+    // Check for exemptions if families don't have workbond records
+    const familiesWithoutWorkbond = familyIds.filter(id => !workbondMap.has(id));
+    
+    if (familiesWithoutWorkbond.length > 0) {
+      // Check if these families have board member exemptions
+      const { data: familiesData, error: famError } = await supabase
+        .from('families')
+        .select('id, is_board_member')
+        .in('id', familiesWithoutWorkbond);
+
+      if (!famError && familiesData) {
+        // Add exempt families to the map
+        familiesData.forEach(family => {
+          if (family.is_board_member) {
+            workbondMap.set(family.id, {
+              family_id: family.id,
+              received: false,
+              notes: 'Exempt - Board Member'
+            });
+          }
+        });
+      }
+    }
+
+    // Count families missing work bond (not received AND not exempt)
+    const pendingFamilies = familyIds.filter(familyId => {
+      const workbond = workbondMap.get(familyId);
+      // Pending if: no record OR (record exists AND not received AND not exempt)
+      if (!workbond) return true; // No workbond record
+      if (workbond.received) return false; // Already received
+      if (workbond.notes && workbond.notes.includes('Exempt')) return false; // Exempt
+      return true; // Not received and not exempt
+    });
+
+    console.log('DEBUG: Families pending work bond:', pendingFamilies.length);
+    console.log('DEBUG: Breakdown:', {
+      totalFamilies: familyIds.length,
+      withWorkbondRecords: workbondRecords.length,
+      pending: pendingFamilies.length
+    });
+
+    return {
+      pendingCount: pendingFamilies.length,
+      families: pendingFamilies,
+      debug: {
+        totalFamilies: familyIds.length,
+        familiesWithWorkbondRecords: workbondRecords.length,
+        familiesPending: pendingFamilies.length
+      }
+    };
+  } catch (error) {
+    console.error('Error in getWorkBondStatistics:', error);
+    throw error;
+  }
 }
 
 module.exports = router;

@@ -2,8 +2,40 @@
 import React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { Shield } from 'lucide-react'; // Import Shield icon for access denied
 
-const ProtectedRoute = ({ element, requiredRoles }) => {
+// Map frontend routes to permission resources (MUST match backend RESOURCE_BY_BASEURL)
+const PAGE_TO_RESOURCE = {
+  '/': 'dashboard',
+  '/players': 'players',
+  '/teams': 'teams',
+  '/draft': 'draft',
+  '/team-uniforms': 'uniforms', // Assuming uniforms are part of teams
+  '/games': 'game_scheduler',
+  '/workbond-management': 'workbond_management',
+  '/volunteers': 'volunteers',
+  '/requests': 'requests',
+  '/mailing-list': 'mailing_list',
+  '/boardmembers': 'board_members',
+  '/users': 'users',
+  '/email-settings': 'email_settings',
+  '/configuration': 'configuration',
+  '/volunteer-import': 'volunteers', // If you have this page
+  // Add other pages as needed
+};
+
+// Helper to normalize permission values
+const normalizePermission = (value) => {
+  if (!value) return 'none';
+  const v = String(value).toLowerCase();
+  if (v === 'none' || v === 'read' || v === 'write') return v;
+  if (v === 'r') return 'read';
+  if (v === 'rw') return 'write';
+  if (v === 'x') return 'none';
+  return 'none';
+};
+
+const ProtectedRoute = ({ element, requiredRoles, requiredPermission = 'read' }) => {
   const { user, loading } = useAuth();
   const location = useLocation();
 
@@ -47,23 +79,68 @@ const ProtectedRoute = ({ element, requiredRoles }) => {
     );
   }
 
-  // If specific roles required, check them
+  // ===== OPTION 1: Check requiredRoles (backward compatibility) =====
   if (requiredRoles && requiredRoles.length > 0) {
     if (!requiredRoles.includes(user.role)) {
       return (
-        <div className="p-8">
-          <div className="max-w-xl mx-auto bg-white shadow rounded-lg p-6 border border-red-100">
-            <h2 className="text-lg font-semibold text-red-700 mb-2">
-              Access denied
-            </h2>
-            <p className="text-sm text-gray-700 mb-2">
-              Your account role (<span className="font-mono">{user.role}</span>) does not have
-              permission to view this page.
+        <div className="flex justify-center items-center min-h-screen bg-gray-50">
+          <div className="max-w-md w-full bg-white shadow-lg rounded-lg p-8 text-center">
+            <Shield className="h-16 w-16 text-red-500 mx-auto mb-4" />
+            <h2 className="text-xl font-bold text-gray-900 mb-2">Access Denied</h2>
+            <p className="text-gray-600 mb-4">
+              Your role "<span className="font-semibold">{user.role}</span>" does not have permission to access this page.
             </p>
-            <p className="text-xs text-gray-500">
-              If you believe this is a mistake, ask an Administrator or President to adjust your
-              permissions.
+            <button
+              onClick={() => window.history.back()}
+              className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+            >
+              Go Back
+            </button>
+          </div>
+        </div>
+      );
+    }
+  }
+
+  // ===== OPTION 2: Check resource-based permissions (NEW SYSTEM) =====
+  const resource = PAGE_TO_RESOURCE[location.pathname];
+  
+  if (resource) {
+    // Get user's permission for this resource
+    const userPermission = user.permissions?.[resource];
+    const normalizedUserPermission = normalizePermission(userPermission);
+    const normalizedRequired = normalizePermission(requiredPermission);
+    
+    // Permission hierarchy: none < read < write
+    const permissionOrder = { 'none': 0, 'read': 1, 'write': 2 };
+    const userLevel = permissionOrder[normalizedUserPermission] || 0;
+    const requiredLevel = permissionOrder[normalizedRequired] || 0;
+    
+    if (userLevel < requiredLevel) {
+      // User doesn't have required permission level
+      const permissionText = {
+        'none': 'No access',
+        'read': 'View-only access',
+        'write': 'Edit access'
+      };
+      
+      return (
+        <div className="flex justify-center items-center min-h-screen bg-gray-50">
+          <div className="max-w-md w-full bg-white shadow-lg rounded-lg p-8 text-center">
+            <Shield className="h-16 w-16 text-red-500 mx-auto mb-4" />
+            <h2 className="text-xl font-bold text-gray-900 mb-2">Access Denied</h2>
+            <p className="text-gray-600 mb-2">
+              You need <span className="font-semibold">{permissionText[normalizedRequired]}</span> to this page.
             </p>
+            <p className="text-sm text-gray-500 mb-4">
+              Your current permission: <span className="font-semibold">{permissionText[normalizedUserPermission] || 'None'}</span>
+            </p>
+            <button
+              onClick={() => window.history.back()}
+              className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+            >
+              Go Back
+            </button>
           </div>
         </div>
       );

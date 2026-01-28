@@ -9,6 +9,7 @@ import api from '../services/api';
 // --- Helpers: volunteer interest roles (for Draft volunteer prompt) ---
 const ASSIGNABLE_ROLES = ['Manager', 'Assistant Coach', 'Team Parent'];
 
+// Update the parseInterestedRoles helper
 function parseInterestedRoles(volunteer) {
   const raw = String(
     volunteer?.interested_roles ??
@@ -18,18 +19,34 @@ function parseInterestedRoles(volunteer) {
   ).trim();
 
   if (!raw) return [];
+  
   return raw
     .split(/[,;|\n]+/)
     .map((s) => s.trim())
     .filter(Boolean)
     .map((s) => {
       const lower = s.toLowerCase();
-      if (lower === 'coach') return 'Assistant Coach';
-      if (lower === 'assistant coach') return 'Assistant Coach';
-      if (lower === 'team parent') return 'Team Parent';
-      if (lower === 'manager') return 'Manager';
+      
+      // Simple mapping - just check for keywords
+      if (lower.includes('manager')) return 'Manager';
+      if (lower.includes('coach')) return 'Assistant Coach';
+      if (lower.includes('team') && lower.includes('parent')) return 'Team Parent';
+      if (lower.includes('parent') && lower.includes('team')) return 'Team Parent';
+      
       return s;
     });
+}
+
+// Also update getEligibleAssignmentRoles to be more flexible
+function getEligibleAssignmentRoles(volunteer) {
+  const roles = getVolunteerInterestedRoles(volunteer);
+  
+  // If no specific roles found, return all assignable roles
+  if (roles.length === 0) {
+    return [...ASSIGNABLE_ROLES];
+  }
+  
+  return roles.filter(role => ASSIGNABLE_ROLES.includes(role));
 }
 
 function getVolunteerInterestedRoles(volunteer) {
@@ -48,10 +65,6 @@ function getVolunteerInterestedRoles(volunteer) {
   return Array.from(roles);
 }
 
-function getEligibleAssignmentRoles(volunteer) {
-  // Return ALL assignable roles so draft manager can choose any
-  return [...ASSIGNABLE_ROLES];
-}
 
 function playerHasEligibleVolunteers(player) {
   const vols = Array.isArray(player?.volunteers) ? player.volunteers : [];
@@ -1087,148 +1100,120 @@ const DraftGrid = ({ draftData, divisionId, seasonId, onPicksUpdate, onDraftStar
 
 
   const commitDraft = async () => {
-    const unassignedManagers = managers.filter(manager => !teamAssignments[manager.id]);
-    if (unassignedManagers.length > 0) {
-      const managerNames = unassignedManagers.map(m => m.name).join(', ');
-      alert(`Please assign teams to the following managers before submitting: ${managerNames}`);
-      return;
-    }
+  const unassignedManagers = managers.filter(manager => !teamAssignments[manager.id]);
+  if (unassignedManagers.length > 0) {
+    const managerNames = unassignedManagers.map(m => m.name).join(', ');
+    alert(`Please assign teams to the following managers before submitting: ${managerNames}`);
+    return;
+  }
 
-    setSaving(true);
-    try {
-      console.log('Starting draft commit process...');
-      
-      for (const manager of managers) {
-        const teamId = teamAssignments[manager.id];
-        if (!teamId) {
-          console.error(`No team assigned for manager: ${manager.name}`);
-          continue;
-        }
-
-        console.log(`Processing manager: ${manager.name}, team: ${teamId}`);
-        
-        // Update players
-        for (const pick of manager.picks) {
-          console.log(`Updating player ${pick.playerName} to team ${teamId}`);
-          const response = await fetch(`/api/players/${pick.playerId}`, {
-            method: 'PUT',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              team_id: teamId
-            })
-          });
-
-          if (!response.ok) {
-            throw new Error(`Failed to update player ${pick.playerName}`);
-          }
-        }
-
-        // Update volunteer assignments
-        if (manager.volunteers.manager) {
-          await fetch(`/api/volunteers/${manager.volunteers.manager.id}`, {
-            method: 'PUT',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              team_id: teamId,
-              role: 'Manager'
-            })
-          });
-        }
-
-        if (manager.volunteers.teamParent) {
-          await fetch(`/api/volunteers/${manager.volunteers.teamParent.id}`, {
-            method: 'PUT',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              team_id: teamId,
-              role: 'Team Parent'
-            })
-          });
-        }
-
-        for (const coach of manager.volunteers.assistantCoaches) {
-          const managerFullName = manager.name.trim();
-const managerLastName = managerFullName.split(' ').pop(); // Get last word as last name
-const team = draftData.teams.find(t => t.id === teamId);
-const baseTeamName = team?.name || '';
-
-let updatedTeamName = baseTeamName;
-if (baseTeamName.includes(' - ')) {
-  updatedTeamName = baseTeamName.split(' - ')[0] + ` - ${managerLastName}`;
-} else {
-  updatedTeamName = `${baseTeamName} - ${managerLastName}`;
-}
-
-// Update team with manager information and updated team name
-await fetch(`/api/teams/${teamId}`, {
-  method: 'PUT',
-  headers: {
-    'Content-Type': 'application/json',
-  },
-  body: JSON.stringify({
-    manager_name: manager.name,
-    volunteer_manager_id: manager.volunteers.manager?.id || null,
-    name: updatedTeamName
-  })
-});
-        }
-
-        // Extract manager's last name and update team name
-const managerFullName = manager.name.trim();
-const managerLastName = managerFullName.split(' ').pop(); // Get last word as last name
-
-// Get the team from draftData
-const team = draftData.teams.find(t => t.id === teamId);
-if (!team) {
-  throw new Error(`Team ${teamId} not found in draft data`);
-}
-
-// Update the team name
-const baseTeamName = team.name || '';
-let updatedTeamName = baseTeamName;
-if (baseTeamName.includes(' - ')) {
-  updatedTeamName = baseTeamName.split(' - ')[0] + ` - ${managerLastName}`;
-} else {
-  updatedTeamName = `${baseTeamName} - ${managerLastName}`;
-}
-
-// Update team with ALL team data from draftData plus new manager info and updated name
-await fetch(`/api/teams/${teamId}`, {
-  method: 'PUT',
-  headers: {
-    'Content-Type': 'application/json',
-  },
-  body: JSON.stringify({
-    ...team, // Include all team data from draftData
-    manager_name: manager.name,
-    volunteer_manager_id: manager.volunteers.manager?.id || null,
-    name: updatedTeamName
-  })
-});
+  setSaving(true);
+  try {
+    console.log('Starting draft commit process...');
+    
+    for (const manager of managers) {
+      const teamId = teamAssignments[manager.id];
+      if (!teamId) {
+        console.error(`No team assigned for manager: ${manager.name}`);
+        continue;
       }
 
-      console.log('Draft commit completed successfully');
-      setDraftCommitted(true);
-        setDraftCommitted(true);
-        alert('Draft committed successfully! All players and volunteers have been assigned to teams.');
+      console.log(`Processing manager: ${manager.name}, team: ${teamId}`);
       
-      if (onDraftComplete) {
-        onDraftComplete();
+      // Update players - USE API CLIENT INSTEAD OF FETCH
+      for (const pick of manager.picks) {
+        console.log(`Updating player ${pick.playerName} to team ${teamId}`);
+        await api.put(`/players/${pick.playerId}`, {
+          team_id: teamId
+        });
       }
-      
-    } catch (error) {
-      console.error('Error committing draft:', error);
-      alert(`Error committing draft: ${error.message}. Please try again.`);
-    } finally {
-      setSaving(false);
+
+      // Update volunteer assignments - USE API CLIENT
+      if (manager.volunteers.manager) {
+        await api.put(`/volunteers/${manager.volunteers.manager.id}`, {
+          team_id: teamId,
+          role: 'Manager'
+        });
+      }
+
+      if (manager.volunteers.teamParent) {
+        await api.put(`/volunteers/${manager.volunteers.teamParent.id}`, {
+          team_id: teamId,
+          role: 'Team Parent'
+        });
+      }
+	  
+	  for (const coach of manager.volunteers.assistantCoaches) {
+  await api.put(`/volunteers/${coach.id}`, {
+    team_id: teamId,
+    role: 'Assistant Coach'
+  });
+}
+
+      for (const coach of manager.volunteers.assistantCoaches) {
+        const managerFullName = manager.name.trim();
+        const managerLastName = managerFullName.split(' ').pop();
+        const team = draftData.teams.find(t => t.id === teamId);
+        const baseTeamName = team?.name || '';
+
+        let updatedTeamName = baseTeamName;
+        if (baseTeamName.includes(' - ')) {
+          updatedTeamName = baseTeamName.split(' - ')[0] + ` - ${managerLastName}`;
+        } else {
+          updatedTeamName = `${baseTeamName} - ${managerLastName}`;
+        }
+
+        // Update team with manager information and updated team name - USE API CLIENT
+        await api.put(`/teams/${teamId}`, {
+          manager_name: manager.name,
+          volunteer_manager_id: manager.volunteers.manager?.id || null,
+          name: updatedTeamName
+        });
+      }
+
+      // Extract manager's last name and update team name
+      const managerFullName = manager.name.trim();
+      const managerLastName = managerFullName.split(' ').pop();
+
+      // Get the team from draftData
+      const team = draftData.teams.find(t => t.id === teamId);
+      if (!team) {
+        throw new Error(`Team ${teamId} not found in draft data`);
+      }
+
+      // Update the team name
+      const baseTeamName = team.name || '';
+      let updatedTeamName = baseTeamName;
+      if (baseTeamName.includes(' - ')) {
+        updatedTeamName = baseTeamName.split(' - ')[0] + ` - ${managerLastName}`;
+      } else {
+        updatedTeamName = `${baseTeamName} - ${managerLastName}`;
+      }
+
+      // Update team with ALL team data from draftData plus new manager info and updated name - USE API CLIENT
+      await api.put(`/teams/${teamId}`, {
+        ...team,
+        manager_name: manager.name,
+        volunteer_manager_id: manager.volunteers.manager?.id || null,
+        name: updatedTeamName
+      });
     }
-  };
+
+    console.log('Draft commit completed successfully');
+    setDraftCommitted(true);
+    alert('Draft committed successfully! All players and volunteers have been assigned to teams.');
+    
+    if (onDraftComplete) {
+      onDraftComplete();
+    }
+    
+  } catch (error) {
+    console.error('Error committing draft:', error);
+    alert(`Error committing draft: ${error.message}. Please try again.`);
+  } finally {
+    setSaving(false);
+  }
+};
 
   const cancelDraft = () => {
     if (window.confirm('Are you sure you want to cancel the draft? All progress will be lost.')) {

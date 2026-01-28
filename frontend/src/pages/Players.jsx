@@ -4,6 +4,7 @@ import { playersAPI, seasonsAPI, importAPI, parseCSV, teamsAPI } from '../servic
 import CSVImport from '../components/CSVImport';
 import CSVTemplate from '../components/CSVTemplate';
 import Modal from '../components/Modal';
+import { getPermissionErrorMessage } from '../utils/permissionHelpers';
 
 const Players = () => {
   const [players, setPlayers] = useState([]);
@@ -85,26 +86,65 @@ const Players = () => {
   const playersLoadSeq = useRef(0);
 
   const playerStats = useMemo(() => {
-    const total = players.length;
-    let paid = 0;
-    let unpaid = 0;
-    let workbondCheck = 0;
-    let activePlayers = 0;
-    let withdrawnPlayers = 0;
+  const total = players.length;
+  let paid = 0;
+  let unpaid = 0;
+  let workbondCheckFamilies = 0;
+  let activePlayers = 0;
+  let withdrawnPlayers = 0;
+  
+  // Debug: Track what we're seeing
+  const workbondDetails = [];
 
-    for (const p of players) {
-      if (p.payment_received) paid += 1;
-      else unpaid += 1;
-      
-      // CHANGED: Check season_workbond.received instead of family.work_bond_check_received
-      if (p.season_workbond?.received) workbondCheck += 1;
-      
-      if (p.status === 'active') activePlayers += 1;
-      if (p.status === 'withdrawn') withdrawnPlayers += 1;
+  // Track which families we've already counted for workbond
+  const countedFamilies = new Set();
+
+  for (const p of players) {
+    if (p.payment_received) paid += 1;
+    else unpaid += 1;
+    
+    // DEBUG: Log workbond status for each player
+    workbondDetails.push({
+      name: `${p.first_name} ${p.last_name}`,
+      family_id: p.family_id,
+      season_workbond: p.season_workbond,
+      received: p.season_workbond?.received
+    });
+    
+    // Count workbond check ONCE per family
+    if (p.season_workbond?.received && p.family_id) {
+      if (!countedFamilies.has(p.family_id)) {
+        workbondCheckFamilies += 1;
+        countedFamilies.add(p.family_id);
+        console.log(`✅ Family ${p.family_id} workbond received (${p.first_name} ${p.last_name})`);
+      } else {
+        console.log(`↩️ Family ${p.family_id} already counted (${p.first_name} ${p.last_name})`);
+      }
+    } else if (p.family_id) {
+      console.log(`❌ Family ${p.family_id} workbond NOT received (${p.first_name} ${p.last_name})`);
     }
+    
+    if (p.status === 'active') activePlayers += 1;
+    if (p.status === 'withdrawn') withdrawnPlayers += 1;
+  }
 
-    return { total, paid, unpaid, workbondCheck, activePlayers, withdrawnPlayers };
-  }, [players]);
+  // Log summary
+  console.log('=== WORKBOND STATS DEBUG ===');
+  console.log('Total players:', total);
+  console.log('Unique families with workbond:', workbondCheckFamilies);
+  console.log('Workbond details:', workbondDetails);
+  console.log('Counted families:', Array.from(countedFamilies));
+  console.log('===========================');
+
+  return { 
+    total, 
+    paid, 
+    unpaid, 
+    workbondCheck: workbondCheckFamilies, // Return family count, not player count
+    activePlayers, 
+    withdrawnPlayers 
+  };
+}, [players]);
 
   useEffect(() => {
     loadSeasons();
@@ -128,50 +168,71 @@ const Players = () => {
   }, [selectedSeason]);
 
   const loadPlayers = async () => {
-    const seqId = ++playersLoadSeq.current;
-    try {
-      setLoading(true);
-      setError(null);
-      
-      // CHANGED: We need to enhance players with season-specific workbond data
-      // First get players for the selected season
-      const filters = {};
-      if (selectedSeason) filters.season_id = selectedSeason;
-      
-      const response = await playersAPI.getAll(filters);
-      const basicPlayers = response.data || [];
-      
-      // Now enhance with season-specific workbond data
-      const playersWithSeasonWorkbond = await enhancePlayersWithSeasonWorkbond(basicPlayers, selectedSeason);
-      
-      // Then enhance with volunteer data
-      const playersWithVolunteers = await enhancePlayersWithVolunteerData(playersWithSeasonWorkbond);
-      
-      // Ignore stale responses
-      if (seqId !== playersLoadSeq.current) return;
-      setPlayers(playersWithVolunteers);
-      
-    } catch (error) {
-      console.error('Error loading players:', error);
-      if (seqId !== playersLoadSeq.current) return;
-      setError('Failed to load players. ' + error.message);
-      setPlayers([]);
-    } finally {
-      if (seqId === playersLoadSeq.current) {
-        setLoading(false);
-      }
+  const seqId = ++playersLoadSeq.current;
+  try {
+    setLoading(true);
+    setError(null);
+    
+    const filters = {};
+    if (selectedSeason) filters.season_id = selectedSeason;
+    
+    console.log('Loading players with filters:', filters);
+    const response = await playersAPI.getAll(filters);
+    
+    const playersData = response.data || [];
+    console.log(`Loaded ${playersData.length} players`);
+    
+    // DEBUG: Check if workbond data is included
+    if (playersData.length > 0) {
+      console.log('Sample player with workbond data:', {
+        name: `${playersData[0].first_name} ${playersData[0].last_name}`,
+        family_id: playersData[0].family_id,
+        season_workbond: playersData[0].season_workbond
+      });
     }
-  };
+    
+    // Count workbond records in the response
+    const workbondCount = playersData.filter(p => p.season_workbond?.received).length;
+    console.log(`Found ${workbondCount} players with workbond received in API response`);
+    
+    // Ignore stale responses
+    if (seqId !== playersLoadSeq.current) return;
+    
+    // Remove or comment out the enhancePlayersWithSeasonWorkbond call
+    // const playersWithWorkbond = await enhancePlayersWithSeasonWorkbond(playersData, selectedSeason);
+    
+    // Just use the data directly from the API
+    const playersWithVolunteers = await enhancePlayersWithVolunteerData(playersData);
+    setPlayers(playersWithVolunteers);
+    
+  } catch (error) {
+    console.error('Error loading players:', error);
+    if (seqId !== playersLoadSeq.current) return;
+    setError('Failed to load players. ' + error.message);
+    setPlayers([]);
+  } finally {
+    if (seqId === playersLoadSeq.current) {
+      setLoading(false);
+    }
+  }
+};
 
 // NEW FUNCTION: Enhance players with season-specific workbond data
   const enhancePlayersWithSeasonWorkbond = async (playersData, seasonId) => {
   try {
+    console.log('=== DEBUG: enhancePlayersWithSeasonWorkbond START ===');
+    console.log('Players to enhance:', playersData?.length);
+    console.log('Season ID:', seasonId);
+    
     if (!playersData || playersData.length === 0) return playersData;
     
     // Get family IDs from these players
     const familyIds = playersData.map(p => p.family_id).filter(Boolean);
+    console.log('Family IDs found:', familyIds);
+    console.log('Unique family IDs:', [...new Set(familyIds)]);
     
     if (familyIds.length === 0) {
+      console.log('No family IDs found');
       return playersData.map(player => ({
         ...player,
         season_workbond: {
@@ -182,61 +243,58 @@ const Players = () => {
     }
     
     // 1. Get existing workbond records in batch
+    console.log('Calling /api/family-season-workbond/batch...');
     const workbondResponse = await fetch(`/api/family-season-workbond/batch`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 
-        family_ids: familyIds,
-        season_id: seasonId 
-      })
-    });
+  method: 'POST',
+  headers: { 
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${localStorage.getItem('slm_token')}` // Ensure token is included
+  },
+  body: JSON.stringify({ 
+    family_ids: familyIds,
+    season_id: seasonId 
+  })
+});
+    
+    console.log('Response status:', workbondResponse.status);
+    console.log('Response headers:', workbondResponse.headers);
+    
+    if (!workbondResponse.ok) {
+      const errorText = await workbondResponse.text();
+      console.error('API Error response:', errorText);
+      throw new Error(`Workbond API failed: ${workbondResponse.status} - ${errorText}`);
+    }
     
     const workbondRecords = await workbondResponse.json();
+    console.log('Workbond records received:', workbondRecords);
+    console.log('Number of workbond records:', workbondRecords?.length || 0);
     
     // Create lookup map
     const workbondMap = new Map();
     workbondRecords.forEach(record => {
+      console.log(`Mapping: family_id=${record.family_id}, received=${record.received}, notes="${record.notes}"`);
       workbondMap.set(record.family_id, record);
     });
     
-    // 2. Check exemptions for families without workbond records in ONE BATCH
-    const familiesWithoutWorkbond = familyIds.filter(id => !workbondMap.has(id));
-    
-    if (familiesWithoutWorkbond.length > 0) {
-      const exemptionResponse = await fetch('/api/family-season-workbond/check-exemptions-batch', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          family_ids: familiesWithoutWorkbond,
-          season_id: seasonId
-        })
-      });
-      
-      if (exemptionResponse.ok) {
-        const exemptionResults = await exemptionResponse.json();
-        
-        // Add exempt records to our map
-        exemptionResults.forEach(result => {
-          if (result.is_exempt) {
-            workbondMap.set(result.family_id, {
-              family_id: result.family_id,
-              season_id: seasonId,
-              notes: result.exempt_reason ? `Exempt - ${result.exempt_reason}` : 'Exempt',
-              received: false
-            });
-          }
-        });
-      }
-    }
+    console.log('Workbond map size:', workbondMap.size);
     
     // 3. Map workbond data to players
-    return playersData.map(player => ({
-      ...player,
-      season_workbond: workbondMap.get(player.family_id) || {
-        received: false,
-        notes: ''
-      }
-    }));
+    const enhancedPlayers = playersData.map(player => {
+      const workbond = workbondMap.get(player.family_id);
+      console.log(`Player ${player.first_name} ${player.last_name} (family_id: ${player.family_id}):`, 
+        workbond ? `Found workbond: received=${workbond.received}, notes="${workbond.notes}"` : 'No workbond record');
+      
+      return {
+        ...player,
+        season_workbond: workbond || {
+          received: false,
+          notes: ''
+        }
+      };
+    });
+    
+    console.log('=== DEBUG: enhancePlayersWithSeasonWorkbond END ===');
+    return enhancedPlayers;
     
   } catch (error) {
     console.error('Error enhancing players with season workbond:', error);
@@ -343,70 +401,78 @@ const Players = () => {
 
   // UPDATED: Save workbond status to season-specific table
   const handleSaveWorkbondChange = async () => {
-    if (!editingPlayer) return;
+  if (!editingPlayer) return;
 
-    try {
-      setSavingWorkbond(true);
+  try {
+    setSavingWorkbond(true);
 
-      // Get the player's family_id and season_id
-      const familyId = editingPlayer.family_id;
-      const seasonId = editingPlayer.season_id;
+    // Get the player's family_id and season_id
+    const familyId = editingPlayer.family_id;
+    const seasonId = editingPlayer.season_id;
 
-      if (!familyId || !seasonId) {
-        throw new Error('Missing family_id or season_id');
-      }
-
-      // Parse the received status from the notes
-      const notes = editWorkbondStatus.trim();
-      const received = notes !== '' && !notes.toLowerCase().includes('exempt');
-
-      // Call API to update season-specific workbond AND families table for compatibility
-      const response = await fetch('/api/family-season-workbond', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          family_id: familyId,
-          season_id: seasonId,
-          notes: notes,
-          received: received,
-          // Also update families table for compatibility
-          update_families_table: true
-        })
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to update workbond status');
-      }
-
-      const updatedWorkbond = await response.json();
-      
-      // Update local state
-      setPlayers(prevPlayers => prevPlayers.map(player => {
-        if (player.family_id === familyId && player.season_id === seasonId) {
-          return {
-            ...player,
-            season_workbond: {
-              received: updatedWorkbond.received,
-              notes: updatedWorkbond.notes
-            }
-          };
-        }
-        return player;
-      }));
-
-      setShowWorkbondEditModal(false);
-      setEditingPlayer(null);
-    } catch (err) {
-      console.error('Error updating workbond status:', err);
-      alert('Failed to update workbond status. Check the console for details.');
-    } finally {
-      setSavingWorkbond(false);
+    if (!familyId || !seasonId) {
+      throw new Error('Missing family_id or season_id');
     }
-  };
 
+    // Parse the received status from the notes
+    const notes = editWorkbondStatus.trim();
+    const received = notes !== '' && !notes.toLowerCase().includes('exempt');
+
+    // Use the authenticated API client instead of fetch()
+    const response = await fetch('/api/family-season-workbond', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${localStorage.getItem('slm_token')}` // ADD AUTH TOKEN
+      },
+      body: JSON.stringify({
+        family_id: familyId,
+        season_id: seasonId,
+        notes: notes,
+        received: received,
+        update_families_table: true
+      })
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || 'Failed to update workbond status');
+    }
+
+    const updatedWorkbond = await response.json();
+    
+    // Update local state
+    setPlayers(prevPlayers => prevPlayers.map(player => {
+      if (player.family_id === familyId && player.season_id === seasonId) {
+        return {
+          ...player,
+          season_workbond: {
+            received: updatedWorkbond.received,
+            notes: updatedWorkbond.notes
+          }
+        };
+      }
+      return player;
+    }));
+
+    setShowWorkbondEditModal(false);
+    setEditingPlayer(null);
+    alert('Workbond status updated successfully!');
+    
+  } catch (err) {
+    console.error('Error updating workbond status:', err);
+    
+    // Use the permission error helper
+    const errorMessage = getPermissionErrorMessage(
+      err,
+      'Failed to update workbond status. You may not have permission to update this field.'
+    );
+    
+    alert(errorMessage);
+  } finally {
+    setSavingWorkbond(false);
+  }
+};
   useEffect(() => {
     if (selectedSeason) {
       loadTeams();
@@ -414,18 +480,54 @@ const Players = () => {
   }, [selectedSeason]);
 
   // FIXED: Enhanced volunteer data matching using family_id
-  const enhancePlayersWithVolunteerData = async (playersData) => {
-    try {
-      // Fetch volunteers for the current season
-      let url = '/api/volunteers';
-      if (selectedSeason) {
-        url += `?season_id=${selectedSeason}`;
+const enhancePlayersWithVolunteerData = async (playersData) => {
+  try {
+    // Fetch volunteers with authentication and proper error handling
+    const token = localStorage.getItem('slm_token');
+    let url = '/api/volunteers';
+    if (selectedSeason) {
+      url += `?season_id=${selectedSeason}`;
+    }
+    
+    console.log('Fetching volunteers from:', url);
+    console.log('Token exists:', !!token);
+    
+    const headers = {
+      'Content-Type': 'application/json'
+    };
+    
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    
+    const volunteersResponse = await fetch(url, { headers });
+    
+    console.log('Volunteers response status:', volunteersResponse.status);
+    console.log('Volunteers response headers:', volunteersResponse.headers);
+    
+    if (!volunteersResponse.ok) {
+      const errorText = await volunteersResponse.text();
+      console.error('Volunteers API error:', {
+        status: volunteersResponse.status,
+        statusText: volunteersResponse.statusText,
+        error: errorText
+      });
+      
+      // Try to parse error as JSON
+      try {
+        const errorJson = JSON.parse(errorText);
+        console.error('Volunteers API error JSON:', errorJson);
+      } catch (e) {
+        // Not JSON, keep as text
       }
       
-      console.log('Fetching volunteers from:', url);
-      const volunteersResponse = await fetch(url);
-      if (!volunteersResponse.ok) throw new Error('Failed to fetch volunteers');
-      const volunteersData = await volunteersResponse.json();
+      // Return players without volunteer data
+      console.warn('Returning players without volunteer data due to API error');
+      return playersData || [];
+    }
+    
+    const volunteersData = await volunteersResponse.json();
+    console.log('Volunteers data loaded:', volunteersData?.length || 0, 'volunteers');
       
       console.log('Total volunteers found:', volunteersData?.length || 0);
 
@@ -860,69 +962,122 @@ const Players = () => {
 
   // Handle linking volunteer
   const handleLinkVolunteer = async () => {
-    if (!linkSelections.volunteerId || !linkSelections.playerId) {
-      alert('Please select both a volunteer and a player');
+  if (!linkSelections.volunteerId || !linkSelections.playerId) {
+    alert('Please select both a volunteer and a player');
+    return;
+  }
+
+  try {
+    const token = localStorage.getItem('slm_token');
+    let url = '/api/volunteers';
+    if (selectedSeason) {
+      url += `?season_id=${selectedSeason}`;
+    }
+    
+    const headers = {
+      'Content-Type': 'application/json'
+    };
+    
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    
+    // Fetch volunteers with proper authentication
+    const volunteersResponse = await fetch(url, { headers });
+    
+    if (!volunteersResponse.ok) {
+      const errorText = await volunteersResponse.text();
+      console.error('Volunteers API error:', {
+        status: volunteersResponse.status,
+        statusText: volunteersResponse.statusText,
+        error: errorText
+      });
+      alert('Failed to fetch volunteers. Please check your permissions.');
+      return;
+    }
+    
+    const responseData = await volunteersResponse.json();
+    
+    // Check if response is an array or has a data property
+    let allVolunteers;
+    if (Array.isArray(responseData)) {
+      allVolunteers = responseData;
+    } else if (responseData && Array.isArray(responseData.data)) {
+      allVolunteers = responseData.data;
+    } else {
+      console.error('Unexpected API response format:', responseData);
+      alert('Failed to load volunteers: Unexpected response format');
+      return;
+    }
+    
+    const volunteer = allVolunteers.find(v => v.id === linkSelections.volunteerId);
+    const player = players.find(p => p.id === linkSelections.playerId);
+
+    if (!volunteer || !player) {
+      alert('Invalid selection - volunteer or player not found');
       return;
     }
 
-    // First, fetch the latest volunteer data
-    try {
-      const volunteersResponse = await fetch(`/api/volunteers${selectedSeason ? `?season_id=${selectedSeason}` : ''}`);
-      const allVolunteers = await volunteersResponse.json();
-      const volunteer = allVolunteers.find(v => v.id === linkSelections.volunteerId);
-      const player = players.find(p => p.id === linkSelections.playerId);
+    console.log(`Linking volunteer ${volunteer.name} to player ${player.first_name} ${player.last_name} (family: ${player.family_id})`);
 
-      if (!volunteer || !player) {
-        alert('Invalid selection');
-        return;
-      }
-
-      const success = await linkVolunteerToFamily(volunteer.id, player.family_id);
-      if (success) {
-        setLinkSelections({ volunteerId: '', playerId: '' });
-        setShowFamilyLinker(false);
-        // Refresh players to see updated volunteer data
-        await loadPlayers();
-      }
-    } catch (error) {
-      console.error('Error linking volunteer:', error);
-      alert(`Error linking volunteer: ${error.message}`);
+    const success = await linkVolunteerToFamily(volunteer.id, player.family_id);
+    if (success) {
+      setLinkSelections({ volunteerId: '', playerId: '' });
+      setShowFamilyLinker(false);
+      // Refresh players to see updated volunteer data
+      await loadPlayers();
     }
-  };
+  } catch (error) {
+    console.error('Error linking volunteer:', error);
+    alert(`Error linking volunteer: ${error.message}`);
+  }
+};
 
   // NEW: Function to link volunteer to family
   const linkVolunteerToFamily = async (volunteerId, familyId) => {
-    try {
-      console.log(`Linking volunteer ${volunteerId} to family ${familyId}`);
-      
-      const response = await fetch(`/api/volunteers/${volunteerId}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          family_id: familyId
-        })
-      });
+  try {
+    console.log(`Linking volunteer ${volunteerId} to family ${familyId}`);
+    
+    const token = localStorage.getItem('slm_token');
+    
+    const response = await fetch(`/api/volunteers/${volunteerId}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        family_id: familyId
+      })
+    });
 
-      if (!response.ok) {
-        throw new Error('Failed to link volunteer to family');
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('API Error response:', errorText);
+      
+      // Try to parse as JSON
+      try {
+        const errorData = JSON.parse(errorText);
+        throw new Error(errorData.error || `API error: ${response.status}`);
+      } catch (e) {
+        throw new Error(`Failed to link volunteer: ${response.status} - ${errorText}`);
       }
-
-      const result = await response.json();
-      console.log('Volunteer linked successfully:', result);
-      
-      // Reload players to see the updated volunteer data
-      await loadPlayers();
-      
-      alert('Volunteer successfully linked to family!');
-      return true;
-    } catch (error) {
-      console.error('Error linking volunteer:', error);
-      alert(`Error linking volunteer: ${error.message}`);
-      return false;
     }
-  };
+
+    const result = await response.json();
+    console.log('Volunteer linked successfully:', result);
+    
+    // Reload players to see the updated volunteer data
+    await loadPlayers();
+    
+    alert('Volunteer successfully linked to family!');
+    return true;
+  } catch (error) {
+    console.error('Error linking volunteer:', error);
+    alert(`Error linking volunteer: ${error.message}`);
+    return false;
+  }
+};
 
   // Family Linker Modal Footer
   const FamilyLinkerFooter = (
@@ -1012,17 +1167,62 @@ const Players = () => {
             value={linkSelections.volunteerId}
             onChange={(e) => setLinkSelections(prev => ({ ...prev, volunteerId: e.target.value }))}
             onClick={async () => {
-              // Fetch unlinked volunteers when dropdown is clicked
-              try {
-                const response = await fetch(`/api/volunteers${selectedSeason ? `?season_id=${selectedSeason}` : ''}`);
-                const allVolunteers = await response.json();
-                const unlinked = allVolunteers.filter(v => !v.family_id);
-                console.log('Fetched unlinked volunteers:', unlinked.length);
-                setUnlinkedVolunteers(unlinked);
-              } catch (error) {
-                console.error('Error fetching unlinked volunteers:', error);
-              }
-            }}
+  // Fetch unlinked volunteers when dropdown is clicked
+  try {
+    const token = localStorage.getItem('slm_token');
+    let url = '/api/volunteers';
+    if (selectedSeason) {
+      url += `?season_id=${selectedSeason}`;
+    }
+    
+    const headers = {
+      'Content-Type': 'application/json'
+    };
+    
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    
+    const response = await fetch(url, { headers });
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Volunteers API error:', {
+        status: response.status,
+        statusText: response.statusText,
+        error: errorText
+      });
+      alert('Failed to load volunteers. Please check your permissions.');
+      return;
+    }
+    
+    const responseData = await response.json();
+    
+    // Check if response is an array or has a data property
+    let allVolunteers;
+    if (Array.isArray(responseData)) {
+      allVolunteers = responseData;
+    } else if (responseData && Array.isArray(responseData.data)) {
+      allVolunteers = responseData.data;
+    } else if (responseData && responseData.error) {
+      console.error('API returned error:', responseData.error);
+      alert(`API Error: ${responseData.error}`);
+      return;
+    } else {
+      console.error('Unexpected API response format:', responseData);
+      alert('Failed to load volunteers: Unexpected response format');
+      return;
+    }
+    
+    // Filter for unlinked volunteers
+    const unlinked = allVolunteers.filter(v => !v.family_id);
+    console.log(`Fetched ${allVolunteers.length} total volunteers, ${unlinked.length} unlinked`);
+    setUnlinkedVolunteers(unlinked);
+  } catch (error) {
+    console.error('Error fetching unlinked volunteers:', error);
+    alert(`Error loading volunteers: ${error.message}`);
+  }
+}}
           >
             <option value="">Choose a volunteer...</option>
             {unlinkedVolunteers.map(volunteer => (

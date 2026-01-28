@@ -1,15 +1,15 @@
 import React, { useState, useEffect } from 'react';
-
-function getLastName(name = '') {
-  const parts = String(name).trim().split(/\s+/).filter(Boolean);
-  return (parts[parts.length - 1] || '').toLowerCase();
-}
-
 import { Users, Plus, Search, Download, Upload, Filter, Mail, Phone, Edit, Trash2, Save, AlertCircle, CheckCircle, XCircle } from 'lucide-react';
 import CSVImport from '../components/CSVImport';
 import CSVTemplate from '../components/CSVTemplate';
 import VolunteerReports from '../components/VolunteerReports';
 import Modal from '../components/Modal';
+import { getPermissionErrorMessage } from '../utils/permissionHelpers';
+
+function getLastName(name = '') {
+  const parts = String(name).trim().split(/\s+/).filter(Boolean);
+  return (parts[parts.length - 1] || '').toLowerCase();
+}
 
 const Volunteers = () => {
   const [volunteers, setVolunteers] = useState([]);
@@ -26,7 +26,7 @@ const Volunteers = () => {
   const [editingVolunteer, setEditingVolunteer] = useState(null);
   const [activeTab, setActiveTab] = useState('manage');
   const [volunteerTrainings, setVolunteerTrainings] = useState([]);
-const [availableVolunteerTrainings, setAvailableVolunteerTrainings] = useState([]);
+  const [availableVolunteerTrainings, setAvailableVolunteerTrainings] = useState([]);
   const [newVolunteer, setNewVolunteer] = useState({
     name: '',
     email: '',
@@ -37,15 +37,56 @@ const [availableVolunteerTrainings, setAvailableVolunteerTrainings] = useState([
     team_id: '',
     notes: '',
     training_completed: false,
-	volunteer_id: '', // ADDED
-	volunteer_type_id: '' // ADDED
+    volunteer_id: '', // ADDED
+    volunteer_type_id: '' // ADDED
   });
   // Add import results state
   const [importResults, setImportResults] = useState(null);
 
+  // ✅ Helper: fetch that automatically includes your login token
+  const authFetch = (url, options = {}) => {
+    const token = localStorage.getItem('slm_token');
+
+    return fetch(url, {
+      ...options,
+      headers: {
+        ...(options.headers || {}),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+    });
+  };
+
+  // ✅ Helper: produce a clear message for 401/403 (no token vs no permission)
+  const buildAuthErrorMessage = async (response, fallback = 'Request failed') => {
+    const status = response?.status;
+
+    let bodyText = '';
+    try {
+      bodyText = await response.text();
+    } catch (e) {
+      bodyText = '';
+    }
+
+    if (status === 401) {
+      return 'You are not logged in (401). Please log in again and retry.';
+    }
+
+    if (status === 403) {
+      // Prefer server-provided error if it exists
+      try {
+        const parsed = bodyText ? JSON.parse(bodyText) : null;
+        if (parsed?.error) return parsed.error;
+      } catch (e) {}
+      return 'Your role is not allowed to perform this action (403).';
+    }
+
+    // Other errors
+    return `${fallback}. HTTP ${status}${bodyText ? `: ${bodyText}` : ''}`;
+  };
+
   useEffect(() => {
     loadInitialData();
-	loadAvailableVolunteerTrainings();
+    loadAvailableVolunteerTrainings();
   }, []);
 
   useEffect(() => {
@@ -61,6 +102,28 @@ const [availableVolunteerTrainings, setAvailableVolunteerTrainings] = useState([
       loadVolunteers();
     }
   }, [selectedDivision, selectedSeason]);
+
+  // When editing a volunteer and their division/season changes, reload teams for those filters
+  useEffect(() => {
+    if (editingVolunteer && showAddForm) {
+      const loadTeamsForCurrentDivision = async () => {
+        const divisionId = editingVolunteer.division_id;
+        const seasonId = editingVolunteer.season_id;
+
+        if (divisionId && seasonId) {
+          await loadTeams({ division_id: divisionId, season_id: seasonId });
+        } else if (divisionId) {
+          await loadTeams({ division_id: divisionId });
+        } else if (seasonId) {
+          await loadTeams({ season_id: seasonId });
+        } else {
+          await loadTeams(); // Load all teams
+        }
+      };
+
+      loadTeamsForCurrentDivision();
+    }
+  }, [editingVolunteer?.division_id, editingVolunteer?.season_id, showAddForm]);
 
   const loadInitialData = async () => {
     try {
@@ -94,10 +157,9 @@ const [availableVolunteerTrainings, setAvailableVolunteerTrainings] = useState([
 
       console.log('Loading volunteers from:', url);
 
-      const response = await fetch(url);
+      const response = await authFetch(url);
       if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`HTTP ${response.status}: ${errorText}`);
+        throw new Error(await buildAuthErrorMessage(response, 'Failed to load volunteers'));
       }
 
       const data = await response.json();
@@ -113,36 +175,39 @@ const [availableVolunteerTrainings, setAvailableVolunteerTrainings] = useState([
       );
     } catch (error) {
       console.error('Error loading volunteers:', error);
-      setError('Failed to load volunteers. ' + error.message);
+      setError(error.message || ('Failed to load volunteers.'));
       setVolunteers([]);
     }
   };
 
-const loadAvailableVolunteerTrainings = async () => {
-  try {
-    const response = await fetch('/api/trainings?category=volunteer');
-    if (response.ok) {
-      const data = await response.json();
-      setAvailableVolunteerTrainings(data || []);
+  const loadAvailableVolunteerTrainings = async () => {
+    try {
+      const response = await authFetch('/api/trainings?category=volunteer');
+      if (response.ok) {
+        const data = await response.json();
+        setAvailableVolunteerTrainings(data || []);
+      } else {
+        // Don't hard-fail the page if trainings can't load
+        console.warn('Failed to load volunteer trainings:', response.status);
+      }
+    } catch (error) {
+      console.error('Error loading volunteer trainings:', error);
     }
-  } catch (error) {
-    console.error('Error loading volunteer trainings:', error);
-  }
-};
+  };
 
   const loadDivisions = async () => {
     try {
       console.log('Loading divisions for season:', selectedSeason);
       let url = '/api/divisions';
-      
+
       // Add season filter if a season is selected
       if (selectedSeason) {
         url += `?season_id=${selectedSeason}`;
       }
-      
-      const response = await fetch(url);
+
+      const response = await authFetch(url);
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: Failed to load divisions`);
+        throw new Error(await buildAuthErrorMessage(response, 'Failed to load divisions'));
       }
       const data = await response.json();
       console.log('Loaded divisions:', data);
@@ -154,19 +219,30 @@ const loadAvailableVolunteerTrainings = async () => {
     }
   };
 
-  const loadTeams = async () => {
+  const loadTeams = async (filters = {}) => {
     try {
-      console.log('Loading teams...');
-      const response = await fetch('/api/teams');
+      console.log('Loading teams with filters:', filters);
+
+      let url = '/api/teams';
+      const params = new URLSearchParams();
+
+      // Only add filters if they exist and are not empty
+      if (filters.division_id) params.append('division_id', filters.division_id);
+      if (filters.season_id) params.append('season_id', filters.season_id);
+
+      if (params.toString()) {
+        url += `?${params.toString()}`;
+      }
+
+      const response = await authFetch(url);
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: Failed to load teams`);
+        throw new Error(await buildAuthErrorMessage(response, 'Failed to load teams'));
       }
       const data = await response.json();
-      console.log('Loaded teams:', data);
+      console.log('Loaded teams:', data.length, 'teams');
       setTeams(data || []);
     } catch (error) {
       console.error('Error loading teams:', error);
-      setError(prev => prev ? prev + ' | ' + error.message : 'Failed to load teams: ' + error.message);
       setTeams([]);
     }
   };
@@ -174,9 +250,9 @@ const loadAvailableVolunteerTrainings = async () => {
   const loadSeasons = async () => {
     try {
       console.log('Loading seasons...');
-      const response = await fetch('/api/seasons');
+      const response = await authFetch('/api/seasons');
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: Failed to load seasons`);
+        throw new Error(await buildAuthErrorMessage(response, 'Failed to load seasons'));
       }
       const data = await response.json();
       console.log('Loaded seasons:', data);
@@ -214,7 +290,7 @@ const loadAvailableVolunteerTrainings = async () => {
   const handleImportVolunteers = async (csvText, seasonId) => {
     try {
       const parsedData = parseCSV(csvText);
-      const response = await fetch('/api/volunteers/import', {
+      const response = await authFetch('/api/volunteers/import', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -226,8 +302,8 @@ const loadAvailableVolunteerTrainings = async () => {
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to import volunteers');
+        // keep your original pattern but with clearer auth messages
+        throw new Error(await buildAuthErrorMessage(response, 'Failed to import volunteers'));
       }
 
       const responseJson = await response.json();
@@ -240,9 +316,19 @@ const loadAvailableVolunteerTrainings = async () => {
         data: responseJson
       };
     } catch (error) {
-      throw new Error(error.message);
-    }
+  console.error('Error importing volunteers:', error);
+  
+  // Use the shared helper function
+  const errorMessage = getPermissionErrorMessage(
+    error,
+    'Your role does not have permission to import volunteers.'
+  );
+  
+  throw new Error(errorMessage);
+}
   };
+
+
 
   const handleAddVolunteer = async (e) => {
     if (e) e.preventDefault();
@@ -257,18 +343,10 @@ const loadAvailableVolunteerTrainings = async () => {
       console.log('Editing mode:', isEditing);
 
       // Validate required fields
-      if (!volunteerData.name) {
-        throw new Error('Name is required');
-      }
-      if (!volunteerData.role) {
-        throw new Error('Role is required');
-      }
-      if (!volunteerData.division_id) {
-        throw new Error('Division is required');
-      }
-      if (!volunteerData.season_id) {
-        throw new Error('Season is required');
-      }
+      if (!volunteerData.name) throw new Error('Name is required');
+      if (!volunteerData.role) throw new Error('Role is required');
+      if (!volunteerData.division_id) throw new Error('Division is required');
+      if (!volunteerData.season_id) throw new Error('Season is required');
 
       // Remove relationship objects that shouldn't be sent to the API
       const cleanVolunteerData = { ...volunteerData };
@@ -300,41 +378,49 @@ const loadAvailableVolunteerTrainings = async () => {
       console.log(`Making ${method} request to: ${url}`);
       console.log('Complete volunteer data (cleaned):', completeVolunteerData);
 
-      const response = await fetch(url, {
-      method,
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(completeVolunteerData)
-    });
+      const response = await authFetch(url, {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(completeVolunteerData)
+      });
 
-    console.log('Response status:', response.status);
+      console.log('Response status:', response.status);
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('Server error response:', errorText);
-      throw new Error(`HTTP ${response.status}: ${errorText}`);
-    }
+      if (!response.ok) {
+        throw new Error(await buildAuthErrorMessage(response, 'Failed to save volunteer'));
+      }
 
-    const result = await response.json();
-    console.log('Success response:', result);
+      const result = await response.json();
+      console.log('Success response:', result);
 
-    // Reload the volunteers list
-    await loadVolunteers();
+      // Reload the volunteers list
+      await loadVolunteers();
 
-    // Reset the form AND close the modal
-    resetVolunteerForm();
-    setShowAddForm(false); // ADD THIS LINE
+      // Reset the form AND close the modal
+      resetVolunteerForm();
+      setShowAddForm(false);
 
-    // Show success message
-    setError(null);
-    alert(isEditing ? 'Volunteer updated successfully!' : 'Volunteer added successfully!');
-
-  } catch (error) {
-    console.error('Error saving volunteer:', error);
-    setError('Failed to save volunteer: ' + error.message);
-  }
-};
+      // Show success message
+      setError(null);
+      alert(isEditing ? 'Volunteer updated successfully!' : 'Volunteer added successfully!');
+    } catch (error) {
+  console.error('Error saving volunteer:', error);
+  
+  // Use the shared helper function
+  const errorMessage = getPermissionErrorMessage(
+    error,
+    'Your role does not have permission to update volunteers.'
+  );
+  
+  // Show popup alert
+  alert(errorMessage);
+  
+  // Also show in the UI error area
+  setError(errorMessage);
+}
+  };
 
   const resetVolunteerForm = () => {
     setNewVolunteer({
@@ -347,93 +433,138 @@ const loadAvailableVolunteerTrainings = async () => {
       team_id: '',
       notes: '',
       training_completed: false,
-	  volunteer_id: '', // ADDED
-	  volunteer_type_id: '' // ADDED
+      volunteer_id: '', // ADDED
+      volunteer_type_id: '' // ADDED
     });
     setEditingVolunteer(null);
     setShowAddForm(false);
   };
 
-const handleEditVolunteer = async (volunteer) => {
-  console.log('Editing volunteer:', volunteer);
-  setEditingVolunteer({
-    ...volunteer,
-    division_id: volunteer.division_id || '',
-    season_id: volunteer.season_id || seasons[0]?.id || '',
-    team_id: volunteer.team_id || '',
-    training_completed: volunteer.training_completed || false
-  });
-  
-  // Load volunteer's trainings
-  if (volunteer.id) {
-    try {
-      const response = await fetch(`/api/trainings/volunteer/${volunteer.id}`);
-      if (response.ok) {
-        const data = await response.json();
-        setVolunteerTrainings(data || []);
-      }
-    } catch (error) {
-      console.error('Error loading volunteer trainings:', error);
-    }
-  }
-  
-  setShowAddForm(true);
-};
+  const handleEditVolunteer = async (volunteer) => {
+    console.log('Editing volunteer:', volunteer);
 
-const handleVolunteerTrainingChange = async (trainingId, completed, date) => {
-  try {
-    const response = await fetch(`/api/trainings/volunteer/${editingVolunteer.id}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        trainings: availableVolunteerTrainings.map(training => {
-          const existing = volunteerTrainings.find(t => t.training_id === training.id);
-          if (training.id === trainingId) {
-            return {
-              training_id: trainingId,
-              completed_date: completed ? (date || new Date().toISOString().split('T')[0]) : null,
-              status: completed ? 'completed' : 'pending'
-            };
-          }
-          return existing ? {
-            training_id: existing.training_id,
-            completed_date: existing.completed_date,
-            status: existing.status
-          } : {
-            training_id: training.id,
-            completed_date: null,
-            status: 'pending'
-          };
-        })
-      })
+    // Extract division_id from volunteer object (could be direct property or nested in division object)
+    const divisionId = volunteer.division_id || volunteer.division?.id || '';
+    const seasonId = volunteer.season_id || volunteer.season?.id || seasons[0]?.id || '';
+
+    setEditingVolunteer({
+      ...volunteer,
+      division_id: divisionId,
+      season_id: seasonId,
+      team_id: volunteer.team_id || '',
+      training_completed: volunteer.training_completed || false
     });
 
-    if (response.ok) {
+    // Load teams - handle different scenarios
+    if (divisionId && seasonId) {
+      await loadTeams({ division_id: divisionId, season_id: seasonId });
+    } else if (divisionId) {
+      await loadTeams({ division_id: divisionId });
+    } else if (seasonId) {
+      await loadTeams({ season_id: seasonId });
+    } else {
+      await loadTeams();
+    }
+
+    // Load volunteer's trainings
+    if (volunteer.id) {
+      try {
+        const response = await authFetch(`/api/trainings/volunteer/${volunteer.id}`);
+        if (response.ok) {
+          const data = await response.json();
+          setVolunteerTrainings(data || []);
+        } else {
+          console.warn('Failed to load volunteer trainings:', response.status);
+        }
+      } catch (error) {
+        console.error('Error loading volunteer trainings:', error);
+      }
+    }
+
+    setShowAddForm(true);
+  };
+
+  const handleVolunteerTrainingChange = async (trainingId, completed, date) => {
+    try {
+      const response = await authFetch(`/api/trainings/volunteer/${editingVolunteer.id}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          trainings: availableVolunteerTrainings.map(training => {
+            const existing = volunteerTrainings.find(t => t.training_id === training.id);
+            if (training.id === trainingId) {
+              return {
+                training_id: trainingId,
+                completed_date: completed ? (date || new Date().toISOString().split('T')[0]) : null,
+                status: completed ? 'completed' : 'pending'
+              };
+            }
+            return existing ? {
+              training_id: existing.training_id,
+              completed_date: existing.completed_date,
+              status: existing.status
+            } : {
+              training_id: training.id,
+              completed_date: null,
+              status: 'pending'
+            };
+          })
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(await buildAuthErrorMessage(response, 'Failed to update training'));
+      }
+
       const updatedTrainings = await response.json();
       setVolunteerTrainings(updatedTrainings);
-    }
-  } catch (error) {
-    console.error('Error updating volunteer training:', error);
-    setError('Failed to update training: ' + error.message);
-  }
-};
+    } catch (error) {
+  console.error('Error updating volunteer training:', error);
+  
+  // Use the shared helper function
+  const errorMessage = getPermissionErrorMessage(
+    error,
+    'Your role does not have permission to update volunteer trainings.'
+  );
+  
+  // Show popup alert
+  alert(errorMessage);
+  
+  // Also show in the UI error area
+  setError(errorMessage);
+}
+  };
 
   const handleDeleteVolunteer = async (volunteerId) => {
     if (!confirm('Are you sure you want to delete this volunteer?')) return;
 
     try {
-      const response = await fetch(`/api/volunteers/${volunteerId}`, {
+      const response = await authFetch(`/api/volunteers/${volunteerId}`, {
         method: 'DELETE'
       });
 
-      if (!response.ok) throw new Error('Failed to delete volunteer');
+      if (!response.ok) {
+        throw new Error(await buildAuthErrorMessage(response, 'Failed to delete volunteer'));
+      }
 
       await loadVolunteers();
     } catch (error) {
-      setError(error.message);
-    }
+  console.error('Error deleting volunteer:', error);
+  
+  // Use the shared helper function
+  const errorMessage = getPermissionErrorMessage(
+    error,
+    'Your role does not have permission to delete volunteers.'
+  );
+  
+  // Show popup alert
+  alert(errorMessage);
+  
+  // Also show in the UI error area
+  setError(errorMessage);
+}
   };
 
   // (left in place from your existing file)
@@ -453,7 +584,7 @@ const handleVolunteerTrainingChange = async (trainingId, completed, date) => {
 
       console.log('Testing API with:', testData);
 
-      const response = await fetch('/api/volunteers', {
+      const response = await authFetch('/api/volunteers', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -462,8 +593,7 @@ const handleVolunteerTrainingChange = async (trainingId, completed, date) => {
       });
 
       if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`HTTP ${response.status}: ${errorText}`);
+        throw new Error(await buildAuthErrorMessage(response, 'API test failed'));
       }
 
       const result = await response.json();
@@ -710,99 +840,102 @@ const handleVolunteerTrainingChange = async (trainingId, completed, date) => {
           <option value="Board Member">Board Member</option>
         </select>
       </div>
-<div>
-  <label style={{
-    display: 'block',
-    fontSize: '14px',
-    fontWeight: '500',
-    color: '#374151',
-    marginBottom: '8px'
-  }}>
-    Interested Roles
-  </label>
-  <input
-    type="text"
-    style={{
-      width: '100%',
-      padding: '10px 12px',
-      border: '1px solid #d1d5db',
-      borderRadius: '8px',
-      fontSize: '14px',
-      color: '#374151',
-      backgroundColor: 'white'
-    }}
-    value={editingVolunteer ? editingVolunteer.interested_roles || '' : newVolunteer.interested_roles || ''}
-    onChange={(e) => editingVolunteer
-      ? setEditingVolunteer(prev => ({ ...prev, interested_roles: e.target.value }))
-      : setNewVolunteer(prev => ({ ...prev, interested_roles: e.target.value }))
-    }
-    placeholder="Manager, Assistant Coach, Team Parent"
-  />
-  <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px' }}>
-    Enter comma-separated roles (e.g., "Manager, Assistant Coach, Team Parent")
-  </p>
-</div>
-{/* ADDED: Volunteer ID Field */}
-<div>
-  <label style={{
-    display: 'block',
-    fontSize: '14px',
-    fontWeight: '500',
-    color: '#374151',
-    marginBottom: '8px'
-  }}>
-    Volunteer ID
-  </label>
-  <input
-    type="text"
-    style={{
-      width: '100%',
-      padding: '10px 12px',
-      border: '1px solid #d1d5db',
-      borderRadius: '8px',
-      fontSize: '14px',
-      color: '#374151',
-      backgroundColor: 'white'
-    }}
-    value={editingVolunteer ? editingVolunteer.volunteer_id || '' : newVolunteer.volunteer_id || ''}
-    onChange={(e) => editingVolunteer
-      ? setEditingVolunteer(prev => ({ ...prev, volunteer_id: e.target.value }))
-      : setNewVolunteer(prev => ({ ...prev, volunteer_id: e.target.value }))
-    }
-    placeholder="Volunteer ID from external system"
-  />
-</div>
 
-{/* ADDED: Volunteer Type ID Field */}
-<div>
-  <label style={{
-    display: 'block',
-    fontSize: '14px',
-    fontWeight: '500',
-    color: '#374151',
-    marginBottom: '8px'
-  }}>
-    Volunteer Type ID
-  </label>
-  <input
-    type="text"
-    style={{
-      width: '100%',
-      padding: '10px 12px',
-      border: '1px solid #d1d5db',
-      borderRadius: '8px',
-      fontSize: '14px',
-      color: '#374151',
-      backgroundColor: 'white'
-    }}
-    value={editingVolunteer ? editingVolunteer.volunteer_type_id || '' : newVolunteer.volunteer_type_id || ''}
-    onChange={(e) => editingVolunteer
-      ? setEditingVolunteer(prev => ({ ...prev, volunteer_type_id: e.target.value }))
-      : setNewVolunteer(prev => ({ ...prev, volunteer_type_id: e.target.value }))
-    }
-    placeholder="Volunteer Type ID from external system"
-  />
-</div>
+      <div>
+        <label style={{
+          display: 'block',
+          fontSize: '14px',
+          fontWeight: '500',
+          color: '#374151',
+          marginBottom: '8px'
+        }}>
+          Interested Roles
+        </label>
+        <input
+          type="text"
+          style={{
+            width: '100%',
+            padding: '10px 12px',
+            border: '1px solid #d1d5db',
+            borderRadius: '8px',
+            fontSize: '14px',
+            color: '#374151',
+            backgroundColor: 'white'
+          }}
+          value={editingVolunteer ? editingVolunteer.interested_roles || '' : newVolunteer.interested_roles || ''}
+          onChange={(e) => editingVolunteer
+            ? setEditingVolunteer(prev => ({ ...prev, interested_roles: e.target.value }))
+            : setNewVolunteer(prev => ({ ...prev, interested_roles: e.target.value }))
+          }
+          placeholder="Manager, Assistant Coach, Team Parent"
+        />
+        <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px' }}>
+          Enter comma-separated roles (e.g., "Manager, Assistant Coach, Team Parent")
+        </p>
+      </div>
+
+      {/* ADDED: Volunteer ID Field */}
+      <div>
+        <label style={{
+          display: 'block',
+          fontSize: '14px',
+          fontWeight: '500',
+          color: '#374151',
+          marginBottom: '8px'
+        }}>
+          Volunteer ID
+        </label>
+        <input
+          type="text"
+          style={{
+            width: '100%',
+            padding: '10px 12px',
+            border: '1px solid #d1d5db',
+            borderRadius: '8px',
+            fontSize: '14px',
+            color: '#374151',
+            backgroundColor: 'white'
+          }}
+          value={editingVolunteer ? editingVolunteer.volunteer_id || '' : newVolunteer.volunteer_id || ''}
+          onChange={(e) => editingVolunteer
+            ? setEditingVolunteer(prev => ({ ...prev, volunteer_id: e.target.value }))
+            : setNewVolunteer(prev => ({ ...prev, volunteer_id: e.target.value }))
+          }
+          placeholder="Volunteer ID from external system"
+        />
+      </div>
+
+      {/* ADDED: Volunteer Type ID Field */}
+      <div>
+        <label style={{
+          display: 'block',
+          fontSize: '14px',
+          fontWeight: '500',
+          color: '#374151',
+          marginBottom: '8px'
+        }}>
+          Volunteer Type ID
+        </label>
+        <input
+          type="text"
+          style={{
+            width: '100%',
+            padding: '10px 12px',
+            border: '1px solid #d1d5db',
+            borderRadius: '8px',
+            fontSize: '14px',
+            color: '#374151',
+            backgroundColor: 'white'
+          }}
+          value={editingVolunteer ? editingVolunteer.volunteer_type_id || '' : newVolunteer.volunteer_type_id || ''}
+          onChange={(e) => editingVolunteer
+            ? setEditingVolunteer(prev => ({ ...prev, volunteer_type_id: e.target.value }))
+            : setNewVolunteer(prev => ({ ...prev, volunteer_type_id: e.target.value }))
+          }
+          placeholder="Volunteer Type ID from external system"
+        />
+      </div>
+
       <div>
         <label style={{
           display: 'block',
@@ -917,9 +1050,11 @@ const handleVolunteerTrainingChange = async (trainingId, completed, date) => {
           ))}
         </select>
         {teams.length === 0 && (
-          <div style={{ color: '#dc2626', fontSize: '12px', marginTop: '4px' }}>
-            <AlertCircle style={{ width: '12px', height: '12px', display: 'inline', marginRight: '4px' }} />
-            No teams available. Please create teams first.
+          <div style={{ color: '#6b7280', fontSize: '12px', marginTop: '4px' }}>
+            No teams available for this division/season combination.
+            {(!editingVolunteer?.division_id && !newVolunteer.division_id) && (
+              <span> Select a division first to see teams.</span>
+            )}
           </div>
         )}
       </div>
@@ -955,7 +1090,7 @@ const handleVolunteerTrainingChange = async (trainingId, completed, date) => {
         />
       </div>
 
-            <div>
+      <div>
         <label
           htmlFor="background_check_completed"
           style={{
@@ -993,112 +1128,109 @@ const handleVolunteerTrainingChange = async (trainingId, completed, date) => {
         </p>
       </div>
 
-{/* Trainings Section */}
-<div>
-  <h3 className="text-md font-medium text-gray-900 mb-4">Volunteer Trainings</h3>
-  <div className="space-y-3">
-    {availableVolunteerTrainings.map(training => {
-      const volunteerTraining = volunteerTrainings.find(t => t.training_id === training.id);
-      const isCompleted = volunteerTraining?.status === 'completed';
-      const isExpired = volunteerTraining?.status === 'expired';
-      const completionDate = volunteerTraining?.completed_date;
-      
-      return (
-        <div key={training.id} className="flex items-center justify-between p-3 border border-gray-200 rounded-lg hover:bg-gray-50">
-          <div className="flex-1">
-            <div className="flex items-center">
-              <div className="font-medium text-gray-900">{training.name}</div>
-              {training.is_required && (
-                <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
-                   *Required 
-                </span>
-              )}
-            </div>
-            {training.description && (
-              <div className="text-sm text-gray-500 mt-1">{training.description}</div>
-            )}
-            {training.expires_in_days && (
-  <div className="text-xs text-gray-400 mt-1">
-    Expires {training.expires_in_days} days after completion
-  </div>
-)}
-{training.expires_on_date && (
-  <div className="text-xs text-gray-400 mt-1">
-    All completions expire on: {training.expires_on_date}
-  </div>
-)}
-            
-            {completionDate && (
-              <div className={`text-xs mt-1 ${isExpired ? 'text-red-600' : 'text-green-600'}`}>
-                {isExpired ? 'Expired: ' : 'Completed: '}{completionDate}
+      {/* Trainings Section */}
+      <div>
+        <h3 className="text-md font-medium text-gray-900 mb-4">Volunteer Trainings</h3>
+        <div className="space-y-3">
+          {availableVolunteerTrainings.map(training => {
+            const volunteerTraining = volunteerTrainings.find(t => t.training_id === training.id);
+            const isCompleted = volunteerTraining?.status === 'completed';
+            const isExpired = volunteerTraining?.status === 'expired';
+            const completionDate = volunteerTraining?.completed_date;
+
+            return (
+              <div key={training.id} className="flex items-center justify-between p-3 border border-gray-200 rounded-lg hover:bg-gray-50">
+                <div className="flex-1">
+                  <div className="flex items-center">
+                    <div className="font-medium text-gray-900">{training.name}</div>
+                    {training.is_required && (
+                      <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                        *Required
+                      </span>
+                    )}
+                  </div>
+                  {training.description && (
+                    <div className="text-sm text-gray-500 mt-1">{training.description}</div>
+                  )}
+                  {training.expires_in_days && (
+                    <div className="text-xs text-gray-400 mt-1">
+                      Expires {training.expires_in_days} days after completion
+                    </div>
+                  )}
+                  {training.expires_on_date && (
+                    <div className="text-xs text-gray-400 mt-1">
+                      All completions expire on: {training.expires_on_date}
+                    </div>
+                  )}
+
+                  {completionDate && (
+                    <div className={`text-xs mt-1 ${isExpired ? 'text-red-600' : 'text-green-600'}`}>
+                      {isExpired ? 'Expired: ' : 'Completed: '}{completionDate}
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex items-center space-x-2">
+                  {isCompleted && !isExpired && (
+                    <span className="text-xs text-green-600">✓</span>
+                  )}
+                  {isExpired && (
+                    <span className="text-xs text-red-600">✗</span>
+                  )}
+                  <input
+                    type="checkbox"
+                    checked={isCompleted && !isExpired}
+                    onChange={(e) => {
+                      if (editingVolunteer && editingVolunteer.id) {
+                        if (e.target.checked) {
+                          const today = new Date();
+                          const mm = String(today.getMonth() + 1).padStart(2, '0');
+                          const dd = String(today.getDate()).padStart(2, '0');
+                          const yyyy = today.getFullYear();
+                          const defaultDate = `${mm}/${dd}/${yyyy}`;
+
+                          const dateInput = window.prompt(
+                            `Enter completion date for "${training.name}" (MM/DD/YYYY):`,
+                            defaultDate
+                          );
+
+                          if (dateInput !== null) {
+                            const dateRegex = /^(0[1-9]|1[0-2])\/(0[1-9]|[12][0-9]|3[01])\/\d{4}$/;
+                            if (!dateRegex.test(dateInput)) {
+                              alert('Please enter date in MM/DD/YYYY format (e.g., 01/15/2024)');
+                              return;
+                            }
+
+                            const [month, day, year] = dateInput.split('/');
+                            const dbDate = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+
+                            handleVolunteerTrainingChange(training.id, true, dbDate);
+                          }
+                        } else {
+                          if (window.confirm(`Mark "${training.name}" as not completed?`)) {
+                            handleVolunteerTrainingChange(training.id, false);
+                          }
+                        }
+                      } else {
+                        alert('Please save the volunteer first before managing trainings');
+                      }
+                    }}
+                    className="h-4 w-4 text-blue-600 rounded focus:ring-blue-500"
+                    disabled={!editingVolunteer || !editingVolunteer.id}
+                    title={!editingVolunteer || !editingVolunteer.id ? "Save volunteer first" : `Mark ${training.name} as completed`}
+                  />
+                </div>
               </div>
-            )}
-          </div>
-          
-          <div className="flex items-center space-x-2">
-            {isCompleted && !isExpired && (
-              <span className="text-xs text-green-600">✓</span>
-            )}
-            {isExpired && (
-              <span className="text-xs text-red-600">✗</span>
-            )}
-            <input
-              type="checkbox"
-              checked={isCompleted && !isExpired}
-              onChange={(e) => {
-  if (editingVolunteer && editingVolunteer.id) {
-    if (e.target.checked) {
-      // Ask for completion date in MM/DD/YYYY format
-      const today = new Date();
-      const mm = String(today.getMonth() + 1).padStart(2, '0');
-      const dd = String(today.getDate()).padStart(2, '0');
-      const yyyy = today.getFullYear();
-      const defaultDate = `${mm}/${dd}/${yyyy}`;
-      
-      const dateInput = window.prompt(
-        `Enter completion date for "${training.name}" (MM/DD/YYYY):`,
-        defaultDate
-      );
-      
-      if (dateInput !== null) {
-        // Validate date format MM/DD/YYYY
-        const dateRegex = /^(0[1-9]|1[0-2])\/(0[1-9]|[12][0-9]|3[01])\/\d{4}$/;
-        if (!dateRegex.test(dateInput)) {
-          alert('Please enter date in MM/DD/YYYY format (e.g., 01/15/2024)');
-          return;
-        }
-        
-        // Convert MM/DD/YYYY to YYYY-MM-DD for database
-        const [month, day, year] = dateInput.split('/');
-        const dbDate = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
-        
-        handleVolunteerTrainingChange(training.id, true, dbDate);
-      }
-    } else {
-      if (window.confirm(`Mark "${training.name}" as not completed?`)) {
-        handleVolunteerTrainingChange(training.id, false);
-      }
-    }
-  } else {
-    alert('Please save the volunteer first before managing trainings');
-  }
-}}
-              className="h-4 w-4 text-blue-600 rounded focus:ring-blue-500"
-              disabled={!editingVolunteer || !editingVolunteer.id}
-              title={!editingVolunteer || !editingVolunteer.id ? "Save volunteer first" : `Mark ${training.name} as completed`}
-            />
-          </div>
+            );
+          })}
+
+          {availableVolunteerTrainings.length === 0 && (
+            <div className="text-center py-4 text-gray-500 border border-gray-200 rounded-lg">
+              No volunteer trainings configured. Add trainings in the Configuration page.
+            </div>
+          )}
         </div>
-      );
-    })}
-    
-    {availableVolunteerTrainings.length === 0 && (
-      <div className="text-center py-4 text-gray-500 border border-gray-200 rounded-lg">
-        No volunteer trainings configured. Add trainings in the Configuration page.
       </div>
-    )}
-  </div>
-</div>
     </form>
   );
 
@@ -1148,7 +1280,6 @@ const handleVolunteerTrainingChange = async (trainingId, completed, date) => {
           <div className="flex flex-col sm:flex-row gap-3">
             {activeTab === 'manage' && (
               <>
-                {/* ✅ Template download button (restored) */}
                 <CSVTemplate
                   templateType="volunteers"
                   headers={[
@@ -1163,22 +1294,16 @@ const handleVolunteerTrainingChange = async (trainingId, completed, date) => {
                   ]}
                 />
 
-                {/* ✅ Import button (restored) */}
                 <CSVImport
                   onImport={async (csvText, seasonId) => {
-                    try {
-                      const result = await handleImportVolunteers(csvText, seasonId);
-                      setImportResults(result);
-                      return result;
-                    } catch (error) {
-                      throw error;
-                    }
+                    const result = await handleImportVolunteers(csvText, seasonId);
+                    setImportResults(result);
+                    return result;
                   }}
                   importType="volunteers"
                   seasons={seasons}
                 />
 
-                {/* ✅ Add volunteer button (restored) */}
                 <button
                   onClick={() => {
                     setEditingVolunteer(null);
@@ -1190,7 +1315,6 @@ const handleVolunteerTrainingChange = async (trainingId, completed, date) => {
                   Add Volunteer
                 </button>
 
-                {/* (left as-is from your existing file) */}
                 <button
                   onClick={testVolunteerAPI}
                   className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-green-600 hover:bg-green-700"
@@ -1420,34 +1544,34 @@ const handleVolunteerTrainingChange = async (trainingId, completed, date) => {
                         {volunteer.season?.name || 'N/A'}
                       </td>
                       <td className="px-6 py-4">
-  <div className="space-y-1">
-    {volunteer.trainings_summary && volunteer.trainings_summary.total > 0 ? (
-      <>
-        <div className="flex items-center">
-          <div className={`inline-flex items-center px-2 py-1 text-xs rounded-full ${
-            volunteer.trainings_summary.all_required_completed 
-              ? 'bg-green-100 text-green-800' 
-              : 'bg-yellow-100 text-yellow-800'
-          }`}>
-            {volunteer.trainings_summary.completed}/{volunteer.trainings_summary.total} trainings
-          </div>
-        </div>
-        {volunteer.trainings_summary.required > 0 && (
-          <div className="text-xs text-gray-600">
-            Required: {volunteer.trainings_summary.completed_required}/{volunteer.trainings_summary.required}
-          </div>
-        )}
-        {volunteer.trainings_summary.expired > 0 && (
-          <div className="text-xs text-red-600">
-            {volunteer.trainings_summary.expired} expired
-          </div>
-        )}
-      </>
-    ) : (
-      <div className="text-xs text-gray-500">No trainings</div>
-    )}
-  </div>
-</td>
+                        <div className="space-y-1">
+                          {volunteer.trainings_summary && volunteer.trainings_summary.total > 0 ? (
+                            <>
+                              <div className="flex items-center">
+                                <div className={`inline-flex items-center px-2 py-1 text-xs rounded-full ${
+                                  volunteer.trainings_summary.all_required_completed
+                                    ? 'bg-green-100 text-green-800'
+                                    : 'bg-yellow-100 text-yellow-800'
+                                }`}>
+                                  {volunteer.trainings_summary.completed}/{volunteer.trainings_summary.total} trainings
+                                </div>
+                              </div>
+                              {volunteer.trainings_summary.required > 0 && (
+                                <div className="text-xs text-gray-600">
+                                  Required: {volunteer.trainings_summary.completed_required}/{volunteer.trainings_summary.required}
+                                </div>
+                              )}
+                              {volunteer.trainings_summary.expired > 0 && (
+                                <div className="text-xs text-red-600">
+                                  {volunteer.trainings_summary.expired} expired
+                                </div>
+                              )}
+                            </>
+                          ) : (
+                            <div className="text-xs text-gray-500">No trainings</div>
+                          )}
+                        </div>
+                      </td>
                       <td className="px-6 py-4 text-sm text-gray-900">
                         {volunteer.background_check_completed || 'pending'}
                       </td>

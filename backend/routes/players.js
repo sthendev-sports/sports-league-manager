@@ -12,6 +12,7 @@ router.get('/', async (req, res) => {
   try {
     const { season_id, division_id, team_id } = req.query;
     
+    // First, get players with their families
     let query = supabase
       .from('players')
       .select(`
@@ -26,10 +27,58 @@ router.get('/', async (req, res) => {
     if (division_id) query = query.eq('division_id', division_id);
     if (team_id) query = query.eq('team_id', team_id);
 
-    const { data, error } = await query;
+    const { data: players, error } = await query;
 
     if (error) throw error;
-    res.json(data);
+    
+    // Get family IDs to fetch workbond data
+    const familyIds = players.map(p => p.family_id).filter(Boolean);
+    
+    if (familyIds.length > 0 && season_id) {
+      // Get workbond records for these families in this season
+      const { data: workbondRecords, error: workbondError } = await supabase
+        .from('family_season_workbond')
+        .select('*')
+        .eq('season_id', season_id)
+        .in('family_id', familyIds);
+
+      if (workbondError) {
+        console.error('Error fetching workbond records:', workbondError);
+      } else {
+        // Create a lookup map: family_id -> workbond record
+        const workbondMap = new Map();
+        workbondRecords.forEach(record => {
+          workbondMap.set(record.family_id, record);
+        });
+
+        // Add workbond data to players
+        const playersWithWorkbond = players.map(player => {
+          const workbond = workbondMap.get(player.family_id);
+          return {
+            ...player,
+            season_workbond: workbond || {
+              received: false,
+              notes: '',
+              // Add empty/default record if none exists
+            }
+          };
+        });
+
+        res.json(playersWithWorkbond);
+        return;
+      }
+    }
+    
+    // If no workbond data found or no season_id, return players with default workbond
+    const playersWithDefaultWorkbond = players.map(player => ({
+      ...player,
+      season_workbond: {
+        received: false,
+        notes: ''
+      }
+    }));
+    
+    res.json(playersWithDefaultWorkbond);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -444,6 +493,12 @@ router.post('/import', jsonParser, async (req, res) => {
             if (!playerData.first_name || !playerData.last_name) {
               errors.push(`Row ${globalIndex + 1}: Missing first_name or last_name`);
               continue;
+            }
+if (playerData.parent1_phone1) {
+              playerData.parent1_phone1 = normalizePhoneForMatching(playerData.parent1_phone1);
+            }
+            if (playerData.parent2_phone1) {
+              playerData.parent2_phone1 = normalizePhoneForMatching(playerData.parent2_phone1);
             }
 
             // Check if player already exists in this season
@@ -931,6 +986,13 @@ function parsePaymentStatus(paymentStatus) {
   }
   
   return false; // Default to false for unknown statuses
+}
+
+function normalizePhoneForMatching(phone) {
+  if (!phone) return '';
+  // Remove all non-digits
+  const digits = String(phone).replace(/\D/g, '');
+  return digits;
 }
 
 // Helper function to create new family

@@ -2,6 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { Plus, Edit, Trash2, Save, Users, Settings, Shield, Calendar, Copy, Mail, Phone, Download, Trash, GraduationCap } from 'lucide-react';
 import Modal from '../components/Modal';
 
+const getAuthHeaders = () => {
+  const token = localStorage.getItem('slm_token');
+  return {
+    'Content-Type': 'application/json',
+    ...(token && { 'Authorization': `Bearer ${token}` })
+  };
+};
+
 const Configuration = () => {
   const [activeTab, setActiveTab] = useState('seasons');
   const [teams, setTeams] = useState([]);
@@ -88,46 +96,50 @@ const [clearTrainingForm, setClearTrainingForm] = useState({
 
 
   const loadData = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-	  
-      const seasonsResponse = await fetch('/api/seasons');
-      if (!seasonsResponse.ok) throw new Error('Seasons API failed');
-      const seasonsData = await seasonsResponse.json();
-      setSeasons(Array.isArray(seasonsData) ? seasonsData : []);
+  try {
+    setLoading(true);
+    setError(null);
+    
+    const headers = getAuthHeaders();
+    
+    // Add headers to ALL fetch calls:
+    const seasonsResponse = await fetch('/api/seasons', { headers });
+    if (!seasonsResponse.ok) throw new Error('Seasons API failed');
+    const seasonsData = await seasonsResponse.json();
+    setSeasons(Array.isArray(seasonsData) ? seasonsData : []);
 
-      const divisionsResponse = await fetch('/api/divisions');
-      if (!divisionsResponse.ok) throw new Error('Divisions API failed');
-      const divisionsData = await divisionsResponse.json();
-      setDivisions(Array.isArray(divisionsData) ? divisionsData : []);
+    const divisionsResponse = await fetch('/api/divisions', { headers });
+    if (!divisionsResponse.ok) throw new Error('Divisions API failed');
+    const divisionsData = await divisionsResponse.json();
+    setDivisions(Array.isArray(divisionsData) ? divisionsData : []);
 
-      const teamsResponse = await fetch('/api/teams');
-      if (!teamsResponse.ok) throw new Error('Teams API failed');
-      const teamsData = await teamsResponse.json();
-      setTeams(Array.isArray(teamsData) ? teamsData : []);
-      
-      // Load board members for player agent dropdown
-      const boardMembersResponse = await fetch('/api/board-members/player-agents');
-      if (boardMembersResponse.ok) {
-        const boardMembersData = await boardMembersResponse.json();
-        setBoardMembers(boardMembersData);
-      }
-      
-	      // ADD THIS LINE - Load trainings
-    await loadTrainings();
-	  
-      // Default the configuration season filter to the ACTIVE season (fallback: first season)
-      if (!selectedSeason && seasonsData.length > 0) {
-        const active = seasonsData.find(s => s.is_active);
-        setSelectedSeason((active?.id) || seasonsData[0].id);
-      }} catch (error) {
-      console.error('Error loading configuration data:', error);
-      setError('Failed to load data: ' + error.message);
-    } finally {
-      setLoading(false);
+    const teamsResponse = await fetch('/api/teams', { headers });
+    if (!teamsResponse.ok) throw new Error('Teams API failed');
+    const teamsData = await teamsResponse.json();
+    setTeams(Array.isArray(teamsData) ? teamsData : []);
+    
+    // Load board members for player agent dropdown
+    const boardMembersResponse = await fetch('/api/board-members/player-agents', { headers });
+    if (boardMembersResponse.ok) {
+      const boardMembersData = await boardMembersResponse.json();
+      setBoardMembers(boardMembersData);
     }
-  };
+    
+    // Load trainings
+    await loadTrainings();
+    
+    // Default the configuration season filter to the ACTIVE season
+    if (!selectedSeason && seasonsData.length > 0) {
+      const active = seasonsData.find(s => s.is_active);
+      setSelectedSeason((active?.id) || seasonsData[0].id);
+    }
+  } catch (error) {
+    console.error('Error loading configuration data:', error);
+    setError('Failed to load data: ' + error.message);
+  } finally {
+    setLoading(false);
+  }
+};
 
   // Season-scoped views for teams/divisions tabs
   const filteredDivisions = selectedSeason ? divisions.filter(d => d.season_id === selectedSeason) : divisions;
@@ -195,10 +207,27 @@ const handleExportSeason = async (seasonId) => {
     const data = await response.json();
     console.log('Dynamic export data received:', data);
     
+    // Fetch requests for this season
+    let requestData = [];
+    try {
+      const requestsResponse = await fetch(`/api/requests?season_id=${seasonId}`, {
+        headers: getAuthHeaders()
+      });
+      
+      if (requestsResponse.ok) {
+        requestData = await requestsResponse.json();
+        console.log('Requests data loaded:', requestData.length, 'requests');
+      } else {
+        console.warn('Could not load requests data:', requestsResponse.status);
+      }
+    } catch (requestsError) {
+      console.warn('Error loading requests:', requestsError);
+    }
+    
     // Create timestamp for filename
     const timestamp = new Date().toISOString().split('T')[0];
     
-    // Create a zip file with multiple CSV tabs
+    // Create a zip file with multiple CSV tabs (UPDATED WITH REQUESTS)
     const createTabbedCSV = () => {
       let csvContent = '';
       
@@ -395,8 +424,77 @@ const handleExportSeason = async (seasonId) => {
         csvContent += 'No workbond shifts found\n';
       }
       csvContent += '\n';
+      
+      // 10. REQUESTS TAB (NEW)
+      csvContent += '=== REQUESTS ===\n';
+      if (requestData.length > 0) {
+        // Define the fields we want to include
+        const requestFields = [
+          'player_name',
+          'parent_request',
+          'birth_date',
+          'age',
+          'status',
+          'type',
+          'program',
+          'comments',
+          'current_division_name',
+          'new_division_name',
+          'requested_teammate_name',
+          'created_at'
+        ];
+        
+        csvContent += requestFields.join(',') + '\n';
+        
+        requestData.forEach(request => {
+          // Get player info
+          const requestingPlayer = request.requesting_player || {};
+          const playerName = `${requestingPlayer.last_name || ''}, ${requestingPlayer.first_name || ''}`.trim();
+          const birthDate = requestingPlayer.birth_date || '';
+          const age = birthDate ? calcAge(birthDate) : '';
+          
+          // Get division names
+          const currentDivisionName = data.divisions?.find(d => d.id === request.current_division_id)?.name || 
+                                    divisions.find(d => d.id === request.current_division_id)?.name || '';
+          const newDivisionName = data.divisions?.find(d => d.id === request.new_division_id)?.name || 
+                                 divisions.find(d => d.id === request.new_division_id)?.name || '';
+          
+          // Format the row
+          const row = [
+            playerName,
+            request.parent_request || '',
+            birthDate ? new Date(birthDate).toISOString().split('T')[0] : '',
+            age,
+            request.status || 'Pending',
+            request.type || '',
+            request.program || '',
+            request.comments || '',
+            currentDivisionName,
+            newDivisionName,
+            request.requested_teammate_name || '',
+            request.created_at ? new Date(request.created_at).toISOString() : ''
+          ].map(value => `"${String(value).replace(/"/g, '""')}"`);
+          
+          csvContent += row.join(',') + '\n';
+        });
+      } else {
+        csvContent += 'No requests found for this season\n';
+      }
+      csvContent += '\n';
 
       return csvContent;
+    };
+
+    // Helper function to calculate age (copied from Requests.jsx)
+    const calcAge = (birthDateStr) => {
+      if (!birthDateStr) return '';
+      const dob = new Date(birthDateStr);
+      if (Number.isNaN(dob.getTime())) return '';
+      const today = new Date();
+      let age = today.getFullYear() - dob.getFullYear();
+      const m = today.getMonth() - dob.getMonth();
+      if (m < 0 || (m === 0 && today.getDate() < dob.getDate())) age--;
+      return age.toString();
     };
 
     // Generate the tabbed CSV
@@ -415,8 +513,8 @@ const handleExportSeason = async (seasonId) => {
     
     console.log('Tabbed export completed successfully');
     
-    // Show summary to user
-    alert(`Export completed!\n\nExported data includes:\n• Season Info\n• ${data.divisions?.length || 0} divisions\n• ${data.teams?.length || 0} teams\n• ${data.players?.length || 0} players\n• ${data.families?.length || 0} families\n• ${data.volunteers?.length || 0} volunteers\n• ${data.workbond_summary?.length || 0} workbond summaries\n• ${data.workbond_shifts?.length || 0} workbond shifts\n\nAll data organized in tabs within the CSV file.`);
+    // Show summary to user (UPDATED WITH REQUESTS COUNT)
+    alert(`Export completed!\n\nExported data includes:\n• Season Info\n• ${data.divisions?.length || 0} divisions\n• ${data.teams?.length || 0} teams\n• ${data.players?.length || 0} players\n• ${data.families?.length || 0} families\n• ${data.volunteers?.length || 0} volunteers\n• ${data.workbond_summary?.length || 0} workbond summaries\n• ${data.workbond_shifts?.length || 0} workbond shifts\n• ${requestData.length || 0} requests\n\nAll data organized in tabs within the CSV file.`);
     
   } catch (error) {
     console.error('Error exporting season:', error);

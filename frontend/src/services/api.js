@@ -29,17 +29,15 @@ api.interceptors.request.use(
 );
 
 const dashboardAPI = {
-  getStatistics: async (seasonId, compareSeasonId = '') => {
-    const params = { season_id: seasonId };
-    
-    // Only add compare_season_id if it's provided
-    if (compareSeasonId && compareSeasonId !== '') {
-      params.compare_season_id = compareSeasonId;
+getStatistics: async (seasonId, compareSeasonId = '') => {
+  const response = await api.get('/dashboard/statistics', {
+    params: {
+      season_id: seasonId,
+      compare_season_id: compareSeasonId
     }
-    
-    const response = await api.get('/dashboard/statistics', { params });
-    return response.data;
-  },
+  });
+  return response.data;
+},
 };
 
 // Family Season Workbond API - NEW
@@ -144,6 +142,9 @@ export const usersAPI = {
   getAll: () => api.get('/users'),
   create: (data) => api.post('/users', data),
   delete: (id) => api.delete(`/users/${id}`),
+   updateRole: (userId, role) => api.put(`/users/${userId}/role`, { role }),
+  requestPasswordReset: (userId) => api.post(`/users/${userId}/password-reset/request`),
+  confirmPasswordReset: (userId, data) => api.post(`/users/${userId}/password-reset/confirm`, data),
 };
 
 // Email Settings API

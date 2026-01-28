@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
 import { Copy, Download, Filter } from 'lucide-react';
+import api from '../services/api'; 
 
 const VOLUNTEER_ROLE_OPTIONS = [
   'All Roles',
@@ -76,7 +77,7 @@ export default function MailingList() {
     (async () => {
       try {
         setError('');
-        const { data } = await axios.get('/api/seasons');
+        const { data } = await api.get('/seasons');
         if (!mounted) return;
         const list = Array.isArray(data) ? data : [];
         setSeasons(list);
@@ -100,9 +101,9 @@ export default function MailingList() {
     let mounted = true;
     (async () => {
       try {
-        const { data } = await axios.get('/api/divisions', {
-          params: { season_id: selectedSeasonId },
-        });
+        const { data } = await api.get('/divisions', {
+  params: { season_id: selectedSeasonId },
+});
         if (!mounted) return;
         setDivisions(Array.isArray(data) ? data : []);
         setSelectedDivisionId('all');
@@ -119,13 +120,17 @@ export default function MailingList() {
 
 // Update the season dropdown handler to properly reset
 const handleSeasonChange = (seasonId) => {
-  // Clear all data immediately
+  // Clear all data and reset filters
   setPlayers([]);
   setVolunteers([]);
   setWorkbondSummary([]);
+  setDivisions([]);  // Also clear divisions
   setSelectedDivisionId('all');
+  setSelectedVolunteerRole('All Roles');
+  setSelectedWorkbondCheck('All');
   setSelectedSeasonId(seasonId);
   setLoading(true);
+  setError('');
 };
 
 // -------------------- LOAD DATA FOR SEASON/DIVISION --------------------
@@ -147,9 +152,9 @@ useEffect(() => {
       
       // 1. Fetch players
       console.log('Fetching players...');
-      const playersRes = await axios.get('/api/players', {
-        params: { season_id: selectedSeasonId }
-      });
+      const playersRes = await api.get('/players', {
+  params: { season_id: selectedSeasonId }
+});
       
       if (!mounted) return;
       
@@ -172,13 +177,13 @@ useEffect(() => {
       // 3. Fetch all other data in parallel
       console.log('Fetching parallel data...');
       const [volunteersRes, workbondRes, workbondBatchRes] = await Promise.allSettled([
-        axios.get('/api/volunteers', { params: { season_id: selectedSeasonId } }),
-        axios.get('/api/workbond/summary', { params: { season_id: selectedSeasonId } }),
-        axios.post('/api/family-season-workbond/batch', {
-          season_id: selectedSeasonId,
-          family_ids: activeFamilyIds
-        })
-      ]);
+  api.get('/volunteers', { params: { season_id: selectedSeasonId } }),
+  api.get('/workbond/summary', { params: { season_id: selectedSeasonId } }),
+  api.post('/family-season-workbond/batch', {
+    season_id: selectedSeasonId,
+    family_ids: activeFamilyIds
+  })
+]);
       
       if (!mounted) return;
       
@@ -599,6 +604,14 @@ const guardianRows = useMemo(() => {
     const rows = (workbondSummary || [])
       .filter((f) => {
         if (!f?.family_id) return false;
+		
+		if (!filteredFamilyIds.has(String(f.family_id))) {
+        return false;
+      }
+	  
+	   if (f.season_id && String(f.season_id) !== String(selectedSeasonId)) {
+        return false;
+      }
 
         // ✅ Division filter by program_title (matches what we display)
         if (selectedDivisionId !== 'all' && !familyMatchesSelectedDivision(f.family_id)) return false;
@@ -810,17 +823,17 @@ const handleExportCsv = () => {
     console.log('Testing API endpoints...');
     
     // Test players endpoint
-    axios.get('/api/players', { params: { season_id: selectedSeasonId } })
-      .then(res => console.log('Players API response:', res.data?.length || 0, 'players'))
-      .catch(err => console.error('Players API error:', err));
-    
-    // Test workbond batch endpoint
-    axios.post('/api/family-season-workbond/batch', {
-      season_id: selectedSeasonId,
-      family_ids: players.map(p => p.family_id).filter(Boolean).slice(0, 10)
-    })
-      .then(res => console.log('Workbond batch response:', res.data))
-      .catch(err => console.error('Workbond batch error:', err));
+api.get('/players', { params: { season_id: selectedSeasonId } })
+  .then(res => console.log('Players API response:', res.data?.length || 0, 'players'))
+  .catch(err => console.error('Players API error:', err));
+
+// Test workbond batch endpoint
+api.post('/family-season-workbond/batch', {
+  season_id: selectedSeasonId,
+  family_ids: players.map(p => p.family_id).filter(Boolean).slice(0, 10)
+})
+  .then(res => console.log('Workbond batch response:', res.data))
+  .catch(err => console.error('Workbond batch error:', err));
   }}
   className="inline-flex items-center px-3 py-2 rounded-lg bg-yellow-100 border border-yellow-300 text-sm text-yellow-800 hover:bg-yellow-200"
 >

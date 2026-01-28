@@ -1,6 +1,12 @@
 const express = require('express');
 const router = express.Router();
 const supabase = require('../config/database');
+// ADD THIS: Import and use permission enforcer
+const { permissionEnforcer } = require('../middleware/permissionEnforcer');
+
+// Apply permission enforcer to ALL volunteer routes
+router.use(permissionEnforcer);
+
 
 /**
  * GET /api/volunteers
@@ -234,16 +240,38 @@ router.post('/import', async (req, res) => {
 const getCachedFamilyId = async ({ email, phone }, seasonId) => {
   const e = String(email || '').trim().toLowerCase();
   const p = normalizePhone(phone);
-  const key = `${e}|${p}|${seasonId}`;  // Include season in cache key!
   
-  if (familyMatchCache.has(key)) {
-    console.log(`Cache hit for key: ${key}`);
-    return familyMatchCache.get(key);
+  // Create multiple cache keys to handle variations
+  const baseEmail = e.split('@')[0]?.replace(/\./g, ''); // Remove dots from local part
+  const cacheKeys = [];
+  
+  // Full match keys
+  if (e && p) cacheKeys.push(`${e}|${p}|${seasonId}`);
+  if (e) cacheKeys.push(`${e}||${seasonId}`); // Email only
+  if (p) cacheKeys.push(`|${p}|${seasonId}`); // Phone only
+  
+  // Try base email (without dots)
+  if (baseEmail && p) cacheKeys.push(`${baseEmail}@${e.split('@')[1]}|${p}|${seasonId}`);
+  
+  console.log(`\n🔑 [CACHE] Looking up with keys:`, cacheKeys);
+  
+  // Check all cache keys
+  for (const key of cacheKeys) {
+    if (familyMatchCache.has(key)) {
+      const cached = familyMatchCache.get(key);
+      console.log(`🔑 [CACHE HIT] Key: "${key}" -> ${cached}`);
+      return cached;
+    }
   }
   
+  console.log(`🔑 [CACHE MISS] No cache hits, calling findMatchingFamilyId`);
   const fid = await findMatchingFamilyId({ email: e, phone: p }, seasonId);
-  familyMatchCache.set(key, fid);
-  console.log(`Cached result for key ${key}: ${fid}`);
+  
+  // Cache under all keys
+  cacheKeys.forEach(key => {
+    familyMatchCache.set(key, fid);
+    console.log(`🔑 [CACHE SET] Key: "${key}" -> ${fid}`);
+  });
   
   return fid;
 };
@@ -268,7 +296,19 @@ const getCachedFamilyId = async ({ email, phone }, seasonId) => {
       console.log('Loading divisions for mapping...');
       const { data: divisions, error: divisionsError } = await supabase
         .from('divisions')
-        .select('id, name');
+        .select('id, name')
+  .eq('season_id', season_id);  // <-- ADD THIS FILTER!
+
+// Create division map
+if (divisions && divisions.length > 0) {
+  divisions.forEach((division) => {
+    divisionMap.set(division.name, division.id);
+  });
+  console.log(`Division map created with ${divisionMap.size} divisions for season ${season_id}`);
+} else {
+  console.warn(`No divisions found for season ${season_id}`);
+  errors.push(`No divisions configured for season ${season_id}. Please create divisions first.`);
+}
 
       if (divisionsError) {
         console.error('Error loading divisions:', divisionsError);
@@ -519,11 +559,21 @@ const volunteerRecord = {
  *  - Same season, same normalized phone + same name
  */
 function findExistingVolunteer(existingVolunteers, volunteerRecord, divisionId, seasonId) {
-  if (!existingVolunteers || !Array.isArray(existingVolunteers)) return null;
+  if (!existingVolunteers || !Array.isArray(existingVolunteers)) {
+    console.log(`No existing volunteers to check against`);
+    return null;
+  }
 
   const email = (volunteerRecord.email || '').trim().toLowerCase();
   const phone = normalizePhone(volunteerRecord.phone);
   const name = (volunteerRecord.name || '').trim().toLowerCase();
+
+  console.log(`Looking for existing volunteer:`);
+  console.log(`  Email: ${email}`);
+  console.log(`  Phone: ${phone}`);
+  console.log(`  Name: ${name}`);
+  console.log(`  Division: ${divisionId}`);
+  console.log(`  Season: ${seasonId}`);
 
   // Strategy 1: exact match by season, division, email
   if (email) {
@@ -533,7 +583,10 @@ function findExistingVolunteer(existingVolunteers, volunteerRecord, divisionId, 
         v.division_id === divisionId &&
         (v.email || '').trim().toLowerCase() === email
     );
-    if (match1) return match1;
+    if (match1) {
+      console.log(`✅ Found existing volunteer by email+season+division: ${match1.name}, family_id: ${match1.family_id}`);
+      return match1;
+    }
   }
 
   // Strategy 2: same season + same email
@@ -609,7 +662,10 @@ function extractPrimaryRole(raw) {
  */
 function normalizePhone(phone) {
   if (!phone) return '';
-  return String(phone).replace(/\D/g, '');
+  // Remove ALL non-numeric characters
+  const normalized = String(phone).replace(/\D/g, '');
+  console.log(`   normalizePhone: "${phone}" -> "${normalized}"`);
+  return normalized;
 }
 
 /**
@@ -620,10 +676,25 @@ async function updateExistingVolunteer(existingVolunteer, newVolunteerData) {
   const updates = {};
   let hasChanges = false;
 
+  console.log(`\n🔄 [UPDATE CHECK] for ${existingVolunteer.name}`);
+  console.log(`   Existing family_id: ${existingVolunteer.family_id}`);
+  console.log(`   New family_id: ${newVolunteerData.family_id}`);
+
+  // Check family_id FIRST - this is critical!
+  if (
+    newVolunteerData.family_id !== undefined &&
+    newVolunteerData.family_id !== existingVolunteer.family_id
+  ) {
+    updates.family_id = newVolunteerData.family_id;
+    hasChanges = true;
+    console.log(`   ✅ Family ID needs update: ${existingVolunteer.family_id} -> ${newVolunteerData.family_id}`);
+  }
+
   // Email
   if (newVolunteerData.email && newVolunteerData.email !== existingVolunteer.email) {
     updates.email = newVolunteerData.email;
     hasChanges = true;
+    console.log(`   ✅ Email needs update`);
   }
 
   // Phone
@@ -633,6 +704,7 @@ async function updateExistingVolunteer(existingVolunteer, newVolunteerData) {
   ) {
     updates.phone = newVolunteerData.phone;
     hasChanges = true;
+    console.log(`   ✅ Phone needs update`);
   }
 
   // Team
@@ -642,12 +714,14 @@ async function updateExistingVolunteer(existingVolunteer, newVolunteerData) {
   ) {
     updates.team_id = newVolunteerData.team_id;
     hasChanges = true;
+    console.log(`   ✅ Team ID needs update`);
   }
 
   // Notes
   if (newVolunteerData.notes && newVolunteerData.notes !== existingVolunteer.notes) {
     updates.notes = newVolunteerData.notes;
     hasChanges = true;
+    console.log(`   ✅ Notes need update`);
   }
 
   // Training Completed
@@ -657,50 +731,59 @@ async function updateExistingVolunteer(existingVolunteer, newVolunteerData) {
   ) {
     updates.training_completed = newVolunteerData.training_completed;
     hasChanges = true;
+    console.log(`   ✅ Training completed needs update`);
   }
-  // NEW: Background Check Status
-if (
-  newVolunteerData.background_check_completed &&
-  newVolunteerData.background_check_completed !== existingVolunteer.background_check_completed
-) {
-  updates.background_check_completed = newVolunteerData.background_check_completed;
-  hasChanges = true;
-}
 
-  // NEW R1: keep interested_roles in sync with CSV
+  // Background Check Status
+  if (
+    newVolunteerData.background_check_completed &&
+    newVolunteerData.background_check_completed !== existingVolunteer.background_check_completed
+  ) {
+    updates.background_check_completed = newVolunteerData.background_check_completed;
+    hasChanges = true;
+    console.log(`   ✅ Background check needs update`);
+  }
+
+  // Interested Roles - IMPORTANT FOR DRAFT!
   if (
     newVolunteerData.interested_roles &&
     newVolunteerData.interested_roles !== existingVolunteer.interested_roles
   ) {
     updates.interested_roles = newVolunteerData.interested_roles;
     hasChanges = true;
+    console.log(`   ✅ Interested roles need update: "${newVolunteerData.interested_roles}"`);
   }
   
-  // ADDED: Update volunteer_id if provided
-if (
-  newVolunteerData.volunteer_id &&
-  newVolunteerData.volunteer_id !== existingVolunteer.volunteer_id
-) {
-  updates.volunteer_id = newVolunteerData.volunteer_id;
-  hasChanges = true;
-}
+  // Volunteer ID
+  if (
+    newVolunteerData.volunteer_id &&
+    newVolunteerData.volunteer_id !== existingVolunteer.volunteer_id
+  ) {
+    updates.volunteer_id = newVolunteerData.volunteer_id;
+    hasChanges = true;
+    console.log(`   ✅ Volunteer ID needs update`);
+  }
 
-// ADDED: Update volunteer_type_id if provided
-if (
-  newVolunteerData.volunteer_type_id &&
-  newVolunteerData.volunteer_type_id !== existingVolunteer.volunteer_type_id
-) {
-  updates.volunteer_type_id = newVolunteerData.volunteer_type_id;
-  hasChanges = true;
-}
+  // Volunteer Type ID
+  if (
+    newVolunteerData.volunteer_type_id &&
+    newVolunteerData.volunteer_type_id !== existingVolunteer.volunteer_type_id
+  ) {
+    updates.volunteer_type_id = newVolunteerData.volunteer_type_id;
+    hasChanges = true;
+    console.log(`   ✅ Volunteer Type ID needs update`);
+  }
+
+  console.log(`   Has changes? ${hasChanges}`);
+  console.log(`   Updates object:`, updates);
 
   // If nothing changed, just return
   if (!hasChanges) {
-    console.log(`No changes needed for volunteer ${existingVolunteer.name}`);
+    console.log(`🔄 No changes needed for volunteer ${existingVolunteer.name}`);
     return null;
   }
 
-  console.log(`Updating volunteer ${existingVolunteer.name} with changes:`, updates);
+  console.log(`🔄 Updating volunteer ${existingVolunteer.name} with changes:`, updates);
 
   const { data: updatedVolunteer, error } = await supabase
     .from('volunteers')
@@ -719,6 +802,7 @@ if (
     throw error;
   }
 
+  console.log(`🔄 Successfully updated volunteer`);
   return updatedVolunteer;
 }
 
@@ -731,69 +815,115 @@ function normalizePhone(phone) {
 // Returns family UUID (families.id) or null.
 // Replace the ENTIRE findMatchingFamilyId function (around line ~350)
 async function findMatchingFamilyId({ email, phone }, seasonId) {
-  console.log(`Finding family for email: ${email}, phone: ${phone}, season: ${seasonId}`);
+  console.log(`\n🔍 [FIND FAMILY DEBUG START] =================================`);
+  console.log(`   Email: "${email}"`);
+  console.log(`   Phone: "${phone}"`);
+  console.log(`   Season ID: "${seasonId}"`);
   
   const emailNorm = String(email || '').trim().toLowerCase();
   const phoneNorm = normalizePhone(phone);
+  
+  console.log(`   Email normalized: "${emailNorm}"`);
+  console.log(`   Phone normalized: "${phoneNorm}"`);
 
   let candidateFamilies = [];
 
-  // 1. Find families by EMAIL (primary or secondary)
+  // 1. Find families by EMAIL - FIXED SYNTAX
   if (emailNorm) {
+    console.log(`\n   📧 Searching families by email...`);
+    
+    // Try multiple query approaches
+    console.log(`   Trying query 1: .or() with ilike`);
     const { data: famByEmail, error: emailError } = await supabase
       .from('families')
-      .select('id')
+      .select('id, primary_contact_email, parent2_email')
       .or(`primary_contact_email.ilike.${emailNorm},parent2_email.ilike.${emailNorm}`);
 
-    if (!emailError && famByEmail) {
-      candidateFamilies = famByEmail;
-      console.log(`Found ${candidateFamilies.length} candidate families by email`);
+    if (emailError) {
+      console.error(`   ❌ Query 1 error:`, emailError.message);
+      
+      // Fallback: Try separate queries
+      console.log(`   Trying query 2: Separate ilike queries`);
+      const { data: fam1 } = await supabase
+        .from('families')
+        .select('id, primary_contact_email')
+        .ilike('primary_contact_email', emailNorm);
+      
+      const { data: fam2 } = await supabase
+        .from('families')
+        .select('id, parent2_email')
+        .ilike('parent2_email', emailNorm);
+      
+      candidateFamilies = [...(fam1 || []), ...(fam2 || [])];
+    } else {
+      candidateFamilies = famByEmail || [];
     }
+    
+    console.log(`   ✅ Found ${candidateFamilies.length} families by email:`);
+    candidateFamilies.forEach(fam => {
+      console.log(`      - Family ${fam.id}: p_email="${fam.primary_contact_email}", p2_email="${fam.parent2_email}"`);
+    });
   }
 
   // 2. If no email matches, try PHONE
   if (candidateFamilies.length === 0 && phoneNorm && phoneNorm.length >= 4) {
-    const last4 = phoneNorm.slice(-4);
+    console.log(`\n   📞 Searching families by phone (last 4: ${phoneNorm.slice(-4)})...`);
+    
     const { data: famCandidates, error: phoneError } = await supabase
       .from('families')
       .select('id, primary_contact_phone, parent2_phone')
-      .or(`primary_contact_phone.ilike.%${last4}%,parent2_phone.ilike.%${last4}%`)
+      .or(`primary_contact_phone.ilike.%${phoneNorm.slice(-4)}%,parent2_phone.ilike.%${phoneNorm.slice(-4)}%`)
       .limit(50);
 
-    if (!phoneError && famCandidates) {
-      for (const fam of famCandidates) {
+    if (phoneError) {
+      console.error(`   ❌ Phone search error:`, phoneError);
+    } else {
+      console.log(`   ✅ Found ${famCandidates?.length || 0} families by phone pattern`);
+      
+      for (const fam of famCandidates || []) {
         const p1 = normalizePhone(fam.primary_contact_phone);
         const p2 = normalizePhone(fam.parent2_phone);
+        console.log(`      Checking family ${fam.id}: p1="${p1}", p2="${p2}" vs "${phoneNorm}"`);
+        
         if ((p1 && p1 === phoneNorm) || (p2 && p2 === phoneNorm)) {
           candidateFamilies.push({ id: fam.id });
-          console.log(`Found family by phone match`);
+          console.log(`      🎯 Phone exact match found!`);
           break;
         }
       }
     }
   }
 
-  // 3. FILTER: Only families with players in CURRENT SEASON
-  console.log(`Checking ${candidateFamilies.length} candidate families for season ${seasonId}`);
-  
-  for (const family of candidateFamilies) {
-    const { data: seasonPlayers, error: seasonError } = await supabase
-      .from('players')
-      .select('id, first_name, last_name')
-      .eq('family_id', family.id)
-      .eq('season_id', seasonId)  // CRITICAL: Check current season
-      .limit(5);
+  console.log(`\n   📊 Total candidate families: ${candidateFamilies.length}`);
 
-    if (!seasonError && seasonPlayers && seasonPlayers.length > 0) {
-      console.log(`✅ Family ${family.id} has ${seasonPlayers.length} player(s) in season ${seasonId}:`, 
-        seasonPlayers.map(p => `${p.first_name} ${p.last_name}`));
-      return family.id;
+  // 3. Return FIRST matching family (we'll deal with season/division later)
+  if (candidateFamilies.length > 0) {
+    const familyId = candidateFamilies[0].id;
+    console.log(`   🎉 RETURNING FAMILY ID: ${familyId}`);
+    
+    // Optional: Log if players exist in this season
+    const { data: seasonPlayers } = await supabase
+      .from('players')
+      .select('id, first_name, last_name, division_id')
+      .eq('family_id', familyId)
+      .eq('season_id', seasonId)
+      .limit(3);
+    
+    if (seasonPlayers && seasonPlayers.length > 0) {
+      console.log(`   ✅ Family has ${seasonPlayers.length} player(s) in season ${seasonId}:`);
+      seasonPlayers.forEach(p => {
+        console.log(`      - ${p.first_name} ${p.last_name} (Division: ${p.division_id})`);
+      });
     } else {
-      console.log(`❌ Family ${family.id} has NO players in season ${seasonId}`);
+      console.log(`   ⚠️  Family has NO players in season ${seasonId} (but volunteer can still help)`);
     }
+    
+    console.log(`🔍 [FIND FAMILY DEBUG END] =================================\n`);
+    return familyId;
   }
 
-  console.log(`No family found with players in season ${seasonId}`);
+  console.log(`   🚫 No family found at all`);
+  console.log(`🔍 [FIND FAMILY DEBUG END] =================================\n`);
   return null;
 }
 

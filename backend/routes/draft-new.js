@@ -188,6 +188,24 @@ router.get('/data', async (req, res) => {
       });
       
       console.log(`\nVolunteers with eligible roles: ${volunteers.length}`);
+	  // In the volunteers filtering section, add:
+console.log('\n=== CHECKING ALL VOLUNTEERS ===');
+(vData || []).forEach(v => {
+  const eligible = eligibleRolesFromInterested(v);
+  console.log(`Volunteer: ${v.name}`);
+  console.log(`  interested_roles: "${v.interested_roles}"`);
+  console.log(`  eligible roles:`, eligible);
+  console.log(`  passes filter? ${eligible.length > 0}`);
+  
+  // Specifically check for Anthony
+  if (v.name.includes('Padovano') || v.email.includes('anthonyt910')) {
+    console.log(`\n⚠️  FOUND ANTHONY PADOVANO!`);
+    console.log(`  Full data:`, v);
+    console.log(`  Family ID: ${v.family_id}`);
+    console.log(`  Division ID: ${v.division_id}`);
+    console.log(`  Season ID: ${v.season_id}`);
+  }
+});
     }
 
     // 4) Organize volunteers by family ID

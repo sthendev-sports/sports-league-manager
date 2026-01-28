@@ -27,31 +27,35 @@ const Layout = ({ children }) => {
   const location = useLocation();
   const { user, logout } = useAuth();
 
-  // Navigation items (roles = which roles can see it; no roles = everyone)
+  // Navigation items - REMOVE 'roles' from items that should use permissions
   const navigation = [
     { name: 'Dashboard', href: '/', icon: Home },
     { name: 'Players', href: '/players', icon: Users },
     { name: 'Teams', href: '/teams', icon: Trophy },
     { name: 'Draft', href: '/draft', icon: DraftingCompass },
     { name: 'Team Uniforms', href: '/team-uniforms', icon: Shirt },
-    {
-      name: 'Game Scheduler',
-      href: '/games',
-      icon: CalendarDays,
-    },
-    {
-      name: 'Workbond Management',
-      href: '/workbond-management',
+    { name: 'Game Scheduler', href: '/games', icon: CalendarDays },
+	{ 
+    name: 'Family Manager', 
+    href: '/family-manager', 
+    icon: Users, // You can use Users or another appropriate icon
+  },
+    { 
+      name: 'Workbond Management', 
+      href: '/workbond-management', 
       icon: ClipboardCheck,
-  ClipboardList,
-      roles: ['Administrator', 'President', 'Work Bond Manager'],
+      roles: ['Administrator', 'President', 'Work Bond Manager'], // Keep roles for these
     },
-    //{ name: 'Seasons', href: '/seasons', icon: Calendar },
     { name: 'Volunteers', href: '/volunteers', icon: HandHelping },
-    { name: 'Requests', href: '/requests', icon: ClipboardList, roles: ['Administrator', 'President'] },
-	{ name: 'Mailing List', href: '/mailing-list', icon: Mail },
+    { 
+      name: 'Requests', 
+      href: '/requests', 
+      icon: ClipboardList, 
+      //roles: ['Administrator', 'President', 'Treasurer'] 
+    },
+    { name: 'Mailing List', href: '/mailing-list', icon: Mail },
     { name: 'Board Members', href: '/boardmembers', icon: UserCheck },
-	{
+    {
       name: 'Users',
       href: '/users',
       icon: Shield,
@@ -63,8 +67,64 @@ const Layout = ({ children }) => {
       icon: Mail,
       roles: ['Administrator', 'President'],
     },
-	{ name: 'Configuration', href: '/configuration', icon: Settings },
+    { name: 'Configuration', href: '/configuration', icon: Settings },
   ];
+
+  // Map routes to permission resources (MUST match backend)
+  const PAGE_TO_RESOURCE = {
+    '/': 'dashboard',
+    '/players': 'players',
+    '/teams': 'teams',
+    '/draft': 'draft',
+    '/team-uniforms': 'uniforms',
+    '/games': 'game_scheduler',
+	 '/family-manager': 'families',
+    '/workbond-management': 'workbond_management',
+    '/volunteers': 'volunteers',
+    '/requests': 'requests',
+    '/mailing-list': 'mailing_list',
+    '/boardmembers': 'board_members',
+    '/users': 'users',
+    '/email-settings': 'email_settings',
+    '/configuration': 'configuration',
+  };
+
+  // Helper: normalize permission values (none/read/write)
+  const normalizePermission = (value) => {
+    if (!value) return 'none';
+    const v = String(value).toLowerCase();
+    if (v === 'none' || v === 'read' || v === 'write') return v;
+    if (v === 'r') return 'read';
+    if (v === 'rw') return 'write';
+    if (v === 'x') return 'none';
+    return 'none';
+  };
+
+  // Check if user can see a navigation item
+  const canSeeNavItem = (item) => {
+    // If no user logged in, hide everything
+    if (!user) return false;
+
+    // 1. First check for role-based restrictions (backward compatibility)
+    if (item.roles && item.roles.length > 0) {
+      return item.roles.includes(user.role);
+    }
+
+    // 2. Check permission-based access (new system)
+    const resource = PAGE_TO_RESOURCE[item.href];
+    
+    // If no resource mapping exists, default to showing it
+    if (!resource) return true;
+    
+    // If user doesn't have permissions object yet, hide it
+    if (!user.permissions) return false;
+    
+    // Get and normalize the permission
+    const permission = normalizePermission(user.permissions[resource]);
+    
+    // Show menu item if user has any access (read or write)
+    return permission !== 'none';
+  };
 
   // Lock body scroll when mobile menu is open
   useEffect(() => {
@@ -88,12 +148,6 @@ const Layout = ({ children }) => {
 
   const handleLogout = () => {
     logout();
-  };
-
-  const canSeeNavItem = (item) => {
-    if (!item.roles) return true;
-    if (!user) return false;
-    return item.roles.includes(user.role);
   };
 
   return (

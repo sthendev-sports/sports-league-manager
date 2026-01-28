@@ -438,8 +438,8 @@ const GameScheduler = () => {
                 games.push({
                   SortOrder: sortOrder++,
                   RoundNo: week,
-                  HomeTeam: `${homeTeam.name} - ${getManagerName(homeTeam)}`,
-                  AwayTeam: `${awayTeam.name} - ${getManagerName(awayTeam)}`,
+                  HomeTeam: `${homeTeam.name}`,
+                  AwayTeam: `${awayTeam.name}`,
                   MatchDate: formatDateForDisplay(gameDate),
                   StartTime: time,
                   EndTime: endTime,

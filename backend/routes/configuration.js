@@ -1,6 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const supabase = require('../config/database');
+const { authMiddleware } = require('../middleware/auth');
+const { permissionEnforcer } = require('../middleware/permissionEnforcer');
 
 // GET all divisions
 router.get('/divisions', async (req, res) => {
@@ -165,6 +167,13 @@ router.delete('/divisions/:id', async (req, res) => {
     console.error('Error deleting division:', error);
     res.status(500).json({ error: 'Failed to delete division' });
   }
+});
+
+// Protect team create/update/delete that lives in configuration routes
+router.use('/teams', authMiddleware, (req, res, next) => {
+  // Force permissionEnforcer to treat these as the Teams resource
+  req._permissionBaseUrl = '/api/teams';
+  return permissionEnforcer(req, res, next);
 });
 
 // Teams routes (if they don't exist elsewhere)

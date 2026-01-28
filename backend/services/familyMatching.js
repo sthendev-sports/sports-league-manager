@@ -2,61 +2,127 @@ const supabase = require('../config/database');
 
 class FamilyMatchingService {
   // Find existing family by multiple criteria
-  async findExistingFamily(playerData) {
-    const matchingCriteria = [];
+async findExistingFamily(playerData) {
+  const email1 = (playerData.parent1_email || '').trim().toLowerCase();
+  const email2 = (playerData.parent2_email || '').trim().toLowerCase();
+  const phone1 = this.normalizePhone(playerData.parent1_phone1);
+  const phone2 = this.normalizePhone(playerData.parent2_phone1);
+  
+  console.log(`Looking for family with emails: ${email1}, ${email2} and phones: ${phone1}, ${phone2}`);
+
+  // 1. Try email matches first (case-insensitive)
+  const emailCandidates = [];
+  
+  if (email1) {
+    const { data: famByEmail1, error: email1Error } = await supabase
+      .from('families')
+      .select('*')
+      .or(`primary_contact_email.ilike.${email1},parent2_email.ilike.${email1}`);
     
-    // 1. By provided family_id
-    if (playerData.family_id) {
-      matchingCriteria.push({ field: 'family_id', value: playerData.family_id });
+    if (!email1Error && famByEmail1) {
+      emailCandidates.push(...famByEmail1);
     }
+  }
+  
+  if (email2) {
+    const { data: famByEmail2, error: email2Error } = await supabase
+      .from('families')
+      .select('*')
+      .or(`primary_contact_email.ilike.${email2},parent2_email.ilike.${email2}`);
     
-    // 2. By parent1 email (exact match)
-    if (playerData.parent1_email) {
-      matchingCriteria.push({ field: 'primary_contact_email', value: playerData.parent1_email.toLowerCase() });
+    if (!email2Error && famByEmail2) {
+      // Filter out duplicates
+      famByEmail2.forEach(fam => {
+        if (!emailCandidates.some(f => f.id === fam.id)) {
+          emailCandidates.push(fam);
+        }
+      });
     }
+  }
+  
+  if (emailCandidates.length > 0) {
+    console.log(`Found ${emailCandidates.length} family candidate(s) by email`);
+    // Return the first email match
+    return emailCandidates[0];
+  }
+
+  // 2. Try phone matches (normalized)
+  const phoneCandidates = [];
+  
+  if (phone1 && phone1.length >= 10) {
+    // Try exact phone match
+    const { data: famByPhone1, error: phone1Error } = await supabase
+      .from('families')
+      .select('*')
+      .or(`primary_contact_phone.ilike.%${phone1}%,parent2_phone.ilike.%${phone1}%`);
     
-    // 3. By parent2 email (exact match)
-    if (playerData.parent2_email) {
-      matchingCriteria.push({ field: 'parent2_email', value: playerData.parent2_email.toLowerCase() });
-    }
-    
-    // 4. By phone number (if available)
-    if (playerData.parent1_phone1) {
-      matchingCriteria.push({ field: 'primary_contact_phone', value: playerData.parent1_phone1 });
-    }
-    
-    // Try each matching criterion
-    for (const criterion of matchingCriteria) {
-      const { data: family, error } = await supabase
-        .from('families')
-        .select('*')
-        .eq(criterion.field, criterion.value)
-        .single();
+    if (!phone1Error && famByPhone1) {
+      // Filter for exact matches
+      const exactMatches = famByPhone1.filter(fam => {
+        const famPhone1 = this.normalizePhone(fam.primary_contact_phone);
+        const famPhone2 = this.normalizePhone(fam.parent2_phone);
+        return (famPhone1 && famPhone1 === phone1) || 
+               (famPhone2 && famPhone2 === phone1);
+      });
       
-      if (family && !error) {
-        console.log(`Found existing family using ${criterion.field}: ${criterion.value}`);
-        return family;
+      if (exactMatches.length > 0) {
+        phoneCandidates.push(...exactMatches);
       }
     }
-    
-    // 5. Fuzzy matching by last name and address (if available)
-// UPDATED: Use player_street for fuzzy matching if available
-const addressForMatching = playerData.player_street || playerData.address_line_1;
-if (playerData.parent1_lastname && addressForMatching) {
-  const { data: families, error } = await supabase
-    .from('families')
-    .select('*')
-    .ilike('primary_contact_name', `%${playerData.parent1_lastname}%`)
-    .ilike('address_line_1', `%${addressForMatching}%`);
+  }
   
-  if (families && families.length > 0 && !error) {
-    console.log(`Found existing family using fuzzy matching: ${playerData.parent1_lastname}, ${addressForMatching}`);
-    return families[0]; // Return the first match
-  }
-}
+  if (phone2 && phone2.length >= 10) {
+    const { data: famByPhone2, error: phone2Error } = await supabase
+      .from('families')
+      .select('*')
+      .or(`primary_contact_phone.ilike.%${phone2}%,parent2_phone.ilike.%${phone2}%`);
     
-    return null;
+    if (!phone2Error && famByPhone2) {
+      // Filter for exact matches and avoid duplicates
+      const exactMatches = famByPhone2.filter(fam => {
+        const famPhone1 = this.normalizePhone(fam.primary_contact_phone);
+        const famPhone2 = this.normalizePhone(fam.parent2_phone);
+        const isExact = (famPhone1 && famPhone1 === phone2) || 
+                       (famPhone2 && famPhone2 === phone2);
+        const isDuplicate = phoneCandidates.some(f => f.id === fam.id);
+        return isExact && !isDuplicate;
+      });
+      
+      if (exactMatches.length > 0) {
+        phoneCandidates.push(...exactMatches);
+      }
+    }
   }
+  
+  if (phoneCandidates.length > 0) {
+    console.log(`Found ${phoneCandidates.length} family candidate(s) by phone`);
+    return phoneCandidates[0];
+  }
+
+  // 3. Try fuzzy matching by last name and address (as before)
+  const addressForMatching = playerData.player_street || playerData.address_line_1;
+  if (playerData.parent1_lastname && addressForMatching) {
+    const { data: families, error } = await supabase
+      .from('families')
+      .select('*')
+      .ilike('primary_contact_name', `%${playerData.parent1_lastname}%`)
+      .ilike('address_line_1', `%${addressForMatching}%`);
+    
+    if (families && families.length > 0 && !error) {
+      console.log(`Found existing family using fuzzy matching: ${playerData.parent1_lastname}, ${addressForMatching}`);
+      return families[0];
+    }
+  }
+  
+  return null;
+}
+
+// ADD THIS HELPER METHOD to familyMatching.js
+normalizePhone(phone) {
+  if (!phone) return '';
+  // Remove ALL non-numeric characters
+  return String(phone).replace(/\D/g, '');
+}
 
   // Generate a new family ID
   generateFamilyId(playerData) {

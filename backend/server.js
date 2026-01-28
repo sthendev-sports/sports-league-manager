@@ -52,34 +52,43 @@ const requestsRoutes = require('./routes/requests');
 const publicCheckWorkbondRoutes = require('./routes/publicCheckWorkbond');
 const familySeasonWorkbondRoutes = require('./routes/familySeasonWorkbond');
 const trainingsRouter = require('./routes/trainings');
+const { authMiddleware } = require('./middleware/auth');
+const { permissionEnforcer } = require('./middleware/permissionEnforcer');
 // const workbondImportRoutes = require('./routes/import-shifts');
 //app.use('/api/draft-new', require('./routes/draft-new'));
-app.use('/api/draft', require('./routes/draft-new')); // NEW - use the new code
+
 
 // Use routes - IMPORTANT: configuration before teams
+app.use('/api/draft', authMiddleware, permissionEnforcer, require('./routes/draft-new')); // NEW - use the new code
 app.use('/api/auth', authRoutes);
 app.use('/api/users', usersRoutes);
 app.use('/api/email-settings', emailSettingsRoutes);
 app.use('/api/notifications', notificationsRoutes);
 app.use('/api/seasons', seasonRoutes);
-app.use('/api/players', playerRoutes);
+//app.use('/api/players', playerRoutes);
+app.use('/api/players', authMiddleware, permissionEnforcer, playerRoutes);
 app.use('/api', configurationRoutes);      // Handles /api/divisions
-app.use('/api/teams', teamRoutes);         // Handles /api/teams
+app.use('/api/teams', authMiddleware, permissionEnforcer, teamRoutes);        // Handles /api/teams
+//app.use('/api/teams', teamRoutes); // not using rules
+app.use('/api/uniforms', authMiddleware, permissionEnforcer, require('./routes/uniforms'));
 app.use('/api/families', familyRoutes);
 app.use('/api/payment-data', paymentDataRoutes);
 app.use('/api/trainings', trainingsRouter);
-app.use('/api/volunteers', volunteerRoutes);
-app.use('/api/volunteer-import', volunteerImportRoutes); // NEW route base
+app.use('/api/volunteers', authMiddleware, permissionEnforcer, volunteerRoutes);
+app.use('/api/volunteer-import', authMiddleware, permissionEnforcer, volunteerImportRoutes); // NEW route base
 app.use('/api/board-members', boardMemberRoutes);
 //app.use('/api/draft', draftRoutes);
 app.use('/api/season-export', seasonExportRoutes);
 app.use('/api/games', gamesRoutes);
-app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/dashboard', authMiddleware, permissionEnforcer, dashboardRoutes);
 app.use('/api/workbond', workbondRoutes);
-app.use('/api/requests', requestsRoutes);
-app.use('/api/family-season-workbond', familySeasonWorkbondRoutes);
+app.use('/api/requests', authMiddleware, permissionEnforcer, requestsRoutes);
+app.use('/api/family-season-workbond', authMiddleware, permissionEnforcer, familySeasonWorkbondRoutes, require('./routes/familySeasonWorkbond'));
 app.use('/api/public/checkworkbond', publicCheckWorkbondRoutes);
 app.use('/api/public/workbond-status', publicCheckWorkbondRoutes); // backward compat
+app.use('/api/families', require('./routes/families'));
+//app.use('/api/seasons', require('./routes/seasons'));
+app.use('/api/role-permissions', permissionEnforcer, require('./routes/rolePermissions'));
 // app.use('/api/workbond', workbondImportRoutes); // enable later if needed
 
 // Basic health check

@@ -1,6 +1,8 @@
+// frontend/src/pages/Dashboard.jsx - Simplified version
 import React, { useState, useEffect } from 'react';
 import { RefreshCw, AlertCircle, Edit2, Save, X } from 'lucide-react';
 import { seasonsAPI, dashboardAPI } from '../services/api';
+import { getPermissionErrorMessage } from '../utils/permissionHelpers';
 
 const DIVISION_ORDER = [
   "T-Ball Division",
@@ -27,7 +29,6 @@ const sortDivisionObjects = (a, b) => {
   return String(a?.name || "").localeCompare(String(b?.name || ""));
 };
 
-
 const Dashboard = () => {
   const [stats, setStats] = useState({
     totalRegistered: 0,
@@ -43,12 +44,11 @@ const Dashboard = () => {
       assistantCoaches: 0,
       teamParents: 0,
     },
-	monthlyTrends: [],
+    monthlyTrends: [],
     volunteerByDivision: []
   });
   
-  const [selectedMonthView, setSelectedMonthView] = useState('all'); // 'all', 'quarter', or specific range
-  
+  const [selectedMonthView, setSelectedMonthView] = useState('all');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [seasons, setSeasons] = useState([]);
@@ -57,16 +57,6 @@ const Dashboard = () => {
   const [currentSeason, setCurrentSeason] = useState(null);
   const [editingDivision, setEditingDivision] = useState(null);
   const [editValue, setEditValue] = useState('');
-
-// Calculate totals for monthly trends
-const monthlyTotals = stats.monthlyTrends?.reduce(
-  (totals, month) => {
-    totals.current += month.current;
-    totals.previous += month.previous;
-    return totals;
-  },
-  { current: 0, previous: 0 }
-) || { current: 0, previous: 0 };
 
   // Load seasons on component mount
   useEffect(() => {
@@ -102,42 +92,45 @@ const monthlyTotals = stats.monthlyTrends?.reduce(
     }
   }, [selectedSeasonId, selectedCompareSeasonId]);
 
-const loadDashboardData = async () => {
-  try {
-    setLoading(true);
-    setError(null);
+  const loadDashboardData = async () => {
+    try {
+      setLoading(true);
+      setError(null);
 
-    console.log('Loading dashboard with:', {
-      currentSeasonId: selectedSeasonId,
-      compareSeasonId: selectedCompareSeasonId || 'none'
-    });
+      console.log('Loading dashboard with:', {
+        currentSeasonId: selectedSeasonId,
+        compareSeasonId: selectedCompareSeasonId || 'none'
+      });
 
-    // Get current season object
-    const seasonObj = seasons.find(s => s.id === selectedSeasonId);
-    if (!seasonObj) {
-      throw new Error('Current season not found');
+      // Get current season object
+      const seasonObj = seasons.find(s => s.id === selectedSeasonId);
+      if (!seasonObj) {
+        throw new Error('Current season not found');
+      }
+      setCurrentSeason(seasonObj);
+
+      // Load dashboard statistics with comparison season
+      const dashboardData = await dashboardAPI.getStatistics(
+        selectedSeasonId, 
+        selectedCompareSeasonId || ''
+      );
+      
+      console.log('Dashboard data loaded');
+      setStats(dashboardData);
+    } catch (error) {
+      console.error('Error loading dashboard data:', error);
+      
+      // Use the helper function for better error messages
+      const errorMessage = getPermissionErrorMessage(
+        error,
+        'Failed to load dashboard data. You may not have permission to view this information.'
+      );
+      
+      setError(errorMessage);
+    } finally {
+      setLoading(false);
     }
-    setCurrentSeason(seasonObj);
-
-    // DEBUG: Log the actual API call
-    console.log('Making API call to:', `/api/dashboard/statistics?season_id=${selectedSeasonId}&compare_season_id=${selectedCompareSeasonId || ''}`);
-    
-    // Load dashboard statistics with comparison season
-    const dashboardData = await dashboardAPI.getStatistics(
-      selectedSeasonId, 
-      selectedCompareSeasonId || ''
-    );
-    
-    console.log('Full API response:', dashboardData);
-    console.log('Dashboard data loaded for comparison season:', dashboardData.previousSeason?.name || 'none');
-    setStats(dashboardData);
-  } catch (error) {
-    console.error('Error loading dashboard data:', error);
-    setError(error.message || 'Failed to load dashboard data');
-  } finally {
-    setLoading(false);
-  }
-};
+  };
 
   // Calculate totals for division breakdown
   const divisionTotals = {
@@ -162,30 +155,45 @@ const loadDashboardData = async () => {
     setEditValue(value.toString());
   };
 
-  const handleSaveEdit = (divisionName) => {
-    const updatedDivisions = stats.divisions.map(division => {
-      if (division.name === divisionName) {
-        const previousValue = parseInt(editValue) || 0;
-        const currentValue = division.current;
-        const trend = currentValue > previousValue ? 'up' : 
-                     currentValue < previousValue ? 'down' : 'neutral';
-        
-        return {
-          ...division,
-          previous: previousValue,
-          trend: trend
-        };
-      }
-      return division;
-    });
+  const handleSaveEdit = async (divisionName) => {
+    try {
+      // Update locally
+      const updatedDivisions = stats.divisions.map(division => {
+        if (division.name === divisionName) {
+          const previousValue = parseInt(editValue) || 0;
+          const currentValue = division.current;
+          const trend = currentValue > previousValue ? 'up' : 
+                       currentValue < previousValue ? 'down' : 'neutral';
+          
+          return {
+            ...division,
+            previous: previousValue,
+            trend: trend
+          };
+        }
+        return division;
+      });
 
-    setStats(prev => ({
-      ...prev,
-      divisions: updatedDivisions
-    }));
-    
-    setEditingDivision(null);
-    setEditValue('');
+      setStats(prev => ({
+        ...prev,
+        divisions: updatedDivisions
+      }));
+      
+      setEditingDivision(null);
+      setEditValue('');
+      
+      alert('Division data updated successfully!');
+      
+    } catch (error) {
+      console.error('Error updating division data:', error);
+      
+      const errorMessage = getPermissionErrorMessage(
+        error,
+        'Failed to update division data. You may not have permission to edit this information.'
+      );
+      
+      alert(errorMessage);
+    }
   };
 
   const handleCancelEdit = () => {
@@ -233,9 +241,9 @@ const loadDashboardData = async () => {
   const getComparisonSeasonName = () => {
     if (selectedCompareSeasonId) {
       const compareSeason = seasons.find(s => s.id === selectedCompareSeasonId);
-      return compareSeason?.name || 'Previous Season';
+      return compareSeason?.name || 'Comparison Season';
     }
-    return 'Previous Season (Auto)';
+    return 'None Selected';
   };
 
   if (loading && !stats.divisions.length) {
@@ -300,7 +308,7 @@ const loadDashboardData = async () => {
               </select>
             </div>
             
-            {/* Compare To Dropdown */}
+            {/* Compare To Dropdown - NO AUTO OPTION */}
             <div className="flex flex-col">
               <label className="text-xs text-gray-500 mb-1">Compare To</label>
               <select
@@ -308,10 +316,12 @@ const loadDashboardData = async () => {
                 value={selectedCompareSeasonId}
                 onChange={(e) => setSelectedCompareSeasonId(e.target.value)}
               >
-                <option value="">-- Auto (Previous Year) --</option>
-                {seasons.filter(season => season.id !== selectedSeasonId).map(season => (
-                  <option key={season.id} value={season.id}>{season.name}</option>
-                ))}
+                <option value="">-- Select Season --</option>
+                {seasons
+                  .filter(season => season.id !== selectedSeasonId)
+                  .map(season => (
+                    <option key={season.id} value={season.id}>{season.name}</option>
+                  ))}
               </select>
             </div>
           </div>
@@ -326,7 +336,7 @@ const loadDashboardData = async () => {
         </div>
       </div>
 
-      {/* Registration Totals - Stacked and Compact */}
+      {/* Registration Totals */}
       <div className="bg-white shadow rounded-lg">
         <div className="px-6 py-4 border-b border-gray-200">
           <h2 className="text-lg font-semibold text-gray-900">Registration Totals</h2>
@@ -346,7 +356,7 @@ const loadDashboardData = async () => {
       </div>
 
       <div className="grid grid-cols-1 gap-6">
-        {/* Division Registration Breakdown - Now with New/Returning Players */}
+        {/* Division Registration Breakdown */}
         <div className="bg-white shadow rounded-lg">
           <div className="px-6 py-4 border-b border-gray-200">
             <h2 className="text-lg font-semibold text-gray-900">Division Registration Breakdown</h2>
@@ -364,10 +374,14 @@ const loadDashboardData = async () => {
                       <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Division</th>
                       <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Current</th>
                       <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Withdrawn</th>
-                      <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap" title={getComparisonSeasonName()}>
-                        {getComparisonColumnHeader()}
-                      </th>
-                      <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Trend</th>
+                      {selectedCompareSeasonId && (
+                        <>
+                          <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap" title={getComparisonSeasonName()}>
+                            {getComparisonColumnHeader()}
+                          </th>
+                          <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Trend</th>
+                        </>
+                      )}
                       <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">New</th>
                       <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Returning</th>
                       <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Teams</th>
@@ -391,51 +405,55 @@ const loadDashboardData = async () => {
                               <span className="text-gray-400">0</span>
                             )}
                           </td>
-                          <td className="px-2 py-2 text-sm text-center whitespace-nowrap">
-                            {editingDivision === division.name ? (
-                              <div className="flex items-center justify-center space-x-1">
-                                <input
-                                  type="number"
-                                  value={editValue}
-                                  onChange={(e) => setEditValue(e.target.value)}
-                                  className="w-16 px-1 py-1 text-sm border border-gray-300 rounded text-center"
-                                  autoFocus
-                                />
-                                <button
-                                  onClick={() => handleSaveEdit(division.name)}
-                                  className="text-green-600 hover:text-green-800"
-                                >
-                                  <Save className="h-3 w-3" />
-                                </button>
-                                <button
-                                  onClick={handleCancelEdit}
-                                  className="text-red-600 hover:text-red-800"
-                                >
-                                  <X className="h-3 w-3" />
-                                </button>
-                              </div>
-                            ) : (
-                              <div className="flex items-center justify-center space-x-1">
-                                <span className="text-gray-500">{division.previous}</span>
-                                <button
-                                  onClick={() => handleEditClick(division, division.previous)}
-                                  className="text-gray-400 hover:text-blue-600 ml-1"
-                                >
-                                  <Edit2 className="h-3 w-3" />
-                                </button>
-                              </div>
-                            )}
-                          </td>
-                          <td className="px-2 py-2 text-sm text-center whitespace-nowrap">
-                            <div className={`inline-flex items-center px-1 py-0.5 rounded text-xs font-medium ${trendStyles.bg} ${trendStyles.text}`}>
-                              <span className={trendStyles.arrow}>
-                                {trendStyles.symbol}
-                              </span>
-                              <span className="ml-0.5">
-                                {Math.abs(division.current - division.previous)}
-                              </span>
-                            </div>
-                          </td>
+                          {selectedCompareSeasonId && (
+                            <>
+                              <td className="px-2 py-2 text-sm text-center whitespace-nowrap">
+                                {editingDivision === division.name ? (
+                                  <div className="flex items-center justify-center space-x-1">
+                                    <input
+                                      type="number"
+                                      value={editValue}
+                                      onChange={(e) => setEditValue(e.target.value)}
+                                      className="w-16 px-1 py-1 text-sm border border-gray-300 rounded text-center"
+                                      autoFocus
+                                    />
+                                    <button
+                                      onClick={() => handleSaveEdit(division.name)}
+                                      className="text-green-600 hover:text-green-800"
+                                    >
+                                      <Save className="h-3 w-3" />
+                                    </button>
+                                    <button
+                                      onClick={handleCancelEdit}
+                                      className="text-red-600 hover:text-red-800"
+                                    >
+                                      <X className="h-3 w-3" />
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <div className="flex items-center justify-center space-x-1">
+                                    <span className="text-gray-500">{division.previous}</span>
+                                    <button
+                                      onClick={() => handleEditClick(division, division.previous)}
+                                      className="text-gray-400 hover:text-blue-600 ml-1"
+                                    >
+                                      <Edit2 className="h-3 w-3" />
+                                    </button>
+                                  </div>
+                                )}
+                              </td>
+                              <td className="px-2 py-2 text-sm text-center whitespace-nowrap">
+                                <div className={`inline-flex items-center px-1 py-0.5 rounded text-xs font-medium ${trendStyles.bg} ${trendStyles.text}`}>
+                                  <span className={trendStyles.arrow}>
+                                    {trendStyles.symbol}
+                                  </span>
+                                  <span className="ml-0.5">
+                                    {Math.abs(division.current - division.previous)}
+                                  </span>
+                                </div>
+                              </td>
+                            </>
+                          )}
                           <td className="px-2 py-2 text-sm text-blue-600 text-center whitespace-nowrap font-medium">{division.newPlayers}</td>
                           <td className="px-2 py-2 text-sm text-green-600 text-center whitespace-nowrap font-medium">{division.returningPlayers}</td>
                           <td className="px-2 py-2 text-sm text-gray-900 text-center whitespace-nowrap">{division.teams}</td>
@@ -457,21 +475,25 @@ const loadDashboardData = async () => {
                           <span className="text-gray-400">0</span>
                         )}
                       </td>
-                      <td className="px-2 py-2 text-sm text-gray-500 text-center whitespace-nowrap">{divisionTotals.previous}</td>
-                      <td className="px-2 py-2 text-sm text-center whitespace-nowrap">
-                        <div className={`inline-flex items-center px-1 py-0.5 rounded text-xs font-medium ${
-                          divisionTotals.current > divisionTotals.previous ? 'bg-green-100 text-green-800' :
-                          divisionTotals.current < divisionTotals.previous ? 'bg-red-100 text-red-800' :
-                          'bg-gray-100 text-gray-800'
-                        }`}>
-                          <span className={divisionTotals.current > divisionTotals.previous ? 'text-green-600' : divisionTotals.current < divisionTotals.previous ? 'text-red-600' : 'text-gray-600'}>
-                            {divisionTotals.current > divisionTotals.previous ? '▲' : divisionTotals.current < divisionTotals.previous ? '▼' : '→'}
-                          </span>
-                          <span className="ml-0.5">
-                            {Math.abs(divisionTotals.current - divisionTotals.previous)}
-                          </span>
-                        </div>
-                      </td>
+                      {selectedCompareSeasonId && (
+                        <>
+                          <td className="px-2 py-2 text-sm text-gray-500 text-center whitespace-nowrap">{divisionTotals.previous}</td>
+                          <td className="px-2 py-2 text-sm text-center whitespace-nowrap">
+                            <div className={`inline-flex items-center px-1 py-0.5 rounded text-xs font-medium ${
+                              divisionTotals.current > divisionTotals.previous ? 'bg-green-100 text-green-800' :
+                              divisionTotals.current < divisionTotals.previous ? 'bg-red-100 text-red-800' :
+                              'bg-gray-100 text-gray-800'
+                            }`}>
+                              <span className={divisionTotals.current > divisionTotals.previous ? 'text-green-600' : divisionTotals.current < divisionTotals.previous ? 'text-red-600' : 'text-gray-600'}>
+                                {divisionTotals.current > divisionTotals.previous ? '▲' : divisionTotals.current < divisionTotals.previous ? '▼' : '→'}
+                              </span>
+                              <span className="ml-0.5">
+                                {Math.abs(divisionTotals.current - divisionTotals.previous)}
+                              </span>
+                            </div>
+                          </td>
+                        </>
+                      )}
                       <td className="px-2 py-2 text-sm text-blue-600 text-center whitespace-nowrap">{divisionTotals.newPlayers}</td>
                       <td className="px-2 py-2 text-sm text-green-600 text-center whitespace-nowrap">{divisionTotals.returningPlayers}</td>
                       <td className="px-2 py-2 text-sm text-gray-900 text-center whitespace-nowrap">{divisionTotals.teams}</td>
@@ -482,144 +504,89 @@ const loadDashboardData = async () => {
             )}
           </div>
         </div>
-{/* Monthly Registration Trends */}
-<div className="bg-white shadow rounded-lg">
-  <div className="px-6 py-4 border-b border-gray-200">
-    <div className="flex justify-between items-center">
-      <h2 className="text-lg font-semibold text-gray-900">Monthly Registration Trends</h2>
-      <div className="flex space-x-2">
-        <button
-          onClick={() => setSelectedMonthView('all')}
-          className={`px-3 py-1 text-sm rounded ${selectedMonthView === 'all' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
-        >
-          All Months
-        </button>
-        <button
-          onClick={() => setSelectedMonthView('quarter')}
-          className={`px-3 py-1 text-sm rounded ${selectedMonthView === 'quarter' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
-        >
-          Jan-Mar
-        </button>
-      </div>
-    </div>
-  </div>
-  <div className="p-4">
-    {stats.monthlyTrends && stats.monthlyTrends.length > 0 ? (
-      <div className="overflow-x-auto">
-        <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Month</th>
-              <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Current Season</th>
-              <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap" title={getComparisonSeasonName()}>
-                {getComparisonColumnHeader()}
-              </th>
-              <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Change</th>
-              <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Trend</th>
-            </tr>
-          </thead>
-          <tbody className="bg-white divide-y divide-gray-200">
-            {stats.monthlyTrends
-              .filter(month => {
-                if (selectedMonthView === 'quarter') {
-                  return month.monthNumber <= 3; // Jan-Mar
-                }
-                return true;
-              })
-              .map((month) => {
-                const change = month.current - month.previous;
-                const trend = month.trend;
-                const trendStyles = getTrendStyles(trend);
-                
-                return (
-                  <tr key={month.month} className="hover:bg-gray-50">
-                    <td className="px-2 py-2 text-sm font-medium text-gray-900 whitespace-nowrap">
-                      {month.month}
-                    </td>
-                    <td className="px-2 py-2 text-sm text-gray-900 text-center whitespace-nowrap font-bold">
-                      {month.current}
-                    </td>
-                    <td className="px-2 py-2 text-sm text-gray-500 text-center whitespace-nowrap">
-                      {month.previous}
-                    </td>
-                    <td className="px-2 py-2 text-sm text-center whitespace-nowrap">
-                      <span className={`font-medium ${change > 0 ? 'text-green-600' : change < 0 ? 'text-red-600' : 'text-gray-500'}`}>
-                        {change > 0 ? '+' : ''}{change}
-                      </span>
-                    </td>
-                    <td className="px-2 py-2 text-sm text-center whitespace-nowrap">
-                      <div className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium ${trendStyles.bg} ${trendStyles.text}`}>
-                        <span className={trendStyles.arrow}>
-                          {trendStyles.symbol}
-                        </span>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            {/* Total Row for Quarterly View */}
-            {selectedMonthView === 'quarter' && (
-              <tr className="bg-gray-50 font-semibold border-t-2 border-gray-300">
-                <td className="px-2 py-2 text-sm text-gray-900 whitespace-nowrap">Q1 Total</td>
-                <td className="px-2 py-2 text-sm text-gray-900 text-center whitespace-nowrap">
-                  {stats.monthlyTrends
-                    .filter(month => month.monthNumber <= 3)
-                    .reduce((sum, month) => sum + month.current, 0)}
-                </td>
-                <td className="px-2 py-2 text-sm text-gray-500 text-center whitespace-nowrap">
-                  {stats.monthlyTrends
-                    .filter(month => month.monthNumber <= 3)
-                    .reduce((sum, month) => sum + month.previous, 0)}
-                </td>
-                <td className="px-2 py-2 text-sm text-center whitespace-nowrap">
-                  {(() => {
-                    const currentTotal = stats.monthlyTrends
-                      .filter(month => month.monthNumber <= 3)
-                      .reduce((sum, month) => sum + month.current, 0);
-                    const previousTotal = stats.monthlyTrends
-                      .filter(month => month.monthNumber <= 3)
-                      .reduce((sum, month) => sum + month.previous, 0);
-                    const change = currentTotal - previousTotal;
-                    return (
-                      <span className={`font-medium ${change > 0 ? 'text-green-600' : change < 0 ? 'text-red-600' : 'text-gray-500'}`}>
-                        {change > 0 ? '+' : ''}{change}
-                      </span>
-                    );
-                  })()}
-                </td>
-                <td className="px-2 py-2 text-sm text-center whitespace-nowrap">
-                  {(() => {
-                    const currentTotal = stats.monthlyTrends
-                      .filter(month => month.monthNumber <= 3)
-                      .reduce((sum, month) => sum + month.current, 0);
-                    const previousTotal = stats.monthlyTrends
-                      .filter(month => month.monthNumber <= 3)
-                      .reduce((sum, month) => sum + month.previous, 0);
-                    const trend = currentTotal > previousTotal ? 'up' : currentTotal < previousTotal ? 'down' : 'neutral';
-                    const trendStyles = getTrendStyles(trend);
-                    
-                    return (
-                      <div className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium ${trendStyles.bg} ${trendStyles.text}`}>
-                        <span className={trendStyles.arrow}>
-                          {trendStyles.symbol}
-                        </span>
-                      </div>
-                    );
-                  })()}
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-    ) : (
-      <div className="text-center py-8 text-gray-500">
-        <p>No monthly registration data available</p>
-        <p className="text-sm mt-1">(No registrations found for either season in any month)</p>
-      </div>
-    )}
-  </div>
-</div>
+
+        {/* Monthly Registration Trends - Only show if comparing */}
+        {selectedCompareSeasonId && stats.monthlyTrends && stats.monthlyTrends.length > 0 && (
+          <div className="bg-white shadow rounded-lg">
+            <div className="px-6 py-4 border-b border-gray-200">
+              <div className="flex justify-between items-center">
+                <h2 className="text-lg font-semibold text-gray-900">Monthly Registration Trends</h2>
+                <div className="flex space-x-2">
+                  <button
+                    onClick={() => setSelectedMonthView('all')}
+                    className={`px-3 py-1 text-sm rounded ${selectedMonthView === 'all' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+                  >
+                    All Months
+                  </button>
+                  <button
+                    onClick={() => setSelectedMonthView('quarter')}
+                    className={`px-3 py-1 text-sm rounded ${selectedMonthView === 'quarter' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+                  >
+                    Jan-Mar
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div className="p-4">
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Month</th>
+                      <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Current Season</th>
+                      <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap" title={getComparisonSeasonName()}>
+                        {getComparisonColumnHeader()}
+                      </th>
+                      <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Change</th>
+                      <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Trend</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {stats.monthlyTrends
+                      .filter(month => {
+                        if (selectedMonthView === 'quarter') {
+                          return month.monthNumber <= 3; // Jan-Mar
+                        }
+                        return true;
+                      })
+                      .map((month) => {
+                        const change = month.current - month.previous;
+                        const trend = month.trend;
+                        const trendStyles = getTrendStyles(trend);
+                        
+                        return (
+                          <tr key={month.month} className="hover:bg-gray-50">
+                            <td className="px-2 py-2 text-sm font-medium text-gray-900 whitespace-nowrap">
+                              {month.month}
+                            </td>
+                            <td className="px-2 py-2 text-sm text-gray-900 text-center whitespace-nowrap font-bold">
+                              {month.current}
+                            </td>
+                            <td className="px-2 py-2 text-sm text-gray-500 text-center whitespace-nowrap">
+                              {month.previous}
+                            </td>
+                            <td className="px-2 py-2 text-sm text-center whitespace-nowrap">
+                              <span className={`font-medium ${change > 0 ? 'text-green-600' : change < 0 ? 'text-red-600' : 'text-gray-500'}`}>
+                                {change > 0 ? '+' : ''}{change}
+                              </span>
+                            </td>
+                            <td className="px-2 py-2 text-sm text-center whitespace-nowrap">
+                              <div className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium ${trendStyles.bg} ${trendStyles.text}`}>
+                                <span className={trendStyles.arrow}>
+                                  {trendStyles.symbol}
+                                </span>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Volunteer Breakdown by Division */}
         <div className="bg-white shadow rounded-lg">
           <div className="px-6 py-4 border-b border-gray-200">

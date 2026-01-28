@@ -4,6 +4,7 @@ import DraftGrid from '../components/DraftGrid';
 import PrintableDraftSheet from '../components/PrintableDraftSheet'; // Keep this import
 import Modal from '../components/Modal';
 import api from '../services/api';
+import { getPermissionErrorMessage } from '../utils/permissionHelpers';
 
 const Draft = () => {
 
@@ -56,49 +57,55 @@ const Draft = () => {
     }
   }, [selectedDivision, selectedSeason]);
 
-  const loadSeasons = async () => {
-    try {
-      const [activeRes, allRes] = await Promise.all([
-        fetch('/api/seasons/active').catch(() => null),
-        fetch('/api/seasons').catch(() => null)
-      ]);
+const loadSeasons = async () => {
+  try {
+    const [activeRes, allRes] = await Promise.all([
+      api.get('/seasons/active').catch(() => ({ data: null })),
+      api.get('/seasons').catch(() => ({ data: [] }))
+    ]);
 
-      const active = activeRes && activeRes.ok ? await activeRes.json() : null;
-      const all = allRes && allRes.ok ? await allRes.json() : [];
-
-      setSeasons(Array.isArray(all) ? all : []);
-      const nextDefault = active?.id || (Array.isArray(all) ? all?.[0]?.id : '') || '';
-      if (nextDefault) setSelectedSeason(nextDefault);
-    } catch (error) {
-      console.error('Error loading seasons:', error);
-      setError('Failed to load seasons');
-    }
-  };
+    const active = activeRes?.data || null;
+    const all = allRes?.data || [];
+    
+    setSeasons(Array.isArray(all) ? all : []);
+    const nextDefault = active?.id || (Array.isArray(all) ? all?.[0]?.id : '') || '';
+    if (nextDefault) setSelectedSeason(nextDefault);
+  } catch (error) {
+    console.error('Error loading seasons:', error);
+    
+    const errorMessage = getPermissionErrorMessage(
+      error,
+      'Failed to load seasons. You may not have permission to view draft data.'
+    );
+    
+    setError(errorMessage);
+  }
+};
 
   const loadDivisions = async (seasonId) => {
-    try {
-      console.log('Loading divisions from /api/divisions');
-      const response = await fetch(`/api/divisions?season_id=${seasonId}`);
-      
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`HTTP ${response.status}: ${errorText}`);
-      }
-      
-      const data = await response.json();
-      console.log('Divisions loaded successfully:', data);
-      setDivisions(data);
-      // If currently selectedDivision isn't in this season, clear it
-      if (selectedDivision && Array.isArray(data) && !data.find(d => d.id === selectedDivision)) {
-        setSelectedDivision('');
-      }
-      setDivisionsError(null);
-    } catch (error) {
-      console.error('Error loading divisions:', error);
-      setDivisionsError(`Failed to load divisions: ${error.message}.`);
-      setDivisions([]);
+  try {
+    console.log('Loading divisions from /api/divisions');
+    const response = await api.get(`/divisions?season_id=${seasonId}`);
+    
+    console.log('Divisions loaded successfully:', response.data);
+    setDivisions(response.data);
+    // If currently selectedDivision isn't in this season, clear it
+    if (selectedDivision && Array.isArray(response.data) && !response.data.find(d => d.id === selectedDivision)) {
+      setSelectedDivision('');
     }
-  };
+    setDivisionsError(null);
+  } catch (error) {
+    console.error('Error loading divisions:', error);
+    
+    const errorMessage = getPermissionErrorMessage(
+      error,
+      `Failed to load divisions: ${error.message}. You may not have permission to view draft data.`
+    );
+    
+    setDivisionsError(errorMessage);
+    setDivisions([]);
+  }
+};
   
     const getVolunteerRoles = (player) => {
     if (!player.volunteers || player.volunteers.length === 0) return '';
@@ -106,47 +113,47 @@ const Draft = () => {
   };
 
   const loadDraftData = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      console.log('Loading draft data for:', { selectedDivision, selectedSeason });
-      
-      const response = await fetch(`/api/draft/data?division_id=${selectedDivision}&season_id=${selectedSeason}`);
-      
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`HTTP ${response.status}: ${errorText}`);
-      }
-      
-      const data = await response.json();
-      console.log('Draft data loaded successfully:', data);
-      
-      if (!data) {
-        throw new Error('No data returned from server');
-      }
-      
-      const safeData = {
-        players: Array.isArray(data.players) ? data.players : [],
-        teams: Array.isArray(data.teams) ? data.teams : [],
-        playerAgent: data.playerAgent || null,
-        division: data.division || 'Unknown Division'
-      };
-      
-      console.log('Safe draft data:', safeData);
-      setDraftData(safeData);
-    } catch (error) {
-      console.error('Error loading draft data:', error);
-      setError(`Failed to load draft data: ${error.message}`);
-      setDraftData({
-        players: [],
-        teams: [],
-        playerAgent: null,
-        division: 'Error'
-      });
-    } finally {
-      setLoading(false);
+  try {
+    setLoading(true);
+    setError(null);
+    console.log('Loading draft data for:', { selectedDivision, selectedSeason });
+    
+    const response = await api.get(`/draft/data?division_id=${selectedDivision}&season_id=${selectedSeason}`);
+    
+    console.log('Draft data loaded successfully:', response.data);
+    
+    if (!response.data) {
+      throw new Error('No data returned from server');
     }
-  };
+    
+    const safeData = {
+      players: Array.isArray(response.data.players) ? response.data.players : [],
+      teams: Array.isArray(response.data.teams) ? response.data.teams : [],
+      playerAgent: response.data.playerAgent || null,
+      division: response.data.division || 'Unknown Division'
+    };
+    
+    console.log('Safe draft data:', safeData);
+    setDraftData(safeData);
+  } catch (error) {
+    console.error('Error loading draft data:', error);
+    
+    const errorMessage = getPermissionErrorMessage(
+      error,
+      `Failed to load draft data: ${error.message}. You may not have permission to view draft data.`
+    );
+    
+    setError(errorMessage);
+    setDraftData({
+      players: [],
+      teams: [],
+      playerAgent: null,
+      division: 'Error'
+    });
+  } finally {
+    setLoading(false);
+  }
+};
 
   const loadPrintData = async (divisionId, seasonId) => {
   try {
@@ -154,22 +161,16 @@ const Draft = () => {
     console.log('Loading print data for:', { divisionId, seasonId });
     
     // Load draft data
-    const response = await fetch(`/api/draft/data?division_id=${divisionId}&season_id=${seasonId}`);
+    const response = await api.get(`/draft/data?division_id=${divisionId}&season_id=${seasonId}`);
     
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`HTTP ${response.status}: ${errorText}`);
-    }
+    console.log('Print data loaded successfully:', response.data);
     
-    const data = await response.json();
-    console.log('Print data loaded successfully:', data);
-    
-    if (!data) {
+    if (!response.data) {
       throw new Error('No data returned from server');
     }
     
-    const playersWithNumbers = Array.isArray(data.players) 
-      ? data.players.map((player, index) => ({
+    const playersWithNumbers = Array.isArray(response.data.players) 
+      ? response.data.players.map((player, index) => ({
           ...player,
           draftNumber: index + 1
         }))
@@ -178,19 +179,10 @@ const Draft = () => {
     // Load teammate requests for this division
     let teammateRequests = [];
     try {
-		console.log('Teammate requests loaded:', teammateRequests);
-console.log('First teammate request:', teammateRequests[0]);
-      const token = localStorage.getItem('slm_token');
-      const requestsResponse = await fetch(`/api/requests?season_id=${seasonId}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
+      const requestsResponse = await api.get(`/requests?season_id=${seasonId}`);
       
-      if (requestsResponse.ok) {
-        const requestsData = await requestsResponse.json();
-        const filtered = (requestsData || []).filter(r => 
+      if (requestsResponse.data) {
+        const filtered = (requestsResponse.data || []).filter(r => 
           r.type === 'Teammate Request' && r.current_division_id === divisionId
         );
         
@@ -216,14 +208,20 @@ console.log('First teammate request:', teammateRequests[0]);
       players: playersWithNumbers,
       divisionName: divisions.find(d => d.id === divisionId)?.name || 'Unknown Division',
       seasonName: seasons.find(s => s.id === seasonId)?.name || 'Unknown Season',
-      teammateRequests: teammateRequests // Add teammate requests to print data
+      teammateRequests: teammateRequests
     };
     
     console.log('Safe print data with teammate requests:', safeData);
     setPrintData(safeData);
   } catch (error) {
     console.error('Error loading print data:', error);
-    alert(`Failed to load draft data for printing: ${error.message}`);
+    
+    const errorMessage = getPermissionErrorMessage(
+      error,
+      `Failed to load draft data for printing: ${error.message}. You may not have permission to view this data.`
+    );
+    
+    alert(errorMessage);
   } finally {
     setPrintLoading(false);
   }

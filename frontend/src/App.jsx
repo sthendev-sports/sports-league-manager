@@ -21,7 +21,7 @@ import WorkbondManagement from './pages/WorkbondManagement';
 import Login from './pages/Login';
 import Users from './pages/Users';
 import EmailSettings from './pages/EmailSettings';
-
+import FamilyManager from './pages/FamilyManager';
 import { AuthProvider } from './context/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import CheckWorkbond from './pages/CheckWorkbond';
@@ -69,10 +69,12 @@ function App() {
                 />
 } />}
                 />
-                <Route
-                  path="/draft"
-                  element={<ProtectedRoute element={<Draft />} />}
-                />
+                <Route path="/draft" element={
+  <ProtectedRoute 
+    element={<Layout><Draft /></Layout>} 
+    requiredPermission="read" // Minimum: read access
+  />
+} />
                 <Route
                   path="/seasons"
                   element={<ProtectedRoute element={<Seasons />} />}
@@ -101,7 +103,9 @@ function App() {
                   path="/boardmembers"
                   element={<ProtectedRoute element={<BoardMembers />} />}
                 />
-
+<Route path="/family-manager" element={
+  <ProtectedRoute element={<FamilyManager />} requiredPermission="write" />
+} />
                 {/* Workbond management: restricted roles */}
                 <Route
                   path="/workbond-management"

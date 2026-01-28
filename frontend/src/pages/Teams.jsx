@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Plus, Edit, Trash2, Save, Users, Shield, AlertCircle, Mail, Phone, ChevronDown, ChevronUp, Download } from 'lucide-react'; // Added Download import
 import Modal from '../components/Modal';
 import api, { teamsAPI, divisionsAPI, seasonsAPI } from '../services/api';
+import { getPermissionErrorMessage } from '../utils/permissionHelpers';
 
 
 const Teams = () => {
@@ -256,9 +257,15 @@ const Teams = () => {
       resetTeamForm();
       alert(editingTeam ? 'Team updated successfully!' : 'Team created successfully!');
     } catch (error) {
-      console.error('Error saving team:', error);
-      setError('Failed to save team: ' + error.message);
-    }
+  console.error('Error saving team:', error);
+
+  const apiMessage =
+    error?.response?.data?.error ||
+    'Your role does not have permission to update teams.';
+
+  alert(apiMessage);              // <-- guarantees you see it
+  setError(apiMessage);           // <-- keeps it for any on-page banner
+}
   };
 
   const handleDeleteTeam = async (teamId) => {
@@ -268,9 +275,15 @@ const Teams = () => {
         await loadData();
         alert('Team deleted successfully!');
       } catch (error) {
-        console.error('Error deleting team:', error);
-        setError('Failed to delete team. ' + error.message);
-      }
+  console.error('Error deleting team:', error);
+
+  const apiMessage =
+    error?.response?.data?.error ||
+    'Your role does not have permission to delete teams.';
+
+  alert(apiMessage);
+  setError(apiMessage);
+}
     }
   };
 

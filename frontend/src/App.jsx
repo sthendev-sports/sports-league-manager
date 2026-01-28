@@ -71,7 +71,7 @@ function App() {
                 />
                 <Route path="/draft" element={
   <ProtectedRoute 
-    element={<Layout><Draft /></Layout>} 
+    element={<Draft />} 
     requiredPermission="read" // Minimum: read access
   />
 } />

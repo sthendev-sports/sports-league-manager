@@ -21,7 +21,21 @@ const PrintableDraftSheet = ({ divisionName, seasonName, players, teammateReques
 
   const getVolunteerRoles = (player) => {
     if (!player.volunteers || player.volunteers.length === 0) return '';
-    return player.volunteers.map(v => v.derived_role || v.role || 'Volunteer').join(', ');
+    return player.volunteers.map(v => {
+      // Get the role name
+      const role = v.derived_role || v.role || 'Volunteer';
+      
+      // Get the volunteer's name
+      const fName = v.name || v.volunteer_name || '';
+      const volunteerName = `${fName}`.trim();
+      
+      // If we have a name, include it with the role
+      if (volunteerName) {
+        return `${role} - ${volunteerName}`;
+      } else {
+        return role;
+      }
+    }).join(', ');
   };
 
   const getSiblingGroups = (players) => {

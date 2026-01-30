@@ -569,7 +569,7 @@ useEffect(() => {
         </div>
       </div>
 
-      {/* Role Statistics */}
+            {/* Role Statistics */}
       <div className="bg-white rounded-lg shadow p-6">
         <h3 className="text-lg font-semibold text-gray-900 mb-4">Volunteers by Role</h3>
         <div className="space-y-3">
@@ -583,6 +583,174 @@ useEffect(() => {
               <span className="text-sm font-medium text-gray-900">- {count}</span>
             </div>
           ))}
+        </div>
+      </div>
+
+             {/* Interested Roles by Division - Table Format */}
+      <div className="bg-white rounded-lg shadow">
+        <div className="px-6 py-4 border-b border-gray-200">
+          <h3 className="text-lg font-semibold text-gray-900">Interested Roles by Division</h3>
+          <p className="text-sm text-gray-500 mt-1">
+            Count of volunteers interested in each role, organized by division
+          </p>
+        </div>
+        
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Division
+                </th>
+                <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Manager
+                </th>
+                <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Assistant Coach
+                </th>
+                <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Team Parent
+                </th>
+                <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Total
+                </th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {(() => {
+                // Initialize structure to track interested roles by division
+                const divisionData = new Map();
+                const allRoles = new Set(['Manager', 'Assistant Coach', 'Team Parent']);
+                
+                // Initialize all divisions with zero counts
+                filteredVolunteers.forEach(volunteer => {
+                  const divisionName = volunteer.division?.name || 'Any Division';
+                  
+                  if (!divisionData.has(divisionName)) {
+                    divisionData.set(divisionName, {
+                      Manager: 0,
+                      'Assistant Coach': 0,
+                      'Team Parent': 0,
+                      total: 0
+                    });
+                  }
+                });
+                
+                // Count interested roles for each division
+                filteredVolunteers.forEach(volunteer => {
+                  if (volunteer.interested_roles) {
+                    const divisionName = volunteer.division?.name || 'Any Division';
+                    const divisionCounts = divisionData.get(divisionName);
+                    
+                    // Split interested roles by common delimiters
+                    const roles = volunteer.interested_roles
+                      .split(/[;,/]+/)
+                      .map(r => r.trim())
+                      .filter(Boolean);
+                    
+                    roles.forEach(role => {
+                      // Normalize role names to match our columns
+                      let normalizedRole = '';
+                      
+                      // Check for Team Manager or Manager
+                      if (role.toLowerCase().includes('team manager') || 
+                          role.toLowerCase().includes('manager') ||
+                          role === 'TM') {
+                        normalizedRole = 'Manager';
+                      }
+                      // Check for Assistant Coach
+                      else if (role.toLowerCase().includes('assistant') || 
+                               role.toLowerCase().includes('assistant coach') ||
+                               role === 'AC') {
+                        normalizedRole = 'Assistant Coach';
+                      }
+                      // Check for Team Parent
+                      else if (role.toLowerCase().includes('team parent') || 
+                               role.toLowerCase().includes('parent') ||
+                               role === 'TP') {
+                        normalizedRole = 'Team Parent';
+                      }
+                      
+                      if (normalizedRole && allRoles.has(normalizedRole) && divisionCounts) {
+                        divisionCounts[normalizedRole] += 1;
+                        divisionCounts.total += 1;
+                      }
+                    });
+                  }
+                });
+                
+                // Convert to array and sort by division order
+                const divisionArray = Array.from(divisionData.entries())
+                  .map(([divisionName, counts]) => ({ divisionName, ...counts }))
+                  .sort((a, b) => sortDivisionName(a.divisionName, b.divisionName));
+                
+                // Calculate totals
+                const totals = {
+                  divisionName: 'Total',
+                  Manager: 0,
+                  'Assistant Coach': 0,
+                  'Team Parent': 0,
+                  total: 0
+                };
+                
+                divisionArray.forEach(division => {
+                  totals.Manager += division.Manager;
+                  totals['Assistant Coach'] += division['Assistant Coach'];
+                  totals['Team Parent'] += division['Team Parent'];
+                  totals.total += division.total;
+                });
+                
+                // Filter to only show divisions in DIVISION_SORT_ORDER
+                const filteredDivisions = divisionArray.filter(division => 
+                  DIVISION_SORT_ORDER.includes(division.divisionName)
+                );
+                
+                if (filteredDivisions.length === 0) {
+                  return (
+                    <tr>
+                      <td colSpan="5" className="px-6 py-12 text-center">
+                        <div className="text-gray-400 mb-2">No interested roles data available</div>
+                        <div className="text-sm text-gray-500">Volunteers can specify roles they're interested in on their profile</div>
+                      </td>
+                    </tr>
+                  );
+                }
+                
+                return (
+                  <>
+                    {filteredDivisions.map((division) => (
+                      <tr key={division.divisionName} className="hover:bg-gray-50">
+                        <td className="px-6 py-3 text-sm font-medium text-gray-900 whitespace-nowrap">
+                          {division.divisionName}
+                        </td>
+                        <td className="px-6 py-3 text-sm text-gray-900 text-center">
+                          {division.Manager > 0 ? division.Manager : ''}
+                        </td>
+                        <td className="px-6 py-3 text-sm text-gray-900 text-center">
+                          {division['Assistant Coach'] > 0 ? division['Assistant Coach'] : ''}
+                        </td>
+                        <td className="px-6 py-3 text-sm text-gray-900 text-center">
+                          {division['Team Parent'] > 0 ? division['Team Parent'] : ''}
+                        </td>
+                        <td className="px-6 py-3 text-sm text-gray-900 text-center font-semibold">
+                          {division.total}
+                        </td>
+                      </tr>
+                    ))}
+                    
+                    {/* Total Row */}
+                    <tr className="bg-gray-50 font-semibold border-t-2 border-gray-300">
+                      <td className="px-6 py-3 text-sm text-gray-900 whitespace-nowrap">Total</td>
+                      <td className="px-6 py-3 text-sm text-gray-900 text-center">{totals.Manager > 0 ? totals.Manager : ''}</td>
+                      <td className="px-6 py-3 text-sm text-gray-900 text-center">{totals['Assistant Coach'] > 0 ? totals['Assistant Coach'] : ''}</td>
+                      <td className="px-6 py-3 text-sm text-gray-900 text-center">{totals['Team Parent'] > 0 ? totals['Team Parent'] : ''}</td>
+                      <td className="px-6 py-3 text-sm text-gray-900 text-center">{totals.total}</td>
+                    </tr>
+                  </>
+                );
+              })()}
+            </tbody>
+          </table>
         </div>
       </div>
 

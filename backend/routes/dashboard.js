@@ -42,14 +42,16 @@ router.get('/statistics', async (req, res) => {
       volunteerStats,
       workBondStats,
       volunteerByDivision,
-	  monthlyTrends
+      monthlyTrends,
+      interestedRolesByDivision  // ADDED: New function call
     ] = await Promise.all([
       getRegistrationStatistics(season_id, comparisonSeason?.id),
       getDivisionStatistics(season_id, comparisonSeason?.id),
       getVolunteerStatistics(season_id),
       getWorkBondStatistics(season_id),
-      getVolunteerByDivision(season_id), // FIXED: Changed seasonId to season_id
-	  getMonthlyRegistrationTrends(season_id, comparisonSeason?.id)
+      getVolunteerByDivision(season_id),
+      getMonthlyRegistrationTrends(season_id, comparisonSeason?.id),
+      getInterestedRolesByDivision(season_id)  // ADDED: New function
     ]);
 
     const dashboardData = {
@@ -76,9 +78,12 @@ router.get('/statistics', async (req, res) => {
       
       // Volunteer breakdown by division
       volunteerByDivision: volunteerByDivision,
-	  
-	  // Monthly Registration Trends
-	  monthlyTrends: monthlyTrends,
+      
+      // Monthly Registration Trends
+      monthlyTrends: monthlyTrends,
+      
+      // NEW: Interested roles by division
+      interestedRolesByDivision: interestedRolesByDivision,
       
       // Season Info
       currentSeason: currentSeason,
@@ -599,6 +604,143 @@ async function getVolunteerByDivision(seasonId) {
 
   } catch (error) {
     console.error('Error in getVolunteerByDivision:', error);
+    return [];
+  }
+}
+
+// Get interested roles by division
+async function getInterestedRolesByDivision(seasonId) {
+  try {
+    console.log('Loading interested roles by division for season:', seasonId);
+    
+    // Get volunteers with their division information AND interested_roles
+    const { data: volunteers, error } = await supabase
+      .from('volunteers')
+      .select(`
+        id,
+        interested_roles,
+        division_id,
+        division:divisions (name)
+      `)
+      .eq('season_id', seasonId)
+      .not('interested_roles', 'is', null)
+      .not('interested_roles', 'eq', '');
+
+    if (error) {
+      console.error('Error fetching volunteers with interested roles:', error);
+      return [];
+    }
+
+    console.log(`Found ${volunteers?.length || 0} volunteers with interested roles`);
+
+    // Initialize division data structure
+    const divisionData = {};
+    
+    // Pre-populate with all divisions from DIVISION_SORT_ORDER
+    const defaultDivisions = [
+      'T-Ball Division',
+      'Baseball - Coach Pitch Division', 
+      'Baseball - Rookies Division',
+      'Baseball - Minors Division',
+      'Baseball - Majors Division',
+      'Softball - Rookies Division (Coach Pitch)',
+      'Softball - Minors Division',
+      'Softball - Majors Division',
+      'Challenger Division',
+      'Softball - Junior Division'
+    ];
+
+    defaultDivisions.forEach(divisionName => {
+      divisionData[divisionName] = {
+        name: divisionName,
+        Manager: 0,
+        'Assistant Coach': 0,
+        'Team Parent': 0,
+        total: 0
+      };
+    });
+
+    // Process each volunteer's interested roles
+    volunteers.forEach(volunteer => {
+      const divisionName = volunteer.division?.name || 'Unassigned';
+      
+      // Initialize division if not already in the map
+      if (!divisionData[divisionName]) {
+        divisionData[divisionName] = {
+          name: divisionName,
+          Manager: 0,
+          'Assistant Coach': 0,
+          'Team Parent': 0,
+          total: 0
+        };
+      }
+
+      if (volunteer.interested_roles) {
+        // Split interested roles by common delimiters
+        const roles = volunteer.interested_roles
+          .split(/[;,/]+/)
+          .map(r => r.trim())
+          .filter(Boolean);
+        
+        // Process each interested role
+        roles.forEach(role => {
+          // Normalize role names to match our columns
+          let normalizedRole = '';
+          
+          // Check for Team Manager or Manager
+          if (role.toLowerCase().includes('team manager') || 
+              role.toLowerCase().includes('manager') ||
+              role === 'TM') {
+            normalizedRole = 'Manager';
+          }
+          // Check for Assistant Coach
+          else if (role.toLowerCase().includes('assistant') || 
+                  role.toLowerCase().includes('assistant coach') ||
+                  role === 'AC') {
+            normalizedRole = 'Assistant Coach';
+          }
+          // Check for Team Parent
+          else if (role.toLowerCase().includes('team parent') || 
+                  role.toLowerCase().includes('parent') ||
+                  role === 'TP') {
+            normalizedRole = 'Team Parent';
+          }
+          
+          // Count the role
+          if (normalizedRole) {
+            divisionData[divisionName][normalizedRole]++;
+            divisionData[divisionName].total++;
+          }
+        });
+      }
+    });
+
+    // Convert to array and sort by division order
+    const result = Object.values(divisionData)
+      .sort((a, b) => {
+        const divisionOrder = {
+          'T-Ball Division': 1,
+          'Baseball - Coach Pitch Division': 2,
+          'Baseball - Rookies Division': 3,
+          'Baseball - Minors Division': 4,
+          'Baseball - Majors Division': 5,
+          'Softball - Rookies Division (Coach Pitch)': 6,
+          'Softball - Minors Division': 7,
+          'Softball - Majors Division': 8,
+          'Challenger Division': 9,
+          'Softball - Junior Division': 10
+        };
+        
+        const orderA = divisionOrder[a.name] || 999;
+        const orderB = divisionOrder[b.name] || 999;
+        return orderA - orderB;
+      });
+
+    console.log('Interested roles by division data processed successfully');
+    return result;
+
+  } catch (error) {
+    console.error('Error in getInterestedRolesByDivision:', error);
     return [];
   }
 }

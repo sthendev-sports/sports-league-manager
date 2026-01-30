@@ -57,6 +57,7 @@ const Dashboard = () => {
   const [currentSeason, setCurrentSeason] = useState(null);
   const [editingDivision, setEditingDivision] = useState(null);
   const [editValue, setEditValue] = useState('');
+  const [activeVolunteerTab, setActiveVolunteerTab] = useState('assigned');
 
   // Load seasons on component mount
   useEffect(() => {
@@ -587,50 +588,158 @@ const Dashboard = () => {
           </div>
         )}
 
-        {/* Volunteer Breakdown by Division */}
+         {/* Volunteer Breakdown by Division with Tabs */}
         <div className="bg-white shadow rounded-lg">
           <div className="px-6 py-4 border-b border-gray-200">
-            <h2 className="text-lg font-semibold text-gray-900">Volunteer Breakdown by Division</h2>
+            <div className="flex justify-between items-center">
+              <h2 className="text-lg font-semibold text-gray-900">Volunteer Breakdown by Division</h2>
+            </div>
+            
+            {/* Tab Navigation */}
+            <div className="mt-4 border-b border-gray-200">
+              <nav className="-mb-px flex space-x-8">
+                <button
+                  onClick={() => setActiveVolunteerTab('assigned')}
+                  className={`whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm ${
+                    activeVolunteerTab === 'assigned'
+                      ? 'border-blue-500 text-blue-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  Assigned Roles
+                </button>
+                <button
+                  onClick={() => setActiveVolunteerTab('interested')}
+                  className={`whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm ${
+                    activeVolunteerTab === 'interested'
+                      ? 'border-blue-500 text-blue-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  Interested Roles
+                </button>
+              </nav>
+            </div>
           </div>
+          
           <div className="p-4">
-            {stats.volunteerByDivision.length === 0 ? (
-              <div className="text-center py-4 text-gray-500">
-                <p>No volunteer data available</p>
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Division</th>
-                      <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Team Manager</th>
-                      <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Assistant Coach</th>
-                      <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Team Parent</th>
-                      <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Division Total</th>
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
-                    {stats.volunteerByDivision.slice().sort(sortDivisionObjects).map((division) => (
-                      <tr key={division.name} className="hover:bg-gray-50">
-                        <td className="px-2 py-2 text-sm font-medium text-gray-900 whitespace-nowrap">{division.name}</td>
-                        <td className="px-2 py-2 text-sm text-blue-600 text-center whitespace-nowrap font-medium">{division.teamManagers}</td>
-                        <td className="px-2 py-2 text-sm text-green-600 text-center whitespace-nowrap font-medium">{division.assistantCoaches}</td>
-                        <td className="px-2 py-2 text-sm text-purple-600 text-center whitespace-nowrap font-medium">{division.teamParents}</td>
-                        <td className="px-2 py-2 text-sm text-gray-900 text-center whitespace-nowrap font-semibold">{division.divisionTotal}</td>
-                      </tr>
-                    ))}
-                    {/* Total Row */}
-                    <tr className="bg-gray-50 font-semibold border-t-2 border-gray-300">
-                      <td className="px-2 py-2 text-sm text-gray-900 whitespace-nowrap">Total Registered</td>
-                      <td className="px-2 py-2 text-sm text-blue-600 text-center whitespace-nowrap">{volunteerTotals.teamManagers}</td>
-                      <td className="px-2 py-2 text-sm text-green-600 text-center whitespace-nowrap">{volunteerTotals.assistantCoaches}</td>
-                      <td className="px-2 py-2 text-sm text-purple-600 text-center whitespace-nowrap">{volunteerTotals.teamParents}</td>
-                      <td className="px-2 py-2 text-sm text-gray-900 text-center whitespace-nowrap">{volunteerTotals.divisionTotal}</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
+            {/* Assigned Roles Tab Content */}
+            {activeVolunteerTab === 'assigned' && (
+              <>
+                {stats.volunteerByDivision.length === 0 ? (
+                  <div className="text-center py-4 text-gray-500">
+                    <p>No assigned volunteer data available</p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-200">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Division</th>
+                          <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Team Manager</th>
+                          <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Assistant Coach</th>
+                          <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Team Parent</th>
+                          <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Division Total</th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {stats.volunteerByDivision.slice().sort(sortDivisionObjects).map((division) => (
+                          <tr key={division.name} className="hover:bg-gray-50">
+                            <td className="px-2 py-2 text-sm font-medium text-gray-900 whitespace-nowrap">{division.name}</td>
+                            <td className="px-2 py-2 text-sm text-blue-600 text-center whitespace-nowrap font-medium">{division.teamManagers}</td>
+                            <td className="px-2 py-2 text-sm text-green-600 text-center whitespace-nowrap font-medium">{division.assistantCoaches}</td>
+                            <td className="px-2 py-2 text-sm text-purple-600 text-center whitespace-nowrap font-medium">{division.teamParents}</td>
+                            <td className="px-2 py-2 text-sm text-gray-900 text-center whitespace-nowrap font-semibold">{division.divisionTotal}</td>
+                          </tr>
+                        ))}
+                        {/* Total Row */}
+                        <tr className="bg-gray-50 font-semibold border-t-2 border-gray-300">
+                          <td className="px-2 py-2 text-sm text-gray-900 whitespace-nowrap">Total Registered</td>
+                          <td className="px-2 py-2 text-sm text-blue-600 text-center whitespace-nowrap">{volunteerTotals.teamManagers}</td>
+                          <td className="px-2 py-2 text-sm text-green-600 text-center whitespace-nowrap">{volunteerTotals.assistantCoaches}</td>
+                          <td className="px-2 py-2 text-sm text-purple-600 text-center whitespace-nowrap">{volunteerTotals.teamParents}</td>
+                          <td className="px-2 py-2 text-sm text-gray-900 text-center whitespace-nowrap">{volunteerTotals.divisionTotal}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </>
             )}
+            
+            {/* Interested Roles Tab Content */}
+{activeVolunteerTab === 'interested' && (
+  <>
+    {stats.interestedRolesByDivision && stats.interestedRolesByDivision.length > 0 ? (
+      <div className="overflow-x-auto">
+        <table className="min-w-full divide-y divide-gray-200">
+          <thead className="bg-gray-50">
+            <tr>
+              <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Division</th>
+              <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Manager</th>
+              <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Assistant Coach</th>
+              <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Team Parent</th>
+              <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Total</th>
+            </tr>
+          </thead>
+          <tbody className="bg-white divide-y divide-gray-200">
+            {stats.interestedRolesByDivision
+              .filter(division => division.total > 0 || 
+                ['T-Ball Division', 'Baseball - Coach Pitch Division', 'Baseball - Rookies Division', 
+                 'Baseball - Minors Division', 'Baseball - Majors Division', 
+                 'Softball - Rookies Division (Coach Pitch)', 'Softball - Minors Division', 
+                 'Softball - Majors Division', 'Challenger Division'].includes(division.name))
+              .map((division) => (
+              <tr key={division.name} className="hover:bg-gray-50">
+                <td className="px-2 py-2 text-sm font-medium text-gray-900 whitespace-nowrap">{division.name}</td>
+                <td className="px-2 py-2 text-sm text-gray-900 text-center">
+                  {division.Manager > 0 ? division.Manager : ''}
+                </td>
+                <td className="px-2 py-2 text-sm text-gray-900 text-center">
+                  {division['Assistant Coach'] > 0 ? division['Assistant Coach'] : ''}
+                </td>
+                <td className="px-2 py-2 text-sm text-gray-900 text-center">
+                  {division['Team Parent'] > 0 ? division['Team Parent'] : ''}
+                </td>
+                <td className="px-2 py-2 text-sm text-gray-900 text-center font-semibold">
+                  {division.total}
+                </td>
+              </tr>
+            ))}
+            
+            {/* Total Row */}
+            {(() => {
+              const totals = stats.interestedRolesByDivision.reduce((acc, division) => {
+                acc.Manager += division.Manager;
+                acc['Assistant Coach'] += division['Assistant Coach'];
+                acc['Team Parent'] += division['Team Parent'];
+                acc.total += division.total;
+                return acc;
+              }, { Manager: 0, 'Assistant Coach': 0, 'Team Parent': 0, total: 0 });
+              
+              return (
+                <tr className="bg-gray-50 font-semibold border-t-2 border-gray-300">
+                  <td className="px-2 py-2 text-sm text-gray-900 whitespace-nowrap">Total</td>
+                  <td className="px-2 py-2 text-sm text-gray-900 text-center">{totals.Manager > 0 ? totals.Manager : ''}</td>
+                  <td className="px-2 py-2 text-sm text-gray-900 text-center">{totals['Assistant Coach'] > 0 ? totals['Assistant Coach'] : ''}</td>
+                  <td className="px-2 py-2 text-sm text-gray-900 text-center">{totals['Team Parent'] > 0 ? totals['Team Parent'] : ''}</td>
+                  <td className="px-2 py-2 text-sm text-gray-900 text-center">{totals.total}</td>
+                </tr>
+              );
+            })()}
+          </tbody>
+        </table>
+      </div>
+    ) : (
+      <div className="text-center py-8">
+        <div className="text-gray-400 mb-2">No interested roles data available</div>
+        <div className="text-sm text-gray-500">
+          Volunteers can specify roles they're interested in on their profile
+        </div>
+      </div>
+    )}
+  </>
+)}
           </div>
         </div>
       </div>

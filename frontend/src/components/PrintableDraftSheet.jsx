@@ -68,9 +68,10 @@ const PrintableDraftSheet = ({ divisionName, seasonName, players, teammateReques
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg w-full max-w-6xl h-full max-h-screen flex flex-col">
-        <div className="flex justify-between items-center p-4 sm:p-6 border-b shrink-0">
+    <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-2 sm:p-4">
+      <div className="bg-white rounded-lg w-full max-w-6xl max-h-[90vh] flex flex-col">
+        {/* Header */}
+        <div className="flex justify-between items-center p-4 border-b shrink-0 bg-white">
           <h2 className="text-lg sm:text-xl font-semibold">Printable Draft Sheet Preview</h2>
           <div className="flex gap-2">
             <button
@@ -81,7 +82,7 @@ const PrintableDraftSheet = ({ divisionName, seasonName, players, teammateReques
                 // Build teammate requests HTML if they exist
                 let teammateRequestsHTML = '';
                 if (teammateRequests.length > 0) {
-  teammateRequestsHTML = `
+                  teammateRequestsHTML = `
     <div style="page-break-before: always; margin-top: 40px;">
       <h2 style="text-align: center; font-size: 20px; font-weight: bold; margin-bottom: 20px; border-bottom: 2px solid #333; padding-bottom: 10px;">
         Teammate Requests - ${divisionName}
@@ -114,7 +115,7 @@ const PrintableDraftSheet = ({ divisionName, seasonName, players, teammateReques
       </div>
     </div>
   `;
-}
+                }
 
                 printWindow.document.write(`
                   <html>
@@ -223,47 +224,48 @@ const PrintableDraftSheet = ({ divisionName, seasonName, players, teammateReques
                 printWindow.document.close();
                 printWindow.print();
               }}
-              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+              className="px-3 py-2 sm:px-4 sm:py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm sm:text-base"
             >
               Print
             </button>
             <button
               onClick={onClose}
-              className="px-4 py-2 bg-gray-500 text-white rounded-md hover:bg-gray-600"
+              className="px-3 py-2 sm:px-4 sm:py-2 bg-gray-500 text-white rounded-md hover:bg-gray-600 text-sm sm:text-base"
             >
               Close
             </button>
           </div>
         </div>
         
-        <div className="flex-1 overflow-auto p-4 sm:p-6">
-          {/* Preview content */}
-          <div className="min-w-full overflow-x-auto">
-            <div className="bg-white p-4 sm:p-6">
-              <div className="text-center mb-6">
-                <h1 className="text-xl sm:text-2xl font-bold">{divisionName} - Draft Sheet</h1>
-                <p className="text-base sm:text-lg">{seasonName}</p>
-                <p className="text-sm">Total Players: {players.length}</p>
-                {teammateRequests.length > 0 && (
-                  <p className="text-sm text-blue-600 font-medium">
-                    Teammate Requests: {teammateRequests.length} (will appear on printed sheet)
-                  </p>
-                )}
-              </div>
+        {/* Scrollable Content Area */}
+        <div className="flex-1 overflow-auto p-4">
+          <div className="bg-white">
+            <div className="text-center mb-6">
+              <h1 className="text-xl sm:text-2xl font-bold">{divisionName} - Draft Sheet</h1>
+              <p className="text-base sm:text-lg">{seasonName}</p>
+              <p className="text-sm">Total Players: {players.length}</p>
+              {teammateRequests.length > 0 && (
+                <p className="text-sm text-blue-600 font-medium">
+                  Teammate Requests: {teammateRequests.length} (will appear on printed sheet)
+                </p>
+              )}
+            </div>
 
-              <div className="overflow-x-auto">
-                <table className="w-full border-collapse border border-gray-300 text-sm mb-8 min-w-max">
+            {/* Player Table - Horizontal scrolling container */}
+            <div className="mb-8 overflow-x-auto">
+              <div className="inline-block min-w-full align-middle">
+                <table className="min-w-full border-collapse border border-gray-300 text-sm">
                   <thead>
                     <tr className="bg-gray-100">
-                      <th className="border border-gray-300 p-1 text-left w-12">#</th>
-                      <th className="border border-gray-300 p-1 text-left w-36">Player Name</th>
-                      <th className="border border-gray-300 p-1 text-left w-12">Gender</th>
-                      <th className="border border-gray-300 p-1 text-left w-16">Travel</th>
-                      <th className="border border-gray-300 p-1 text-left w-24">New/Return</th>
-                      <th className="border border-gray-300 p-1 text-left w-12">Age</th>
-                      <th className="border border-gray-300 p-1 text-left w-24">Birthday</th>
-                      <th className="border border-gray-300 p-1 text-left w-36">Parent Volunteers</th>
-                      <th className="border border-gray-300 p-1 text-left w-48">Notes</th>
+                      <th className="border border-gray-300 p-1 text-left sticky left-0 bg-gray-100">#</th>
+                      <th className="border border-gray-300 p-1 text-left min-w-[120px]">Player Name</th>
+                      <th className="border border-gray-300 p-1 text-left">Gender</th>
+                      <th className="border border-gray-300 p-1 text-left">Travel</th>
+                      <th className="border border-gray-300 p-1 text-left min-w-[80px]">New/Return</th>
+                      <th className="border border-gray-300 p-1 text-left">Age</th>
+                      <th className="border border-gray-300 p-1 text-left min-w-[100px]">Birthday</th>
+                      <th className="border border-gray-300 p-1 text-left min-w-[150px]">Parent Volunteers</th>
+                      <th className="border border-gray-300 p-1 text-left min-w-[150px]">Notes</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -272,7 +274,7 @@ const PrintableDraftSheet = ({ divisionName, seasonName, players, teammateReques
                         key={player.id} 
                         className={`${player.hasSiblings ? 'bg-yellow-50' : ''}`}
                       >
-                        <td className="border border-gray-300 p-1 text-center">{player.draftNumber}</td>
+                        <td className="border border-gray-300 p-1 text-center sticky left-0 bg-white">{player.draftNumber}</td>
                         <td className="border border-gray-300 p-1">
                           <div className="flex items-center">
                             {player.first_name} {player.last_name}
@@ -300,28 +302,30 @@ const PrintableDraftSheet = ({ divisionName, seasonName, players, teammateReques
                   </tbody>
                 </table>
               </div>
-              
-              <div className="mt-4 text-xs text-gray-500">
-                <p><strong>Instructions:</strong> Call out player numbers during the draft. Players with 👥 have siblings - picking them automatically drafts their siblings.</p>
-                <p><strong>Note:</strong> Highlighted rows indicate players with siblings in the division.</p>
-              </div>
+            </div>
+            
+            <div className="mt-4 text-xs text-gray-500">
+              <p><strong>Instructions:</strong> Call out player numbers during the draft. Players with 👥 have siblings - picking them automatically drafts their siblings.</p>
+              <p><strong>Note:</strong> Highlighted rows indicate players with siblings in the division.</p>
+            </div>
 
-              {/* Teammate Requests Preview */}
-              {teammateRequests.length > 0 && (
-                <div className="mt-10 pt-8 border-t border-gray-300">
-                  <h3 className="text-lg sm:text-xl font-bold text-center mb-6 pb-2 border-b border-gray-300">
-                    Teammate Requests - {divisionName}
-                  </h3>
-                  
-                  <div className="overflow-x-auto">
-                    <table className="w-full border-collapse border border-gray-300 text-sm mb-4 min-w-max">
+            {/* Teammate Requests Preview */}
+            {teammateRequests.length > 0 && (
+              <div className="mt-10 pt-8 border-t border-gray-300">
+                <h3 className="text-lg sm:text-xl font-bold text-center mb-6 pb-2 border-b border-gray-300">
+                  Teammate Requests - {divisionName}
+                </h3>
+                
+                <div className="overflow-x-auto">
+                  <div className="inline-block min-w-full align-middle">
+                    <table className="min-w-full border-collapse border border-gray-300 text-sm mb-4">
                       <thead>
                         <tr className="bg-gray-100">
-                          <th className="border border-gray-300 p-2 text-left w-16">Draft #</th>
-                          <th className="border border-gray-300 p-2 text-left">Requesting Player</th>
-                          <th className="border border-gray-300 p-2 text-left">Requested Teammate</th>
-                          {/*<th className="border border-gray-300 p-2 text-left w-20">Status</th> */}
-                          <th className="border border-gray-300 p-2 text-left">Notes</th>
+                          <th className="border border-gray-300 p-2 text-left">Draft #</th>
+                          <th className="border border-gray-300 p-2 text-left min-w-[150px]">Requesting Player</th>
+                          <th className="border border-gray-300 p-2 text-left min-w-[150px]">Requested Teammate</th>
+                          {/*<th className="border border-gray-300 p-2 text-left">Status</th> */}
+                          <th className="border border-gray-300 p-2 text-left min-w-[200px]">Notes</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -358,14 +362,14 @@ const PrintableDraftSheet = ({ divisionName, seasonName, players, teammateReques
                       </tbody>
                     </table>
                   </div>
-                  
-                  <div className="text-xs text-gray-600 italic p-3 bg-gray-50 rounded border border-gray-200">
-                    <p className="font-semibold mb-1">Note to Managers:</p>
-                    <p>These are player requests to be on the same team as the listed teammate. Please consider these requests during the draft when making your selections. "Approved" requests should be prioritized.</p>
-                  </div>
                 </div>
-              )}
-            </div>
+                
+                <div className="text-xs text-gray-600 italic p-3 bg-gray-50 rounded border border-gray-200">
+                  <p className="font-semibold mb-1">Note to Managers:</p>
+                  <p>These are player requests to be on the same team as the listed teammate. Please consider these requests during the draft when making your selections. "Approved" requests should be prioritized.</p>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>

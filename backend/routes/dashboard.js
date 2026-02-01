@@ -309,7 +309,7 @@ async function getDivisionStatistics(currentSeasonId, comparisonSeasonId) {
   // Get players with their program_title for current season
   const { data: currentPlayers, error: currentError } = await supabase
     .from('players')
-    .select('id, is_new_player, program_title, team_id, status')
+    .select('id, is_new_player, program_title, team_id, status, is_travel_player')
     .eq('season_id', currentSeasonId);
 
   if (currentError) throw currentError;
@@ -320,7 +320,7 @@ async function getDivisionStatistics(currentSeasonId, comparisonSeasonId) {
     console.log('Fetching comparison players for season:', comparisonSeasonId);
     const { data: compData, error: compError } = await supabase
       .from('players')
-      .select('id, is_new_player, program_title, team_id, status')
+      .select('id, is_new_player, program_title, team_id, status, is_travel_player')
       .eq('season_id', comparisonSeasonId);
 
     if (compError) throw compError;
@@ -339,7 +339,8 @@ async function getDivisionStatistics(currentSeasonId, comparisonSeasonId) {
         players: [],
         newPlayers: 0,
         returningPlayers: 0,
-        withdrawnPlayers: 0
+        withdrawnPlayers: 0,
+		travelPlayers: 0
       };
     }
     currentDivisionMap[divisionName].players.push(player);
@@ -355,6 +356,11 @@ async function getDivisionStatistics(currentSeasonId, comparisonSeasonId) {
     } else {
       currentDivisionMap[divisionName].returningPlayers++;
     }
+	
+	// ADDED: Count travel players
+    if (player.is_travel_player) {
+      currentDivisionMap[divisionName].travelPlayers++;
+    }
   });
 
   // Group comparison players by program_title (division)
@@ -366,7 +372,8 @@ async function getDivisionStatistics(currentSeasonId, comparisonSeasonId) {
         players: [],
         newPlayers: 0,
         returningPlayers: 0,
-        withdrawnPlayers: 0
+        withdrawnPlayers: 0,
+		travelPlayers: 0
       };
     }
     comparisonDivisionMap[divisionName].players.push(player);
@@ -381,6 +388,11 @@ async function getDivisionStatistics(currentSeasonId, comparisonSeasonId) {
       comparisonDivisionMap[divisionName].newPlayers++;
     } else {
       comparisonDivisionMap[divisionName].returningPlayers++;
+    }
+	
+	// ADDED: Count travel players for comparison season
+    if (player.is_travel_player) {
+      comparisonDivisionMap[divisionName].travelPlayers++;
     }
   });
 
@@ -450,6 +462,7 @@ async function getDivisionStatistics(currentSeasonId, comparisonSeasonId) {
       trend: trend,
       newPlayers: currentData.newPlayers,
       returningPlayers: currentData.returningPlayers,
+	  travelPlayers: currentData.travelPlayers,
       teams: currentTeamsPerDivisionCount[divisionName] || 0,
       withdrawnPlayers: currentData.withdrawnPlayers,
       totalRegistered: currentCount
@@ -470,6 +483,7 @@ async function getDivisionStatistics(currentSeasonId, comparisonSeasonId) {
         trend: 'down',
         newPlayers: 0,
         returningPlayers: 0,
+		travelPlayers: 0,
         teams: 0,
         withdrawnPlayers: 0,
         totalRegistered: 0

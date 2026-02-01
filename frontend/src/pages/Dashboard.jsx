@@ -139,6 +139,7 @@ const Dashboard = () => {
     previous: stats.divisions.reduce((sum, division) => sum + division.previous, 0),
     newPlayers: stats.divisions.reduce((sum, division) => sum + division.newPlayers, 0),
     returningPlayers: stats.divisions.reduce((sum, division) => sum + division.returningPlayers, 0),
+	travelPlayers: stats.divisions.reduce((sum, division) => sum + (division.travelPlayers || 0), 0),
     teams: stats.divisions.reduce((sum, division) => sum + division.teams, 0),
     withdrawnPlayers: stats.divisions.reduce((sum, division) => sum + (division.withdrawnPlayers || 0), 0)
   };
@@ -385,6 +386,7 @@ const Dashboard = () => {
                       )}
                       <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">New</th>
                       <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Returning</th>
+					  <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Travel</th>
                       <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Teams</th>
                     </tr>
                   </thead>
@@ -457,6 +459,7 @@ const Dashboard = () => {
                           )}
                           <td className="px-2 py-2 text-sm text-blue-600 text-center whitespace-nowrap font-medium">{division.newPlayers}</td>
                           <td className="px-2 py-2 text-sm text-green-600 text-center whitespace-nowrap font-medium">{division.returningPlayers}</td>
+						  <td className="px-2 py-2 text-sm text-yellow-600 text-center whitespace-nowrap font-medium">{division.travelPlayers || 0}</td>
                           <td className="px-2 py-2 text-sm text-gray-900 text-center whitespace-nowrap">{division.teams}</td>
                         </tr>
                       );
@@ -497,6 +500,7 @@ const Dashboard = () => {
                       )}
                       <td className="px-2 py-2 text-sm text-blue-600 text-center whitespace-nowrap">{divisionTotals.newPlayers}</td>
                       <td className="px-2 py-2 text-sm text-green-600 text-center whitespace-nowrap">{divisionTotals.returningPlayers}</td>
+					  <td className="px-2 py-2 text-sm text-yellow-600 text-center whitespace-nowrap">{divisionTotals.travelPlayers}</td>
                       <td className="px-2 py-2 text-sm text-gray-900 text-center whitespace-nowrap">{divisionTotals.teams}</td>
                     </tr>
                   </tbody>

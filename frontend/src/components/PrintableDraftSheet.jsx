@@ -69,9 +69,9 @@ const PrintableDraftSheet = ({ divisionName, seasonName, players, teammateReques
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg w-full max-w-6xl max-h-[90vh] overflow-hidden">
-        <div className="flex justify-between items-center p-6 border-b">
-          <h2 className="text-xl font-semibold">Printable Draft Sheet Preview</h2>
+      <div className="bg-white rounded-lg w-full max-w-6xl h-full max-h-screen flex flex-col">
+        <div className="flex justify-between items-center p-4 sm:p-6 border-b shrink-0">
+          <h2 className="text-lg sm:text-xl font-semibold">Printable Draft Sheet Preview</h2>
           <div className="flex gap-2">
             <button
               onClick={() => {
@@ -236,129 +236,136 @@ const PrintableDraftSheet = ({ divisionName, seasonName, players, teammateReques
           </div>
         </div>
         
-        <div className="overflow-auto p-6">
+        <div className="flex-1 overflow-auto p-4 sm:p-6">
           {/* Preview content */}
-          <div className="bg-white p-6">
-            <div className="text-center mb-6">
-              <h1 className="text-2xl font-bold">{divisionName} - Draft Sheet</h1>
-              <p className="text-lg">{seasonName}</p>
-              <p className="text-sm">Total Players: {players.length}</p>
-              {teammateRequests.length > 0 && (
-                <p className="text-sm text-blue-600 font-medium">
-                  Teammate Requests: {teammateRequests.length} (will appear on printed sheet)
-                </p>
-              )}
-            </div>
+          <div className="min-w-full overflow-x-auto">
+            <div className="bg-white p-4 sm:p-6">
+              <div className="text-center mb-6">
+                <h1 className="text-xl sm:text-2xl font-bold">{divisionName} - Draft Sheet</h1>
+                <p className="text-base sm:text-lg">{seasonName}</p>
+                <p className="text-sm">Total Players: {players.length}</p>
+                {teammateRequests.length > 0 && (
+                  <p className="text-sm text-blue-600 font-medium">
+                    Teammate Requests: {teammateRequests.length} (will appear on printed sheet)
+                  </p>
+                )}
+              </div>
 
-            <table className="w-full border-collapse border border-gray-300 text-sm mb-8">
-              <thead>
-                <tr className="bg-gray-100">
-                  <th className="border border-gray-300 p-1 text-left w-12">#</th>
-                  <th className="border border-gray-300 p-1 text-left w-36">Player Name</th>
-                  <th className="border border-gray-300 p-1 text-left w-12">Gender</th>
-                  <th className="border border-gray-300 p-1 text-left w-16">Travel</th>
-                  <th className="border border-gray-300 p-1 text-left w-24">New/Return</th>
-                  <th className="border border-gray-300 p-1 text-left w-12">Age</th>
-                  <th className="border border-gray-300 p-1 text-left w-24">Birthday</th>
-                  <th className="border border-gray-300 p-1 text-left w-36">Parent Volunteers</th>
-                  <th className="border border-gray-300 p-1 text-left w-48">Notes</th>
-                </tr>
-              </thead>
-              <tbody>
-                {playersWithSiblingInfo.map((player) => (
-                  <tr 
-                    key={player.id} 
-                    className={`${player.hasSiblings ? 'bg-yellow-50' : ''}`}
-                  >
-                    <td className="border border-gray-300 p-1 text-center">{player.draftNumber}</td>
-                    <td className="border border-gray-300 p-1">
-                      <div className="flex items-center">
-                        {player.first_name} {player.last_name}
-                        {player.hasSiblings && (
-                          <span 
-                            className="ml-1 text-yellow-600 font-bold"
-                            title="This player has siblings in the draft"
-                          >
-                            👥
-                          </span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="border border-gray-300 p-1 text-center">
-                      {player.gender ? player.gender.charAt(0).toUpperCase() : ''}
-                    </td>
-                    <td className="border border-gray-300 p-1 text-center">{player.is_travel_player ? '✓' : ''}</td>
-                    <td className="border border-gray-300 p-1">{player.is_new_player ? 'New' : 'Returning'}</td>
-                    <td className="border border-gray-300 p-1 text-center">{calculateAge(player.birth_date)}</td>
-                    <td className="border border-gray-300 p-1">{formatBirthday(player.birth_date)}</td>
-                    <td className="border border-gray-300 p-1 text-xs">{getVolunteerRoles(player)}</td>
-                    <td className="border border-gray-300 p-1">&nbsp;</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <div className="mt-4 text-xs text-gray-500">
-              <p><strong>Instructions:</strong> Call out player numbers during the draft. Players with 👥 have siblings - picking them automatically drafts their siblings.</p>
-              <p><strong>Note:</strong> Highlighted rows indicate players with siblings in the division.</p>
-            </div>
-
-            {/* Teammate Requests Preview */}
-            {teammateRequests.length > 0 && (
-              <div className="mt-10 pt-8 border-t border-gray-300">
-                <h3 className="text-xl font-bold text-center mb-6 pb-2 border-b border-gray-300">
-                  Teammate Requests - {divisionName}
-                </h3>
-                
-                <table className="w-full border-collapse border border-gray-300 text-sm mb-4">
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse border border-gray-300 text-sm mb-8 min-w-max">
                   <thead>
                     <tr className="bg-gray-100">
-                      <th className="border border-gray-300 p-2 text-left w-16">Draft #</th>
-                      <th className="border border-gray-300 p-2 text-left">Requesting Player</th>
-                      <th className="border border-gray-300 p-2 text-left">Requested Teammate</th>
-                      {/*<th className="border border-gray-300 p-2 text-left w-20">Status</th> */}
-                      <th className="border border-gray-300 p-2 text-left">Notes</th>
+                      <th className="border border-gray-300 p-1 text-left w-12">#</th>
+                      <th className="border border-gray-300 p-1 text-left w-36">Player Name</th>
+                      <th className="border border-gray-300 p-1 text-left w-12">Gender</th>
+                      <th className="border border-gray-300 p-1 text-left w-16">Travel</th>
+                      <th className="border border-gray-300 p-1 text-left w-24">New/Return</th>
+                      <th className="border border-gray-300 p-1 text-left w-12">Age</th>
+                      <th className="border border-gray-300 p-1 text-left w-24">Birthday</th>
+                      <th className="border border-gray-300 p-1 text-left w-36">Parent Volunteers</th>
+                      <th className="border border-gray-300 p-1 text-left w-48">Notes</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {teammateRequests.map((request) => {
-                      const statusColors = getStatusColor(request.status);
-                      return (
-                        <tr key={request.id} className="border-b border-gray-200 hover:bg-gray-50">
-                          <td className="border border-gray-300 p-2 text-center font-semibold">
-                            {request.draftNumber}
-                          </td>
-                          <td className="border border-gray-300 p-2">
-                            {request.requestingPlayerName || 'Unknown Player'}
-                          </td>
-                          <td className="border border-gray-300 p-2 font-medium">
-                            {request.requested_teammate_name || 'Not specified'}
-                          </td>
-                          <td className="border border-gray-300 p-2">
-                            <span 
-                              className="px-2 py-1 rounded-full text-xs font-bold"
-                              style={{
-                                backgroundColor: statusColors.bg,
-                                color: statusColors.text
-                              }}
-                            >
-                              {/*{request.status || 'Pending'} */}
-                            </span>
-                          </td>
-                          <td className="border border-gray-300 p-2 text-xs">
-                            {request.comments || ''}
-                          </td>
-                        </tr>
-                      );
-                    })}
+                    {playersWithSiblingInfo.map((player) => (
+                      <tr 
+                        key={player.id} 
+                        className={`${player.hasSiblings ? 'bg-yellow-50' : ''}`}
+                      >
+                        <td className="border border-gray-300 p-1 text-center">{player.draftNumber}</td>
+                        <td className="border border-gray-300 p-1">
+                          <div className="flex items-center">
+                            {player.first_name} {player.last_name}
+                            {player.hasSiblings && (
+                              <span 
+                                className="ml-1 text-yellow-600 font-bold"
+                                title="This player has siblings in the draft"
+                              >
+                                👥
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="border border-gray-300 p-1 text-center">
+                          {player.gender ? player.gender.charAt(0).toUpperCase() : ''}
+                        </td>
+                        <td className="border border-gray-300 p-1 text-center">{player.is_travel_player ? '✓' : ''}</td>
+                        <td className="border border-gray-300 p-1">{player.is_new_player ? 'New' : 'Returning'}</td>
+                        <td className="border border-gray-300 p-1 text-center">{calculateAge(player.birth_date)}</td>
+                        <td className="border border-gray-300 p-1">{formatBirthday(player.birth_date)}</td>
+                        <td className="border border-gray-300 p-1 text-xs">{getVolunteerRoles(player)}</td>
+                        <td className="border border-gray-300 p-1">&nbsp;</td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
-                
-                <div className="text-xs text-gray-600 italic p-3 bg-gray-50 rounded border border-gray-200">
-                  <p className="font-semibold mb-1">Note to Managers:</p>
-                  <p>These are player requests to be on the same team as the listed teammate. Please consider these requests during the draft when making your selections. "Approved" requests should be prioritized.</p>
-                </div>
               </div>
-            )}
+              
+              <div className="mt-4 text-xs text-gray-500">
+                <p><strong>Instructions:</strong> Call out player numbers during the draft. Players with 👥 have siblings - picking them automatically drafts their siblings.</p>
+                <p><strong>Note:</strong> Highlighted rows indicate players with siblings in the division.</p>
+              </div>
+
+              {/* Teammate Requests Preview */}
+              {teammateRequests.length > 0 && (
+                <div className="mt-10 pt-8 border-t border-gray-300">
+                  <h3 className="text-lg sm:text-xl font-bold text-center mb-6 pb-2 border-b border-gray-300">
+                    Teammate Requests - {divisionName}
+                  </h3>
+                  
+                  <div className="overflow-x-auto">
+                    <table className="w-full border-collapse border border-gray-300 text-sm mb-4 min-w-max">
+                      <thead>
+                        <tr className="bg-gray-100">
+                          <th className="border border-gray-300 p-2 text-left w-16">Draft #</th>
+                          <th className="border border-gray-300 p-2 text-left">Requesting Player</th>
+                          <th className="border border-gray-300 p-2 text-left">Requested Teammate</th>
+                          {/*<th className="border border-gray-300 p-2 text-left w-20">Status</th> */}
+                          <th className="border border-gray-300 p-2 text-left">Notes</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {teammateRequests.map((request) => {
+                          const statusColors = getStatusColor(request.status);
+                          return (
+                            <tr key={request.id} className="border-b border-gray-200 hover:bg-gray-50">
+                              <td className="border border-gray-300 p-2 text-center font-semibold">
+                                {request.draftNumber}
+                              </td>
+                              <td className="border border-gray-300 p-2">
+                                {request.requestingPlayerName || 'Unknown Player'}
+                              </td>
+                              <td className="border border-gray-300 p-2 font-medium">
+                                {request.requested_teammate_name || 'Not specified'}
+                              </td>
+                              <td className="border border-gray-300 p-2">
+                                <span 
+                                  className="px-2 py-1 rounded-full text-xs font-bold"
+                                  style={{
+                                    backgroundColor: statusColors.bg,
+                                    color: statusColors.text
+                                  }}
+                                >
+                                  {/*{request.status || 'Pending'} */}
+                                </span>
+                              </td>
+                              <td className="border border-gray-300 p-2 text-xs">
+                                {request.comments || ''}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  
+                  <div className="text-xs text-gray-600 italic p-3 bg-gray-50 rounded border border-gray-200">
+                    <p className="font-semibold mb-1">Note to Managers:</p>
+                    <p>These are player requests to be on the same team as the listed teammate. Please consider these requests during the draft when making your selections. "Approved" requests should be prioritized.</p>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>

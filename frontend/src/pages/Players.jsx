@@ -20,6 +20,11 @@ const Players = () => {
   const [showStatusEditModal, setShowStatusEditModal] = useState(false);
   const [editStatus, setEditStatus] = useState('');
   const [savingStatus, setSavingStatus] = useState(false);
+//Delete modal  
+const [showDeleteModal, setShowDeleteModal] = useState(false);
+const [deletingPlayer, setDeletingPlayer] = useState(null);
+const [deleting, setDeleting] = useState(false);
+const [deleteError, setDeleteError] = useState('');
   
   //ADD: Workbond edit modal
   const [showWorkbondEditModal, setShowWorkbondEditModal] = useState(false);
@@ -45,8 +50,9 @@ const Players = () => {
   });
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 50;
-  const [showFamilyLinker, setShowFamilyLinker] = useState(false);
-  const [unlinkedVolunteers, setUnlinkedVolunteers] = useState([]);
+const [showFamilyLinker, setShowFamilyLinker] = useState(false);
+const [unlinkedVolunteers, setUnlinkedVolunteers] = useState([]); // Add this line
+const [loadingUnlinkedVolunteers, setLoadingUnlinkedVolunteers] = useState(false);
   const [linkSelections, setLinkSelections] = useState({
     volunteerId: '',
     playerId: ''
@@ -166,6 +172,67 @@ const Players = () => {
     if (selectedSeason === null) return;
     loadPlayers();
   }, [selectedSeason]);
+  
+  const loadUnlinkedVolunteers = async () => {
+  try {
+    setLoadingUnlinkedVolunteers(true);
+    const token = localStorage.getItem('slm_token');
+    let url = '/api/volunteers';
+    if (selectedSeason) {
+      url += `?season_id=${selectedSeason}`;
+    }
+    
+    const headers = {
+      'Content-Type': 'application/json'
+    };
+    
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    
+    const response = await fetch(url, { headers });
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Volunteers API error:', {
+        status: response.status,
+        statusText: response.statusText,
+        error: errorText
+      });
+      alert('Failed to load volunteers. Please check your permissions.');
+      return;
+    }
+    
+    const responseData = await response.json();
+    
+    // Check if response is an array or has a data property
+    let allVolunteers;
+    if (Array.isArray(responseData)) {
+      allVolunteers = responseData;
+    } else if (responseData && Array.isArray(responseData.data)) {
+      allVolunteers = responseData.data;
+    } else if (responseData && responseData.error) {
+      console.error('API returned error:', responseData.error);
+      alert(`API Error: ${responseData.error}`);
+      return;
+    } else {
+      console.error('Unexpected API response format:', responseData);
+      alert('Failed to load volunteers: Unexpected response format');
+      return;
+    }
+    
+    // Filter for unlinked volunteers
+    const unlinked = allVolunteers.filter(v => !v.family_id);
+    console.log(`Fetched ${allVolunteers.length} total volunteers, ${unlinked.length} unlinked`);
+    setUnlinkedVolunteers(unlinked);
+    
+  } catch (error) {
+    console.error('Error fetching unlinked volunteers:', error);
+    alert(`Error loading volunteers: ${error.message}`);
+  } finally {
+    setLoadingUnlinkedVolunteers(false);
+  }
+};
 
   const loadPlayers = async () => {
   const seqId = ++playersLoadSeq.current;
@@ -376,6 +443,95 @@ const Players = () => {
       setSavingTeam(false);
     }
   };
+  
+  const handleDeletePlayer = async () => {
+  if (!deletingPlayer) return;
+
+  // SECURITY CHECK 1: Check if player has team assignment
+  if (deletingPlayer.team_id) {
+    const teamName = deletingPlayer.team?.name || 'a team';
+    const confirmTeam = window.confirm(
+      `⚠️ WARNING: This player is assigned to team "${teamName}".\n\n` +
+      `Deleting will remove them from the team roster.\n\n` +
+      `Are you sure you want to delete ${deletingPlayer.first_name} ${deletingPlayer.last_name}?`
+    );
+    if (!confirmTeam) return;
+  }
+
+  // SECURITY CHECK 2: Check if payment was received
+  if (deletingPlayer.payment_received) {
+    const confirmPayment = window.confirm(
+      `💰 WARNING: This player's registration was marked as PAID.\n\n` +
+      `Consider marking as "withdrawn" instead of deleting to preserve payment records.\n\n` +
+      `Do you still want to delete ${deletingPlayer.first_name} ${deletingPlayer.last_name}?`
+    );
+    if (!confirmPayment) return;
+  }
+
+  // SECURITY CHECK 3: Check if player has workbond check received
+  if (deletingPlayer.season_workbond?.received) {
+    const confirmWorkbond = window.confirm(
+      `📋 WARNING: Workbond check was received for this player's family.\n\n` +
+      `Deleting this player won't affect the workbond record, but you should verify\n` +
+      `if other family members are still in the system.\n\n` +
+      `Continue deleting ${deletingPlayer.first_name} ${deletingPlayer.last_name}?`
+    );
+    if (!confirmWorkbond) return;
+  }
+
+  // SECURITY CHECK 4: Final confirmation
+  const finalConfirm = window.confirm(
+    `🚨 FINAL CONFIRMATION\n\n` +
+    `You are about to PERMANENTLY delete:\n` +
+    `• ${deletingPlayer.first_name} ${deletingPlayer.last_name}\n` +
+    `• Division: ${deletingPlayer.division?.name || deletingPlayer.program_title || 'Unknown'}\n` +
+    `• Season: ${seasons.find(s => s.id === selectedSeason)?.name || 'Current'}\n\n` +
+    `This action CANNOT be undone.\n\n` +
+    `Click OK to delete or Cancel to abort.`
+  );
+  
+  if (!finalConfirm) return;
+
+  try {
+    setDeleting(true);
+    setDeleteError('');
+
+    console.log('Deleting player:', deletingPlayer.id);
+    
+    // Use the playersAPI.delete method (which already exists in your api.js)
+    const response = await playersAPI.delete(deletingPlayer.id);
+
+    // Close modal and refresh players
+    setShowDeleteModal(false);
+    setDeletingPlayer(null);
+    
+    // Show success message with details
+    alert(`✅ Successfully deleted player:\n\n${deletingPlayer.first_name} ${deletingPlayer.last_name}\n` +
+          `Division: ${deletingPlayer.division?.name || deletingPlayer.program_title || 'Unknown'}\n` +
+          `Registration #: ${deletingPlayer.registration_no || 'N/A'}`);
+    
+    // Refresh the players list
+    await loadPlayers();
+    
+  } catch (error) {
+    console.error('Error deleting player:', error);
+    
+    // Check for specific error types
+    if (error.response?.status === 404) {
+      setDeleteError('Player not found. It may have already been deleted.');
+    } else if (error.response?.status === 403) {
+      setDeleteError('Permission denied. You do not have authorization to delete players.');
+    } else if (error.response?.status === 409) {
+      setDeleteError('Cannot delete player. They may have active game assignments or other dependencies.');
+    } else {
+      setDeleteError(`Error: ${error.message}`);
+    }
+    
+    // Don't close the modal on error so user can see the error message
+  } finally {
+    setDeleting(false);
+  }
+};
 
   // ADD: Save only the status change for the selected player
   const handleSaveStatusChange = async () => {
@@ -968,50 +1124,8 @@ const enhancePlayersWithVolunteerData = async (playersData) => {
   }
 
   try {
-    const token = localStorage.getItem('slm_token');
-    let url = '/api/volunteers';
-    if (selectedSeason) {
-      url += `?season_id=${selectedSeason}`;
-    }
-    
-    const headers = {
-      'Content-Type': 'application/json'
-    };
-    
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
-    }
-    
-    // Fetch volunteers with proper authentication
-    const volunteersResponse = await fetch(url, { headers });
-    
-    if (!volunteersResponse.ok) {
-      const errorText = await volunteersResponse.text();
-      console.error('Volunteers API error:', {
-        status: volunteersResponse.status,
-        statusText: volunteersResponse.statusText,
-        error: errorText
-      });
-      alert('Failed to fetch volunteers. Please check your permissions.');
-      return;
-    }
-    
-    const responseData = await volunteersResponse.json();
-    
-    // Check if response is an array or has a data property
-    let allVolunteers;
-    if (Array.isArray(responseData)) {
-      allVolunteers = responseData;
-    } else if (responseData && Array.isArray(responseData.data)) {
-      allVolunteers = responseData.data;
-    } else {
-      console.error('Unexpected API response format:', responseData);
-      alert('Failed to load volunteers: Unexpected response format');
-      return;
-    }
-    
-    const volunteer = allVolunteers.find(v => v.id === linkSelections.volunteerId);
     const player = players.find(p => p.id === linkSelections.playerId);
+    const volunteer = unlinkedVolunteers.find(v => v.id === linkSelections.volunteerId);
 
     if (!volunteer || !player) {
       alert('Invalid selection - volunteer or player not found');
@@ -1022,10 +1136,17 @@ const enhancePlayersWithVolunteerData = async (playersData) => {
 
     const success = await linkVolunteerToFamily(volunteer.id, player.family_id);
     if (success) {
+      // Clear selections but keep modal open
       setLinkSelections({ volunteerId: '', playerId: '' });
-      setShowFamilyLinker(false);
+      
+      // Reload the unlinked volunteers list to reflect the change
+      await loadUnlinkedVolunteers();
+      
       // Refresh players to see updated volunteer data
       await loadPlayers();
+      
+      // Show success message
+      alert(`Successfully linked ${volunteer.name} to ${player.first_name} ${player.last_name}'s family!`);
     }
   } catch (error) {
     console.error('Error linking volunteer:', error);
@@ -1067,10 +1188,9 @@ const enhancePlayersWithVolunteerData = async (playersData) => {
     const result = await response.json();
     console.log('Volunteer linked successfully:', result);
     
-    // Reload players to see the updated volunteer data
-    await loadPlayers();
+    // Keep the console log but remove the alert
+    // alert('Volunteer successfully linked to family!'); // ← THIS LINE IS REMOVED
     
-    alert('Volunteer successfully linked to family!');
     return true;
   } catch (error) {
     console.error('Error linking volunteer:', error);
@@ -1142,7 +1262,14 @@ const enhancePlayersWithVolunteerData = async (playersData) => {
         <p className="text-sm text-gray-600 mb-4">
           These volunteers don't have family associations. Link them to players to display their roles correctly.
         </p>
-        
+         <button
+        onClick={loadUnlinkedVolunteers}
+        disabled={loadingUnlinkedVolunteers}
+        className="inline-flex items-center px-3 py-1 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50"
+      >
+        <RefreshCw className={`h-4 w-4 mr-1 ${loadingUnlinkedVolunteers ? 'animate-spin' : ''}`} />
+        Refresh List
+      </button>
         <div>
           <label style={{
             display: 'block',
@@ -1154,83 +1281,27 @@ const enhancePlayersWithVolunteerData = async (playersData) => {
             Select Volunteer *
           </label>
           <select
-            required
-            style={{
-              width: '100%',
-              padding: '10px 12px',
-              border: '1px solid #d1d5db',
-              borderRadius: '8px',
-              fontSize: '14px',
-              color: '#374151',
-              backgroundColor: 'white'
-            }}
-            value={linkSelections.volunteerId}
-            onChange={(e) => setLinkSelections(prev => ({ ...prev, volunteerId: e.target.value }))}
-            onClick={async () => {
-  // Fetch unlinked volunteers when dropdown is clicked
-  try {
-    const token = localStorage.getItem('slm_token');
-    let url = '/api/volunteers';
-    if (selectedSeason) {
-      url += `?season_id=${selectedSeason}`;
-    }
-    
-    const headers = {
-      'Content-Type': 'application/json'
-    };
-    
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
-    }
-    
-    const response = await fetch(url, { headers });
-    
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('Volunteers API error:', {
-        status: response.status,
-        statusText: response.statusText,
-        error: errorText
-      });
-      alert('Failed to load volunteers. Please check your permissions.');
-      return;
-    }
-    
-    const responseData = await response.json();
-    
-    // Check if response is an array or has a data property
-    let allVolunteers;
-    if (Array.isArray(responseData)) {
-      allVolunteers = responseData;
-    } else if (responseData && Array.isArray(responseData.data)) {
-      allVolunteers = responseData.data;
-    } else if (responseData && responseData.error) {
-      console.error('API returned error:', responseData.error);
-      alert(`API Error: ${responseData.error}`);
-      return;
-    } else {
-      console.error('Unexpected API response format:', responseData);
-      alert('Failed to load volunteers: Unexpected response format');
-      return;
-    }
-    
-    // Filter for unlinked volunteers
-    const unlinked = allVolunteers.filter(v => !v.family_id);
-    console.log(`Fetched ${allVolunteers.length} total volunteers, ${unlinked.length} unlinked`);
-    setUnlinkedVolunteers(unlinked);
-  } catch (error) {
-    console.error('Error fetching unlinked volunteers:', error);
-    alert(`Error loading volunteers: ${error.message}`);
-  }
-}}
-          >
-            <option value="">Choose a volunteer...</option>
-            {unlinkedVolunteers.map(volunteer => (
-              <option key={volunteer.id} value={volunteer.id}>
-                {volunteer.name} - {volunteer.role} {volunteer.email ? `(${volunteer.email})` : ''}
-              </option>
-            ))}
-          </select>
+  required
+  style={{
+    width: '100%',
+    padding: '10px 12px',
+    border: '1px solid #d1d5db',
+    borderRadius: '8px',
+    fontSize: '14px',
+    color: '#374151',
+    backgroundColor: 'white'
+  }}
+  value={linkSelections.volunteerId}
+  onChange={(e) => setLinkSelections(prev => ({ ...prev, volunteerId: e.target.value }))}
+  disabled={loadingUnlinkedVolunteers}
+>
+  <option value="">{loadingUnlinkedVolunteers ? 'Loading volunteers...' : 'Choose a volunteer...'}</option>
+  {unlinkedVolunteers.map(volunteer => (
+    <option key={volunteer.id} value={volunteer.id}>
+      {volunteer.name} - {volunteer.role} {volunteer.email ? `(${volunteer.email})` : ''}
+    </option>
+  ))}
+</select>
           <div className="text-xs text-gray-500 mt-1">
             Found {unlinkedVolunteers.length} unlinked volunteers in {selectedSeason ? 'this season' : 'all seasons'}
           </div>
@@ -1328,12 +1399,16 @@ const enhancePlayersWithVolunteerData = async (playersData) => {
     Debug Volunteers
   </button>
   <button 
-    onClick={() => setShowFamilyLinker(true)}
-    className="inline-flex items-center px-4 py-2 border border-yellow-300 rounded-md shadow-sm text-sm font-medium text-yellow-700 bg-yellow-50 hover:bg-yellow-100"
-  >
-    <Link className="h-4 w-4 mr-2" />
-    Fix Family Links
-  </button>
+  onClick={async () => {
+    setShowFamilyLinker(true);
+    // Load unlinked volunteers when opening the modal
+    await loadUnlinkedVolunteers();
+  }}
+  className="inline-flex items-center px-4 py-2 border border-yellow-300 rounded-md shadow-sm text-sm font-medium text-yellow-700 bg-yellow-50 hover:bg-yellow-100"
+>
+  <Link className="h-4 w-4 mr-2" />
+  Fix Family Links
+</button>
 </div>
         </div>
       </div>
@@ -1659,6 +1734,9 @@ const enhancePlayersWithVolunteerData = async (playersData) => {
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Secondary Guardian
                 </th>
+				<th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+      Actions
+    </th>
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
@@ -1924,7 +2002,21 @@ const enhancePlayersWithVolunteerData = async (playersData) => {
                       <span className="text-sm text-gray-400">Not provided</span>
                     )}
                   </td>
+				  <td className="px-4 py-4 whitespace-nowrap">
+      <button
+        onClick={() => {
+          setDeletingPlayer(player);
+          setShowDeleteModal(true);
+          setDeleteError('');
+        }}
+        className="text-red-600 hover:text-red-900 text-sm font-medium"
+        title="Delete player"
+      >
+        Delete
+      </button>
+    </td>
                 </tr>
+				
               ))}
             </tbody>
           </table>
@@ -1987,16 +2079,24 @@ const enhancePlayersWithVolunteerData = async (playersData) => {
 
             <div className="flex justify-end gap-2 pt-2">
               <button
-                type="button"
-                onClick={() => {
-                  setShowTeamEditModal(false);
-                  setEditingPlayer(null);
-                }}
-                className="px-4 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-50"
-                disabled={savingTeam}
-              >
-                Cancel
-              </button>
+  onClick={() => {
+    setShowFamilyLinker(false);
+    setLinkSelections({ volunteerId: '', playerId: '' });
+    setUnlinkedVolunteers([]); // Clear the list when closing
+  }}
+  style={{
+    padding: '10px 20px',
+    fontSize: '14px',
+    fontWeight: '500',
+    color: '#374151',
+    backgroundColor: 'white',
+    border: '1px solid #d1d5db',
+    borderRadius: '6px',
+    cursor: 'pointer'
+  }}
+>
+  Cancel
+</button>
               <button
                 type="button"
                 onClick={handleSaveTeamChange}
@@ -2072,6 +2172,163 @@ const enhancePlayersWithVolunteerData = async (playersData) => {
           </div>
         </Modal>
       )}
+	  
+	  {/* Delete Confirmation Modal */}
+{showDeleteModal && deletingPlayer && (
+  <Modal
+    isOpen={showDeleteModal}
+    onClose={() => {
+      setShowDeleteModal(false);
+      setDeletingPlayer(null);
+      setDeleteError('');
+    }}
+    title="Delete Player - Confirmation Required"
+  >
+    <div className="space-y-4">
+      <div className="bg-red-50 border-l-4 border-red-400 p-4">
+        <div className="flex">
+          <div className="flex-shrink-0">
+            <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+            </svg>
+          </div>
+          <div className="ml-3">
+            <h3 className="text-sm font-medium text-red-800">
+              ⚠️ Permanent Deletion Warning
+            </h3>
+            <div className="mt-2 text-sm text-red-700">
+              <p>This action <strong>cannot be undone</strong>. The player record will be permanently deleted from the database.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="text-sm text-gray-700 bg-gray-50 p-3 rounded-md">
+        <div className="font-medium text-gray-900 text-base mb-2">
+          Player Details:
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <div className="text-gray-600">Name:</div>
+          <div className="font-medium">{deletingPlayer.first_name} {deletingPlayer.last_name}</div>
+          
+          <div className="text-gray-600">Division:</div>
+          <div>{deletingPlayer.division?.name || deletingPlayer.program_title || 'Unknown'}</div>
+          
+          <div className="text-gray-600">Season:</div>
+          <div>{seasons.find(s => s.id === selectedSeason)?.name || 'Current'}</div>
+          
+          <div className="text-gray-600">Registration #:</div>
+          <div>{deletingPlayer.registration_no || 'N/A'}</div>
+          
+          <div className="text-gray-600">Team:</div>
+          <div>
+            {deletingPlayer.team_id ? (
+              <span className="text-yellow-600 font-medium">
+                {deletingPlayer.team?.name || 'Assigned'} 
+                {deletingPlayer.team?.color && (
+                  <span className="ml-1 inline-block w-3 h-3 rounded-full" style={{backgroundColor: deletingPlayer.team.color}}></span>
+                )}
+              </span>
+            ) : 'No Team'}
+          </div>
+          
+          <div className="text-gray-600">Payment Status:</div>
+          <div>
+            {deletingPlayer.payment_received ? (
+              <span className="text-green-600 font-medium">Paid ✓</span>
+            ) : (
+              <span className="text-gray-500">Pending</span>
+            )}
+          </div>
+          
+          <div className="text-gray-600">Workbond:</div>
+          <div>
+            {deletingPlayer.season_workbond?.received ? (
+              <span className="text-green-600 font-medium">Received ✓</span>
+            ) : (
+              <span className="text-gray-500">Not Received</span>
+            )}
+          </div>
+          
+          {deletingPlayer.family && (
+            <>
+              <div className="text-gray-600">Family Contact:</div>
+              <div>{deletingPlayer.family.primary_contact_name || 'No contact'}</div>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Additional warnings based on player status */}
+      {deletingPlayer.team_id && (
+        <div className="bg-yellow-50 border-l-4 border-yellow-400 p-3">
+          <div className="flex items-center">
+            <svg className="h-5 w-5 text-yellow-400 mr-2" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+            </svg>
+            <span className="text-sm font-medium text-yellow-800">
+              Team Assignment: Player is on team "{deletingPlayer.team?.name}". Deleting will remove them from the roster.
+            </span>
+          </div>
+        </div>
+      )}
+
+      {deletingPlayer.payment_received && (
+        <div className="bg-yellow-50 border-l-4 border-yellow-400 p-3">
+          <div className="flex items-center">
+            <svg className="h-5 w-5 text-yellow-400 mr-2" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+            </svg>
+            <span className="text-sm font-medium text-yellow-800">
+              Payment Record: Registration was marked as PAID. Consider marking as "withdrawn" to preserve payment history.
+            </span>
+          </div>
+        </div>
+      )}
+
+      {deleteError && (
+        <div className="bg-red-50 border border-red-200 rounded-md p-3">
+          <div className="flex items-center">
+            <svg className="h-5 w-5 text-red-400 mr-2" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+            </svg>
+            <p className="text-red-700 text-sm">{deleteError}</p>
+          </div>
+        </div>
+      )}
+
+      <div className="flex justify-end gap-2 pt-2">
+        <button
+          type="button"
+          onClick={() => {
+            setShowDeleteModal(false);
+            setDeletingPlayer(null);
+            setDeleteError('');
+          }}
+          className="px-4 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-50"
+          disabled={deleting}
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={handleDeletePlayer}
+          className="px-4 py-2 text-sm text-white bg-red-600 rounded-md hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
+          disabled={deleting}
+        >
+          {deleting ? (
+            <>
+              <span className="inline-block animate-spin rounded-full h-3 w-3 border-b-2 border-white mr-2"></span>
+              Deleting...
+            </>
+          ) : (
+            'Permanently Delete Player'
+          )}
+        </button>
+      </div>
+    </div>
+  </Modal>
+)}
 
       {/* UPDATED: Workbond Status Edit Modal - Now for season-specific workbond */}
       {showWorkbondEditModal && editingPlayer && (
@@ -2140,7 +2397,10 @@ const enhancePlayersWithVolunteerData = async (playersData) => {
         </Modal>
       )}
     </div>
+	
   );
 };
+
+
 
 export default Players;

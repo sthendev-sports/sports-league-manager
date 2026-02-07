@@ -1160,4 +1160,50 @@ router.get('/team/:teamId', async (req, res) => {
   }
 });
 
+// Delete player
+router.delete('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    console.log('Deleting player with ID:', id);
+    
+    // First, check if the player exists
+    const { data: player, error: fetchError } = await supabase
+      .from('players')
+      .select('id, first_name, last_name, family_id')
+      .eq('id', id)
+      .single();
+
+    if (fetchError) {
+      if (fetchError.code === 'PGRST116') {
+        return res.status(404).json({ error: 'Player not found' });
+      }
+      throw fetchError;
+    }
+
+    if (!player) {
+      return res.status(404).json({ error: 'Player not found' });
+    }
+
+    // Delete the player
+    const { error: deleteError } = await supabase
+      .from('players')
+      .delete()
+      .eq('id', id);
+
+    if (deleteError) throw deleteError;
+
+    console.log(`Successfully deleted player: ${player.first_name} ${player.last_name} (ID: ${id})`);
+
+    res.json({ 
+      success: true, 
+      message: `Player ${player.first_name} ${player.last_name} deleted successfully`,
+      deletedPlayer: player
+    });
+  } catch (error) {
+    console.error('Error deleting player:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 module.exports = router;

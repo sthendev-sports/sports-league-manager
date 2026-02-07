@@ -484,79 +484,101 @@ router.get('/summary', async (req, res) => {
     }
 
     // -------------------- Build summary --------------------
-    const summary = [];
+const summary = [];
 
-    for (const family of (families || [])) {
-      const familyPlayers =
-        playersByFamily.get(String(family.id)) ||
-        playersByFamily.get(String(family.family_id)) ||
-        [];
+for (const family of (families || [])) {
+  const familyPlayers =
+    playersByFamily.get(String(family.id)) ||
+    playersByFamily.get(String(family.family_id)) ||
+    [];
 
-      const familyVolunteers =
-        volunteersByFamily.get(String(family.id)) ||
-        volunteersByFamily.get(String(family.family_id)) ||
-        [];
+  const familyVolunteers =
+    volunteersByFamily.get(String(family.id)) ||
+    volunteersByFamily.get(String(family.family_id)) ||
+    [];
 
-      // required shifts = max requirement across the player's divisions (default 1 if no requirement exists)
-      let requiredShifts = 1;
+  // required shifts = max requirement across the player's divisions (default 1 if no requirement exists)
+  let requiredShifts = 1;
 
-      const divIds = (familyPlayers || [])
-        .map(p => p.__resolved_division_id || (p.division && p.division.id) || null)
-        .filter(Boolean)
-        .map(x => String(x));
+  const divIds = (familyPlayers || [])
+    .map(p => p.__resolved_division_id || (p.division && p.division.id) || null)
+    .filter(Boolean)
+    .map(x => String(x));
 
-      const reqVals = divIds
-        .map(divId => reqByDivision.get(divId))
-        .filter(v => v !== null && v !== undefined)
-        .map(v => Number(v))
-        .filter(v => !Number.isNaN(v));
+  const reqVals = divIds
+    .map(divId => reqByDivision.get(divId))
+    .filter(v => v !== null && v !== undefined)
+    .map(v => Number(v))
+    .filter(v => !Number.isNaN(v));
 
-      if (reqVals.length) requiredShifts = Math.max(...reqVals);
+  if (reqVals.length) requiredShifts = Math.max(...reqVals);
 
-      const completedShifts =
-        completedByFamily.get(String(family.id)) ??
-        completedByFamily.get(String(family.family_id)) ??
-        0;
+  const completedShifts =
+    completedByFamily.get(String(family.id)) ??
+    completedByFamily.get(String(family.family_id)) ??
+    0;
 
-      // FIXED: Use the new function that checks both family_id and email
-      const exInfo = getExemptionForFamily(family);
-      const finalRequiredShifts = exInfo.is_exempt ? 0 : requiredShifts;
-      const remainingShifts = Math.max(0, finalRequiredShifts - completedShifts);
+  // FIXED: Use the new function that checks both family_id and email
+  const exInfo = getExemptionForFamily(family);
+  const finalRequiredShifts = exInfo.is_exempt ? 0 : requiredShifts;
+  const remainingShifts = Math.max(0, finalRequiredShifts - completedShifts);
 
-      const status = exInfo.is_exempt
-        ? 'exempt'
-        : remainingShifts === 0
-          ? 'completed'
-          : 'incomplete';
+  const status = exInfo.is_exempt
+    ? 'exempt'
+    : remainingShifts === 0
+      ? 'completed'
+      : 'incomplete';
 
-      summary.push({
-        family_id: family.id,
-        family_identifier: family.family_id,
-        family_name: family.primary_contact_name,
-        email: family.primary_contact_email,
-        parent2_email: family.parent2_email,
-        all_emails: [family.primary_contact_email, family.parent2_email].filter(Boolean),
-        players: (familyPlayers || []).map(p => ({
-          id: p.id,
-          first_name: p.first_name,
-          last_name: p.last_name,
-          full_name: `${p.first_name} ${p.last_name}`,
-          division: (p.division && p.division.name) || p.program_title || 'Unknown Division',
-          division_id: p.__resolved_division_id || (p.division && p.division.id) || null
-        })),
-        volunteers: (familyVolunteers || []).map(v => ({
-          role: v.role,
-          is_approved: v.is_approved,
-          name: v.name
-        })),
-        required_shifts: finalRequiredShifts,
-        completed_shifts: completedShifts,
-        remaining_shifts: remainingShifts,
-        status,
-        is_exempt: exInfo.is_exempt,
-        exempt_reason: exInfo.exempt_reason || ''
-      });
-    }
+  // ==== NEW: Get volunteer emails for this family ====
+  // Get unique volunteer emails that aren't already in family guardian emails
+  const familyGuardianEmails = [
+    family.primary_contact_email,
+    family.parent2_email
+  ].filter(Boolean).map(e => e.toLowerCase().trim());
+  
+  const volunteerEmails = (familyVolunteers || [])
+    .map(v => v.email)
+    .filter(Boolean)
+    .map(e => e.toLowerCase().trim())
+    .filter(email => !familyGuardianEmails.includes(email)) // Don't duplicate guardian emails
+    .filter((email, index, self) => self.indexOf(email) === index); // Remove duplicates
+
+  // Combine all emails: guardians first, then volunteers
+  const allEmails = [
+    family.primary_contact_email,
+    family.parent2_email,
+    ...volunteerEmails
+  ].filter(Boolean);
+
+  summary.push({
+    family_id: family.id,
+    family_identifier: family.family_id,
+    family_name: family.primary_contact_name,
+    email: family.primary_contact_email,
+    parent2_email: family.parent2_email,
+    all_emails: allEmails, // NOW INCLUDES VOLUNTEER EMAILS!
+    players: (familyPlayers || []).map(p => ({
+      id: p.id,
+      first_name: p.first_name,
+      last_name: p.last_name,
+      full_name: `${p.first_name} ${p.last_name}`,
+      division: (p.division && p.division.name) || p.program_title || 'Unknown Division',
+      division_id: p.__resolved_division_id || (p.division && p.division.id) || null
+    })),
+    volunteers: (familyVolunteers || []).map(v => ({
+      role: v.role,
+      is_approved: v.is_approved,
+      name: v.name,
+      email: v.email // Added email to volunteer info
+    })),
+    required_shifts: finalRequiredShifts,
+    completed_shifts: completedShifts,
+    remaining_shifts: remainingShifts,
+    status,
+    is_exempt: exInfo.is_exempt,
+    exempt_reason: exInfo.exempt_reason || ''
+  });
+}
 
     res.json(summary);
   } catch (error) {

@@ -134,8 +134,7 @@ router.post('/', async (req, res) => {
 /**
  * PUT /api/volunteers/:id
  * Update an existing volunteer.
- * NEW: When linking to a family (family_id is set), also update the families table
- * with volunteer info as a secondary guardian.
+ * REVERTED: No longer updates families table
  */
 router.put('/:id', async (req, res) => {
   try {
@@ -147,22 +146,6 @@ router.put('/:id', async (req, res) => {
     // Clean the data - remove training-related fields that shouldn't be in volunteers table
     const { trainings, trainings_summary, division, season, team, ...dataToUpdate } = volunteerData;
 
-    // Track if we're linking to a new family
-    const newFamilyId = dataToUpdate.family_id;
-    let currentFamilyId = null;
-
-    // Get current volunteer to check family_id change
-    const { data: currentVolunteer } = await supabase
-      .from('volunteers')
-      .select('family_id, name, email, phone')
-      .eq('id', id)
-      .single();
-
-    if (currentVolunteer) {
-      currentFamilyId = currentVolunteer.family_id;
-    }
-
-    // Update volunteer
     const { data, error } = await supabase
       .from('volunteers')
       .update(dataToUpdate)
@@ -172,86 +155,12 @@ router.put('/:id', async (req, res) => {
 
     if (error) throw error;
 
-    // === NEW LOGIC: Update families table when linking volunteer to family ===
-    if (newFamilyId && newFamilyId !== currentFamilyId) {
-      console.log(`Linking volunteer ${id} to family ${newFamilyId} - updating family table...`);
-      
-      try {
-        // Get current family data
-        const { data: family, error: familyError } = await supabase
-          .from('families')
-          .select('*')
-          .eq('id', newFamilyId)
-          .single();
-
-        if (!familyError && family) {
-          // Parse volunteer name
-          const volunteerName = data.name || currentVolunteer?.name || '';
-          const nameParts = volunteerName.trim().split(' ');
-          const firstName = nameParts[0] || '';
-          const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : '';
-          
-          const volunteerEmail = data.email || currentVolunteer?.email || '';
-          const volunteerPhone = data.phone || currentVolunteer?.phone || '';
-
-          // Build family updates - only fill empty fields
-          const familyUpdates = {};
-          
-          // Check and update primary contact fields if empty
-          if (!family.primary_contact_name && volunteerName) {
-            familyUpdates.primary_contact_name = volunteerName;
-          }
-          if (!family.primary_contact_email && volunteerEmail) {
-            familyUpdates.primary_contact_email = volunteerEmail;
-          }
-          if (!family.primary_contact_phone && volunteerPhone) {
-            familyUpdates.primary_contact_phone = volunteerPhone;
-          }
-          
-          // Check and update secondary guardian fields if empty
-          if (!family.parent2_first_name && firstName) {
-            familyUpdates.parent2_first_name = firstName;
-          }
-          if (!family.parent2_last_name && lastName) {
-            familyUpdates.parent2_last_name = lastName;
-          }
-          if (!family.parent2_email && volunteerEmail) {
-            familyUpdates.parent2_email = volunteerEmail;
-          }
-          if (!family.parent2_phone && volunteerPhone) {
-            familyUpdates.parent2_phone = volunteerPhone;
-          }
-          
-          // Update family if there are fields to update
-          if (Object.keys(familyUpdates).length > 0) {
-            console.log('Updating family table with:', familyUpdates);
-            
-            const { error: familyUpdateError } = await supabase
-              .from('families')
-              .update(familyUpdates)
-              .eq('id', newFamilyId);
-            
-            if (familyUpdateError) {
-              console.error('Error updating family table:', familyUpdateError);
-              // Don't fail the volunteer update - just log the error
-            } else {
-              console.log('Family table updated successfully');
-            }
-          } else {
-            console.log('No family updates needed - all fields already populated');
-          }
-        }
-      } catch (familyUpdateError) {
-        console.error('Error in family update logic:', familyUpdateError);
-        // Don't fail the volunteer update - just log the error
-      }
-    }
-
-    // Return success response
+    // Return simple success response
     res.json({
       success: true,
       message: 'Volunteer updated successfully',
-      data: data
+      id: data.id,
+      name: data.name
     });
   } catch (error) {
     console.error('Error updating volunteer:', error);

@@ -418,45 +418,61 @@ if (divisions && divisions.length > 0) {
 // rawInterestedRoles = whatever the CSV says ("Manager, Assistant Coach, Team Parent")
 const rawInterestedRoles = volunteerData['volunteer role'] || null;
 
+// FIRST: Check if this volunteer already exists
+const matchedVolunteer = findExistingVolunteer(  // <-- Changed variable name
+  existingVolunteers || [],
+  {
+    name: `${volunteerData['volunteer first name']} ${volunteerData['volunteer last name']}`.trim(),
+    email: volunteerData['volunteer email address'],
+    phone: volunteerData['volunteer cellphone']
+  },
+  divisionId,
+  season_id
+);
+
+// DECIDE family_id: Keep existing if we have it, otherwise try to find match
+let finalFamilyId = null;
+if (matchedVolunteer && matchedVolunteer.family_id) {  // <-- Use matchedVolunteer
+  // Volunteer already exists with a family_id - KEEP IT
+  finalFamilyId = matchedVolunteer.family_id;
+  console.log(`🔗 Preserving existing family_id ${finalFamilyId} for ${matchedVolunteer.name}`);
+} else {
+  // No existing volunteer or no family_id - try to find match
+  finalFamilyId = await getCachedFamilyId(
+    { 
+      email: volunteerData['volunteer email address'], 
+      phone: volunteerData['volunteer cellphone'] 
+    },
+    season_id
+  );
+  if (finalFamilyId) {
+    console.log(`🔗 Found new family match: ${finalFamilyId}`);
+  }
+}
+
+// NOW create the volunteerRecord with the determined family_id
 const volunteerRecord = {
   name: `${volunteerData['volunteer first name']} ${volunteerData['volunteer last name']}`.trim(),
   email: volunteerData['volunteer email address'] || null,
   phone: volunteerData['volunteer cellphone'] || null,
-
-  // PRIMARY assigned role (for now still stored in "role")
-  // Derived as first role from CSV string.
-  role: 'Parent', // keep system default; import role goes to interested_roles
-
-  // Raw interested roles exactly as provided in CSV
-  // e.g. "Manager, Assistant Coach, Team Parent"
+  role: 'Parent',
   interested_roles: rawInterestedRoles || null,
-
-  // ADDED: New columns for import
   volunteer_id: volunteerData['volunteer id'] || null,
   volunteer_type_id: volunteerData['volunteer type id'] || null,
-
   division_id: divisionId,
   season_id: season_id,
   team_id: teamId,
   notes: `Imported from volunteer signup. Original team: ${
     volunteerData['team name'] || 'Unallocated'
   }`,
-  training_completed: false, // Default to false for imports
-
-  // Defaults required by schema
+  training_completed: false,
   background_check_completed: volunteerData['verification status'] || 'pending',
   background_check_complete: false,
   is_approved: false,
   shifts_completed: 0,
   shifts_required: 0,
   can_pickup: false,
-  family_id: await getCachedFamilyId(
-    { 
-      email: volunteerData['volunteer email address'], 
-      phone: volunteerData['volunteer cellphone'] 
-    },
-    season_id  // PASS THE SEASON ID!
-  ),
+  family_id: finalFamilyId,  // <-- This is now either preserved or newly found
   player_id: null,
 };
 
@@ -680,6 +696,15 @@ async function updateExistingVolunteer(existingVolunteer, newVolunteerData) {
   console.log(`\n🔄 [UPDATE CHECK] for ${existingVolunteer.name}`);
   console.log(`   Existing family_id: ${existingVolunteer.family_id}`);
   console.log(`   New family_id: ${newVolunteerData.family_id}`);
+ // ==== CRITICAL FIX: Never clear an existing family_id ====
+  // If we have existing family_id and import doesn't provide a new one, keep existing
+  if (existingVolunteer.family_id && (!newVolunteerData.family_id || newVolunteerData.family_id === null)) {
+    console.log(`   🛡️  Preserving existing family_id: ${existingVolunteer.family_id}`);
+    // Remove family_id from newVolunteerData so it won't be updated
+    delete newVolunteerData.family_id;
+  }
+  // ==== END FIX ====
+
 
   // Check family_id FIRST - this is critical!
   if (

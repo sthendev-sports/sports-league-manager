@@ -224,38 +224,58 @@ const generatePDFReport = async () => {
       let currentY = startY;
       
       // Calculate column widths if not provided
-      let colWidths;
-      if (columnWidths) {
-        colWidths = columnWidths;
-      } else {
-        // Find the longest division name to set first column width
-        let maxDivisionLength = 0;
-        const allDivisionNames = [
-          ...data.map(row => row[0] || ''),
-          ...(showTotal && totalData ? [totalData[0] || ''] : [])
-        ];
-        
-        allDivisionNames.forEach(name => {
-          maxDivisionLength = Math.max(maxDivisionLength, name.length);
-        });
-        
-        // First column width based on content, minimum 60mm for long names
-        const firstColWidth = Math.min(80, Math.max(60, maxDivisionLength * 1.2));
-        
-        // Remaining width for other columns
-        const remainingWidth = pdfWidth - startX * 2 - firstColWidth;
-        const otherColCount = headers.length - 1;
-        const otherColWidth = Math.max(15, remainingWidth / otherColCount);
-        
-        colWidths = [firstColWidth, ...Array(otherColCount).fill(otherColWidth)];
-        
-        // Adjust if total width exceeds page
-        const totalWidth = colWidths.reduce((a, b) => a + b, 0);
-        if (totalWidth > pdfWidth - startX * 2) {
-          const scale = (pdfWidth - startX * 2) / totalWidth;
-          colWidths = colWidths.map(width => width * scale);
-        }
+let colWidths;
+if (columnWidths) {
+  colWidths = columnWidths;
+} else {
+  // Calculate optimal widths for each column based on content
+  colWidths = new Array(headers.length).fill(0);
+  
+  // Minimum widths based on headers (headers need more space)
+  headers.forEach((header, index) => {
+    const headerLength = header.length;
+    // Approximate width: 1.5mm per character for headers + padding
+    colWidths[index] = Math.max(15, headerLength * 1.5 + 6);
+  });
+  
+  // Check data rows for wider content
+  data.forEach(row => {
+    row.forEach((cell, index) => {
+      if (index < colWidths.length) {
+        const cellValue = cell !== undefined ? cell.toString() : '';
+        const cellLength = cellValue.length;
+        // Approximate width: 1.0mm per character for data + padding
+        const cellWidth = cellLength * 1.0 + 4;
+        colWidths[index] = Math.max(colWidths[index], cellWidth);
       }
+    });
+  });
+  
+  // Check total row if exists
+  if (showTotal && totalData) {
+    totalData.forEach((cell, index) => {
+      if (index < colWidths.length) {
+        const cellValue = cell !== undefined ? cell.toString() : '';
+        const cellLength = cellValue.length;
+        const cellWidth = cellLength * 1.0 + 4;
+        colWidths[index] = Math.max(colWidths[index], cellWidth);
+      }
+    });
+  }
+  
+  // Ensure minimum widths for all columns
+  colWidths = colWidths.map(width => Math.max(12, width));
+  
+  // Check if total width exceeds available space
+  const totalNeededWidth = colWidths.reduce((sum, width) => sum + width, 0);
+  const availableWidth = pdfWidth - startX * 2;
+  
+  if (totalNeededWidth > availableWidth) {
+    // Scale down proportionally but keep minimum 10mm
+    const scaleFactor = availableWidth / totalNeededWidth;
+    colWidths = colWidths.map(width => Math.max(10, width * scaleFactor));
+  }
+}
       
       // Add spacing before table
       currentY += 5;
@@ -460,48 +480,97 @@ const generatePDFReport = async () => {
     pdf.text(`Players Not Returning: ${stats.playersNotReturning}`, 25, yPosition);
     yPosition += 20;
     
-    // 2. Division Breakdown
-    if (stats.divisions.length > 0) {
-      pdf.setFontSize(14);
-      pdf.setTextColor(0, 0, 0);
-      pdf.text('Division Registration Breakdown', 20, yPosition);
-      yPosition += 10;
+// 2. Division Breakdown
+if (stats.divisions.length > 0) {
+  pdf.setFontSize(14);
+  pdf.setTextColor(0, 0, 0);
+  pdf.text('Division Registration Breakdown', 20, yPosition);
+  yPosition += 10;
+  
+  // Create headers based on whether comparison is selected
+  let headers = ['Division', 'Current', 'New', 'Returning', 'Travel', 'Withdrawn', 'Teams'];
+  
+  // Add comparison and change columns if a season is selected for comparison
+  if (selectedCompareSeasonId) {
+    headers = ['Division', 'Current', getComparisonColumnHeader(), 'Change', 'New', 'Returning', 'Travel', 'Withdrawn', 'Teams'];
+  }
+  
+  const data = stats.divisions
+    .slice()
+    .sort(sortDivisionObjects)
+    .map(division => {
+      // Create base row without comparison
+      let row = [
+        division.name,
+        division.current,
+        division.newPlayers,
+        division.returningPlayers,
+        division.travelPlayers || 0,
+        division.withdrawnPlayers || 0,
+        division.teams
+      ];
       
-      const headers = ['Division', 'Current', 'New', 'Returning', 'Travel', 'Withdrawn', 'Teams'];
-      const data = stats.divisions
-        .slice()
-        .sort(sortDivisionObjects)
-        .map(division => [
+      // Insert comparison data and change if comparison is selected
+      if (selectedCompareSeasonId) {
+        const previous = division.previous || 0;
+        const change = division.current - previous;
+        const changeDisplay = (change > 0 ? '+' : '') + change;
+        
+        row = [
           division.name,
           division.current,
+          previous,
+          changeDisplay,
           division.newPlayers,
           division.returningPlayers,
           division.travelPlayers || 0,
           division.withdrawnPlayers || 0,
           division.teams
-        ]);
+        ];
+      }
       
-      const totalData = [
-        'TOTAL',
-        divisionTotals.current,
-        divisionTotals.newPlayers,
-        divisionTotals.returningPlayers,
-        divisionTotals.travelPlayers,
-        divisionTotals.withdrawnPlayers,
-        divisionTotals.teams
-      ];
-      
-      // Custom column widths with very wide first column
-      const colWidths = [65, 20, 20, 25, 20, 25, 20]; // First column 65mm for full division names
-      
-      yPosition = drawTable(headers, data, yPosition, {
-        showTotal: true,
-        totalData: totalData,
-        columnWidths: colWidths
-      });
-      
-      yPosition += 10;
-    }
+      return row;
+    });
+  
+  // Calculate total change
+  const totalChange = divisionTotals.current - divisionTotals.previous;
+  const totalChangeDisplay = (totalChange > 0 ? '+' : '') + totalChange;
+  
+  // Create totals row
+  let totalData = [
+    'TOTAL',
+    divisionTotals.current,
+    divisionTotals.newPlayers,
+    divisionTotals.returningPlayers,
+    divisionTotals.travelPlayers,
+    divisionTotals.withdrawnPlayers,
+    divisionTotals.teams
+  ];
+  
+  // Add comparison total and change if selected
+  if (selectedCompareSeasonId) {
+    totalData = [
+      'TOTAL',
+      divisionTotals.current,
+      divisionTotals.previous,
+      totalChangeDisplay,
+      divisionTotals.newPlayers,
+      divisionTotals.returningPlayers,
+      divisionTotals.travelPlayers,
+      divisionTotals.withdrawnPlayers,
+      divisionTotals.teams
+    ];
+  }
+  
+  // Let drawTable auto-calculate column widths (remove fixed columnWidths)
+  yPosition = drawTable(headers, data, yPosition, {
+    showTotal: true,
+    totalData: totalData
+    // No columnWidths - let it auto-calculate based on content
+  });
+  
+  yPosition += 10;
+}
     
     // 3. Monthly Trends
     if (selectedCompareSeasonId && stats.monthlyTrends && stats.monthlyTrends.length > 0) {

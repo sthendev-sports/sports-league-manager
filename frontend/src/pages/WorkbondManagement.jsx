@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
+import api from '../services/api'; // Added import
 
 const API = import.meta.env.VITE_API_URL || ''; // empty => use same-origin /api (Vercel rewrite or Vite proxy)
 
@@ -124,8 +125,8 @@ export default function WorkbondManagement() {
       try {
         // Prefer ACTIVE season as the default everywhere
         const [activeRes, allRes] = await Promise.all([
-          axios.get(`${API}/api/seasons/active`).catch(() => ({ data: null })),
-          axios.get(`${API}/api/seasons`).catch(() => ({ data: [] }))
+          api.get('/seasons/active').catch(() => ({ data: null })), // Changed from axios.get to api.get
+          api.get('/seasons').catch(() => ({ data: [] })) // Changed from axios.get to api.get
         ]);
 
         const active = activeRes?.data || null;
@@ -146,13 +147,42 @@ export default function WorkbondManagement() {
     setLoading(true);
     setError('');
     try {
-      const [summaryRes, reqRes] = await Promise.all([
-        axios.get(`${API}/api/workbond/summary`, { params: { season_id: sid } }),
-        axios.get(`${API}/api/workbond/requirements`, { params: { season_id: sid } })
+      // First, we need to get all players to identify active families
+      // (families with at least one non-withdrawn player)
+      const [playersRes, summaryRes, reqRes] = await Promise.all([
+        api.get('/players', { params: { season_id: sid } }),
+        api.get('/workbond/summary', { params: { season_id: sid } }),
+        api.get('/workbond/requirements', { params: { season_id: sid } })
       ]);
 
+      const allPlayers = Array.isArray(playersRes.data) ? playersRes.data : [];
       const summary = Array.isArray(summaryRes.data) ? summaryRes.data : [];
       const reqs = Array.isArray(reqRes.data) ? reqRes.data : [];
+
+      // Get family IDs that have at least one active (non-withdrawn) player
+      const activePlayers = allPlayers.filter(p => 
+        String(p.status || '').toLowerCase() !== 'withdrawn'
+      );
+      
+      const activeFamilyIds = new Set(
+        activePlayers
+          .map(p => p.family_id)
+          .filter(Boolean)
+          .map(id => String(id))
+      );
+
+      // Filter summary to only include families with active players
+      const filteredSummary = summary.filter(f => {
+        // Check if family_id exists in activeFamilyIds
+        // Try multiple possible family ID fields
+        const familyId = String(f.family_id || '');
+        const familyUUID = String(f.id || f.family?.id || '');
+        
+        return activeFamilyIds.has(familyId) || 
+               activeFamilyIds.has(familyUUID) ||
+               (f.family && activeFamilyIds.has(String(f.family.id || ''))) ||
+               (f.family && activeFamilyIds.has(String(f.family.family_id || '')));
+      });
 
       // Merge requirements into families required_shifts based on the family's player division(s)
       const reqMap = new Map(
@@ -161,7 +191,7 @@ export default function WorkbondManagement() {
           .filter(([k]) => k !== undefined && k !== null)
       );
 
-      const mergedSummary = summary.map(f => {
+      const mergedSummary = filteredSummary.map(f => {
         const playerDivIds = Array.isArray(f.players)
           ? f.players
               .map(p => p.division_id ?? p.division?.id)
@@ -188,7 +218,7 @@ export default function WorkbondManagement() {
       });
       setRequirementsDraft(nextDraft);
 
-      const firstFamilyId = summary[0]?.family_id || '';
+      const firstFamilyId = mergedSummary[0]?.family_id || '';
       setShiftForm(prev => ({ ...prev, family_id: prev.family_id || firstFamilyId }));
     } catch (e) {
       console.error(e);
@@ -216,7 +246,7 @@ export default function WorkbondManagement() {
     if (!seasonId) return;
     setShiftLogLoading(true);
     try {
-      const logRes = await axios.get(`${API}/api/workbond/shifts`, {
+      const logRes = await api.get('/workbond/shifts', { // Changed from axios.get to api.get
         params: { season_id: seasonId }
       });
       setShiftLog(Array.isArray(logRes.data) ? logRes.data : []);
@@ -249,7 +279,7 @@ export default function WorkbondManagement() {
           shifts_required: toIntOrNull(requirementsDraft[r.division_id] ?? '')
         }));
 
-      await axios.post(`${API}/api/workbond/requirements`, payload);
+      await api.post('/workbond/requirements', payload); // Changed from axios.post to api.post
       await loadSeasonData(seasonId);
     } catch (e) {
       console.error(e);
@@ -268,7 +298,7 @@ export default function WorkbondManagement() {
     setSavingShift(true);
     setError('');
     try {
-      await axios.post(`${API}/api/workbond/shifts`, {
+      await api.post('/workbond/shifts', { // Changed from axios.post to api.post
         season_id: seasonId,
         family_id: shiftForm.family_id,
         date: shiftForm.date,
@@ -323,7 +353,7 @@ export default function WorkbondManagement() {
 
     setError('');
     try {
-      await axios.put(`${API}/api/workbond/shifts/${editingShiftId}`, {
+      await api.put(`/workbond/shifts/${editingShiftId}`, { // Changed from axios.put to api.put
         shift_date: editShiftDraft.shift_date,
         shift_type: editShiftDraft.shift_type,
         description: editShiftDraft.shift_type,
@@ -344,7 +374,7 @@ export default function WorkbondManagement() {
     if (!id) return;
     setError('');
     try {
-      await axios.delete(`${API}/api/workbond/shifts/${id}`);
+      await api.delete(`/workbond/shifts/${id}`); // Changed from axios.delete to api.delete
       await loadSeasonData(seasonId);
       await loadShifts();
     } catch (e) {
@@ -603,7 +633,7 @@ export default function WorkbondManagement() {
           </div>
 
           <p className="mt-2 text-sm text-gray-600">
-            Set required shifts per division. The Families tab “Required” will reflect these values.
+            Set required shifts per division. The Families tab "Required" will reflect these values.
           </p>
 
           <div className="mt-4 overflow-x-auto">

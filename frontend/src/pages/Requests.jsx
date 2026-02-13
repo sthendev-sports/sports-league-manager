@@ -108,37 +108,57 @@ const Requests = () => {
   };
 
   const loadData = async () => {
-    try {
-      setLoading(true);
+  try {
+    setLoading(true);
 
-      // Players + divisions depend on season
-      const seasonFilter = selectedSeason ? { season_id: selectedSeason } : {};
-      const [playersRes, divisionsRes, requestsRes] = await Promise.all([
-        playersAPI.getAll(seasonFilter).catch(() => ({ data: [] })),
-        divisionsAPI.getAll(seasonFilter).catch(() => ({ data: [] })),
-        requestsAPI.getAll(seasonFilter).catch(() => ({ data: [] })),
-      ]);
+    // Players + divisions depend on season
+    const seasonFilter = selectedSeason ? { season_id: selectedSeason } : {};
+    const [playersRes, divisionsRes, requestsRes] = await Promise.all([
+      playersAPI.getAll(seasonFilter).catch(() => ({ data: [] })),
+      divisionsAPI.getAll(seasonFilter).catch(() => ({ data: [] })),
+      requestsAPI.getAll(seasonFilter).catch(() => ({ data: [] })),
+    ]);
 
-      const p = Array.isArray(playersRes?.data) ? playersRes.data : [];
-      const d = Array.isArray(divisionsRes?.data) ? divisionsRes.data : [];
-      const r = Array.isArray(requestsRes?.data) ? requestsRes.data : [];
+    const p = Array.isArray(playersRes?.data) ? playersRes.data : [];
+    const d = Array.isArray(divisionsRes?.data) ? divisionsRes.data : [];
+    const r = Array.isArray(requestsRes?.data) ? requestsRes.data : [];
 
-      // Active players only (exclude withdrawn)
-      const activePlayers = p.filter((pl) => String(pl?.status || '').toLowerCase() !== 'withdrawn');
+    // Fetch parent/guardian data for each player
+    const playersWithParents = await Promise.all(
+      p.map(async (player) => {
+        try {
+          // Fetch guardians for this player
+          const guardiansRes = await playersAPI.getGuardians(player.id);
+          return {
+            ...player,
+            parents: Array.isArray(guardiansRes?.data) ? guardiansRes.data : []
+          };
+        } catch (error) {
+          console.error(`Error fetching guardians for player ${player.id}:`, error);
+          return {
+            ...player,
+            parents: []
+          };
+        }
+      })
+    );
 
-      setPlayers(activePlayers);
-      setDivisions(d);
-      setRequests(r);
-    } catch (e) {
-      console.error(e);
-      toast.error('Failed to load requests data');
-      setPlayers([]);
-      setDivisions([]);
-      setRequests([]);
-    } finally {
-      setLoading(false);
-    }
-  };
+    // Active players only (exclude withdrawn)
+    const activePlayers = playersWithParents.filter((pl) => String(pl?.status || '').toLowerCase() !== 'withdrawn');
+
+    setPlayers(activePlayers);
+    setDivisions(d);
+    setRequests(r);
+  } catch (e) {
+    console.error(e);
+    toast.error('Failed to load requests data');
+    setPlayers([]);
+    setDivisions([]);
+    setRequests([]);
+  } finally {
+    setLoading(false);
+  }
+};
 
   const loadTeammateRequests = async () => {
     try {
@@ -420,28 +440,115 @@ const Requests = () => {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Player Name</label>
-            <select
-              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm bg-white"
-              value={form.player_id}
-              onChange={(e) => setForm((p) => ({ ...p, player_id: e.target.value }))}
-            >
-              <option value="">Select a player…</option>
-              {players
-                .slice()
-                .sort((a, b) => {
-                  const an = `${a.last_name || ''}, ${a.first_name || ''}`.toLowerCase();
-                  const bn = `${b.last_name || ''}, ${b.first_name || ''}`.toLowerCase();
-                  return an.localeCompare(bn);
-                })
-                .map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {(p.last_name || '') + ', ' + (p.first_name || '')}
-                  </option>
-                ))}
-            </select>
+<div>
+  <label className="block text-sm font-medium text-gray-700 mb-1">Player Name</label>
+  <select
+    className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm bg-white"
+    value={form.player_id}
+    onChange={(e) => setForm((p) => ({ ...p, player_id: e.target.value }))}
+  >
+    <option value="">Select a player…</option>
+    {players
+      .slice()
+      .sort((a, b) => {
+        const an = `${a.last_name || ''}, ${a.first_name || ''}`.toLowerCase();
+        const bn = `${b.last_name || ''}, ${b.first_name || ''}`.toLowerCase();
+        return an.localeCompare(bn);
+      })
+      .map((p) => {
+        // Format parent info for display in the dropdown using family object
+        const parentInfo = [];
+        
+        // Add primary guardian if exists
+        if (p.family?.primary_contact_name) {
+          const primaryPhone = p.family.primary_contact_phone ? ` (${p.family.primary_contact_phone})` : '';
+          const primaryEmail = p.family.primary_contact_email ? ` - ${p.family.primary_contact_email}` : '';
+          parentInfo.push(`${p.family.primary_contact_name}${primaryPhone}${primaryEmail}`);
+        }
+        
+        // Add secondary guardian if exists
+        if (p.family?.parent2_first_name) {
+          const secondaryName = `${p.family.parent2_first_name} ${p.family.parent2_last_name || ''}`.trim();
+          const secondaryPhone = p.family.parent2_phone ? ` (${p.family.parent2_phone})` : '';
+          const secondaryEmail = p.family.parent2_email ? ` - ${p.family.parent2_email}` : '';
+          parentInfo.push(`${secondaryName}${secondaryPhone}${secondaryEmail}`);
+        }
+        
+        const parentDisplay = parentInfo.length > 0 ? ` - Parents: ${parentInfo.join('; ')}` : '';
+        
+        return (
+          <option key={p.id} value={p.id}>
+            {(p.last_name || '') + ', ' + (p.first_name || '')}{parentDisplay}
+          </option>
+        );
+      })}
+  </select>
+  
+  {/* Display detailed parent info when a player is selected - using family object like in Players.jsx */}
+  {selectedPlayer && selectedPlayer.family && (
+    <div className="mt-3 p-3 bg-blue-50 rounded-md border border-blue-200">
+      <div className="text-sm font-medium text-blue-800 mb-2">Parent/Guardian Information:</div>
+      
+      {/* Primary Guardian */}
+      {selectedPlayer.family.primary_contact_name && (
+        <div className="text-sm text-blue-700 mb-3 pb-2 border-b border-blue-100">
+          <div className="font-medium">{selectedPlayer.family.primary_contact_name}</div>
+          <div className="flex flex-col gap-1 mt-1">
+            {selectedPlayer.family.primary_contact_email && (
+              <div className="flex items-center gap-2">
+                <span className="text-blue-600">✉️</span>
+                <span>{selectedPlayer.family.primary_contact_email}</span>
+              </div>
+            )}
+            {selectedPlayer.family.primary_contact_phone && (
+              <div className="flex items-center gap-2">
+                <span className="text-blue-600">📞</span>
+                <span>{selectedPlayer.family.primary_contact_phone}</span>
+              </div>
+            )}
           </div>
+        </div>
+      )}
+      
+      {/* Secondary Guardian */}
+      {selectedPlayer.family.parent2_first_name && (
+        <div className="text-sm text-blue-700">
+          <div className="font-medium">
+            {selectedPlayer.family.parent2_first_name} {selectedPlayer.family.parent2_last_name || ''}
+          </div>
+          <div className="flex flex-col gap-1 mt-1">
+            {selectedPlayer.family.parent2_email && (
+              <div className="flex items-center gap-2">
+                <span className="text-blue-600">✉️</span>
+                <span>{selectedPlayer.family.parent2_email}</span>
+              </div>
+            )}
+            {selectedPlayer.family.parent2_phone && (
+              <div className="flex items-center gap-2">
+                <span className="text-blue-600">📞</span>
+                <span>{selectedPlayer.family.parent2_phone}</span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+      
+      {/* If no guardian info at all */}
+      {!selectedPlayer.family?.primary_contact_name && !selectedPlayer.family?.parent2_first_name && (
+        <div className="text-sm text-gray-500 italic">
+          No parent/guardian information available for this player.
+        </div>
+      )}
+    </div>
+  )}
+  
+  {/* Show message if no family object exists */}
+  {selectedPlayer && !selectedPlayer.family && (
+    <div className="mt-2 text-xs text-gray-500 italic">
+      No parent/guardian information available for this player.
+    </div>
+  )}
+</div>
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Parent Requests</label>

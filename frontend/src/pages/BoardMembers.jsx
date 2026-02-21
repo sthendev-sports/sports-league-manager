@@ -91,31 +91,37 @@ const loadAvailableTrainings = async () => {
 
 
   const handleSubmit = async (e) => {
-    if (e) e.preventDefault();
-    try {
-      const url = editingMember ? `/api/board-members/${editingMember.id}` : '/api/board-members';
-      const method = editingMember ? 'PUT' : 'POST';
+  if (e) e.preventDefault();
+  try {
+    const url = editingMember ? `/api/board-members/${editingMember.id}` : '/api/board-members';
+    const method = editingMember ? 'PUT' : 'POST';
 
-      const response = await fetch(url, {
-        method,
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(formData)
-      });
+    // Create a copy of formData and add the name field
+    const dataToSend = {
+      ...formData,
+      name: `${formData.first_name} ${formData.last_name}`.trim()
+    };
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`HTTP ${response.status}: ${errorText}`);
-      }
-      
-      await loadBoardMembers();
-      resetForm();
-    } catch (error) {
-      console.error('Error saving board member:', error);
-      setError('Failed to save board member: ' + error.message);
+    const response = await fetch(url, {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(dataToSend)
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`HTTP ${response.status}: ${errorText}`);
     }
-  };
+    
+    await loadBoardMembers();
+    resetForm();
+  } catch (error) {
+    console.error('Error saving board member:', error);
+    setError('Failed to save board member: ' + error.message);
+  }
+};
 
 // Update handleEdit function
 const handleEdit = async (member) => {

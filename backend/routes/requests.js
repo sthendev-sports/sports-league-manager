@@ -120,8 +120,13 @@ router.put('/:id', async (req, res) => {
       comments,
       current_division_id,
       new_division_id,
-	  requested_teammate_name
+      requested_teammate_name,
+      player_id,
+      season_id
     } = req.body || {};
+
+    console.log('Updating request with ID:', id);
+    console.log('Update payload:', req.body);
 
     const updates = {
       parent_request: parent_request ?? null,
@@ -131,18 +136,48 @@ router.put('/:id', async (req, res) => {
       comments: comments ?? null,
       current_division_id: current_division_id ?? null,
       new_division_id: new_division_id ?? null,
-	  requested_teammate_name: requested_teammate_name ?? null,
+      requested_teammate_name: requested_teammate_name ?? null,
+      player_id: player_id ?? null,
+      season_id: season_id ?? null,
       updated_at: new Date().toISOString()
     };
+
+    console.log('Final updates object:', updates);
 
     const { data, error } = await supabase
       .from('requests')
       .update(updates)
       .eq('id', id)
-      .select()
+      .select(`
+        *,
+        requesting_player:players!requests_player_id_fkey (
+          id,
+          first_name,
+          last_name,
+          birth_date,
+          division_id,
+          division:divisions (
+            id,
+            name
+          )
+        ),
+        current_division:divisions!requests_current_division_id_fkey (
+          id,
+          name
+        ),
+        new_division:divisions!requests_new_division_id_fkey (
+          id,
+          name
+        )
+      `)
       .single();
 
-    if (error) throw error;
+    if (error) {
+      console.error('Supabase error:', error);
+      throw error;
+    }
+    
+    console.log('Updated request with relationships:', data);
     res.json(data);
   } catch (error) {
     console.error('Error updating request:', error);

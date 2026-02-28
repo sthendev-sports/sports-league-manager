@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import toast from 'react-hot-toast';
-import { Plus, Pencil, Trash2, RefreshCw, Users, Save } from 'lucide-react';
+import { Plus, Pencil, Trash2, RefreshCw, Users } from 'lucide-react';
 import { playersAPI, seasonsAPI, divisionsAPI, requestsAPI } from '../services/api';
 import Modal from '../components/Modal'; // ADD THIS IMPORT
 
@@ -40,11 +40,6 @@ const Requests = () => {
   const [saving, setSaving] = useState(false);
 
   const [editingId, setEditingId] = useState(null);
-  
-  // ADD THESE TWO NEW STATE VARIABLES:
-  const [showEditModal, setShowEditModal] = useState(false);
-  const [editingRequest, setEditingRequest] = useState(null);
-  
   const [form, setForm] = useState({
     player_id: '',
     parent_request: '',
@@ -59,8 +54,6 @@ const Requests = () => {
 
   const [showTeammateModal, setShowTeammateModal] = useState(false);
   const [teammateRequests, setTeammateRequests] = useState([]);
-
-
 
   // Derived: player info for display
   const selectedPlayer = useMemo(() => {
@@ -115,41 +108,57 @@ const Requests = () => {
   };
 
   const loadData = async () => {
-    try {
-      setLoading(true);
+  try {
+    setLoading(true);
 
-      // Players + divisions depend on season
-      const seasonFilter = selectedSeason ? { season_id: selectedSeason } : {};
-      const [playersRes, divisionsRes, requestsRes] = await Promise.all([
-        playersAPI.getAll(seasonFilter).catch(() => ({ data: [] })),
-        divisionsAPI.getAll(seasonFilter).catch(() => ({ data: [] })),
-        requestsAPI.getAll(seasonFilter).catch(() => ({ data: [] })),
-      ]);
+    // Players + divisions depend on season
+    const seasonFilter = selectedSeason ? { season_id: selectedSeason } : {};
+    const [playersRes, divisionsRes, requestsRes] = await Promise.all([
+      playersAPI.getAll(seasonFilter).catch(() => ({ data: [] })),
+      divisionsAPI.getAll(seasonFilter).catch(() => ({ data: [] })),
+      requestsAPI.getAll(seasonFilter).catch(() => ({ data: [] })),
+    ]);
 
-      const p = Array.isArray(playersRes?.data) ? playersRes.data : [];
-      const d = Array.isArray(divisionsRes?.data) ? divisionsRes.data : [];
-      const r = Array.isArray(requestsRes?.data) ? requestsRes.data : [];
+    const p = Array.isArray(playersRes?.data) ? playersRes.data : [];
+    const d = Array.isArray(divisionsRes?.data) ? divisionsRes.data : [];
+    const r = Array.isArray(requestsRes?.data) ? requestsRes.data : [];
 
-      // Log the requests to see what data structure we're getting
-      console.log('Requests data from API:', r);
+    // Fetch parent/guardian data for each player
+    const playersWithParents = await Promise.all(
+      p.map(async (player) => {
+        try {
+          // Fetch guardians for this player
+          const guardiansRes = await playersAPI.getGuardians(player.id);
+          return {
+            ...player,
+            parents: Array.isArray(guardiansRes?.data) ? guardiansRes.data : []
+          };
+        } catch (error) {
+          console.error(`Error fetching guardians for player ${player.id}:`, error);
+          return {
+            ...player,
+            parents: []
+          };
+        }
+      })
+    );
 
-      // Active players only (exclude withdrawn) - no need to fetch guardians
-      const activePlayers = p.filter((pl) => String(pl?.status || '').toLowerCase() !== 'withdrawn');
+    // Active players only (exclude withdrawn)
+    const activePlayers = playersWithParents.filter((pl) => String(pl?.status || '').toLowerCase() !== 'withdrawn');
 
-      setPlayers(activePlayers);
-      setDivisions(d);
-      setRequests(r);
-      
-    } catch (e) {
-      console.error(e);
-      toast.error('Failed to load requests data');
-      setPlayers([]);
-      setDivisions([]);
-      setRequests([]);
-    } finally {
-      setLoading(false);
-    }
-  };
+    setPlayers(activePlayers);
+    setDivisions(d);
+    setRequests(r);
+  } catch (e) {
+    console.error(e);
+    toast.error('Failed to load requests data');
+    setPlayers([]);
+    setDivisions([]);
+    setRequests([]);
+  } finally {
+    setLoading(false);
+  }
+};
 
   const loadTeammateRequests = async () => {
     try {
@@ -165,9 +174,8 @@ const Requests = () => {
     }
   };
 
-   const resetForm = () => {
+  const resetForm = () => {
     setEditingId(null);
-    setEditingRequest(null);
     setForm({
       player_id: '',
       parent_request: '',
@@ -179,12 +187,10 @@ const Requests = () => {
       new_division_id: '',
       requested_teammate_name: '',
     });
-    setShowEditModal(false);
   };
 
   const startEdit = (row) => {
     setEditingId(row.id);
-    setEditingRequest(row);
     setForm({
       player_id: row.player_id || row.player?.id || '',
       parent_request: row.parent_request || '',
@@ -196,11 +202,11 @@ const Requests = () => {
       new_division_id: row.new_division_id || row.new_division?.id || '',
       requested_teammate_name: row.requested_teammate_name || '',
     });
-    setShowEditModal(true);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-   const onSave = async (e) => {
-    if (e) e.preventDefault(); // Handle both form submit and button click
+  const onSave = async (e) => {
+    e.preventDefault();
     if (!selectedSeason) {
       toast.error('Please select a season');
       return;
@@ -223,39 +229,37 @@ const Requests = () => {
       requested_teammate_name: form.type === 'Teammate Request' ? form.requested_teammate_name || null : null,
     };
 
-    console.log('Saving request with payload:', payload);
-    console.log('Editing ID:', editingId);
-
     try {
       setSaving(true);
-      let response;
       if (editingId) {
-        console.log('Updating existing request with ID:', editingId);
-        response = await requestsAPI.update(editingId, payload);
-        console.log('Update response data:', response.data);
+        await requestsAPI.update(editingId, payload);
         toast.success('Request updated');
       } else {
-        console.log('Creating new request');
-        response = await requestsAPI.create(payload);
-        console.log('Create response data:', response.data);
+        await requestsAPI.create(payload);
         toast.success('Request added');
       }
-      
-      // Close the modal first
-      setShowEditModal(false);
-      
-      // Reset the form
       resetForm();
-      
-      // Reload data
       await loadData();
-      
     } catch (err) {
-      console.error('Error in onSave:', err);
-      console.error('Error response:', err?.response);
+      console.error(err);
       toast.error(err?.response?.data?.error || 'Failed to save request');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const onDelete = async (row) => {
+    if (!row?.id) return;
+    const ok = window.confirm('Delete this request?');
+    if (!ok) return;
+
+    try {
+      await requestsAPI.delete(row.id);
+      toast.success('Request deleted');
+      await loadData();
+    } catch (err) {
+      console.error(err);
+      toast.error(err?.response?.data?.error || 'Failed to delete request');
     }
   };
 
@@ -785,7 +789,6 @@ const getRequestCounts = useMemo(() => {
           <table className="min-w-full text-sm">
             <thead className="bg-gray-50">
               <tr className="text-left">
-                <th className="px-3 py-2 font-medium text-gray-700">#</th>
                 <th className="px-3 py-2 font-medium text-gray-700">Player</th>
                 <th className="px-3 py-2 font-medium text-gray-700">Parent Requests</th>
                 <th className="px-3 py-2 font-medium text-gray-700">Birthday</th>
@@ -803,12 +806,12 @@ const getRequestCounts = useMemo(() => {
             <tbody>
               {(requests || []).length === 0 ? (
                 <tr>
-                  <td colSpan={13} className="px-3 py-6 text-center text-gray-500">
+                  <td colSpan={12} className="px-3 py-6 text-center text-gray-500">
                     {loading ? 'Loading…' : 'No requests yet.'}
                   </td>
                 </tr>
               ) : (
-                requests.map((r, index) => {
+                requests.map((r) => {
                   const player = r.requesting_player || r.player || null;
                   const name = player
                     ? `${player.last_name || ''}, ${player.first_name || ''}`.replace(/^,\s*/, '').trim()
@@ -818,25 +821,14 @@ const getRequestCounts = useMemo(() => {
                   const curName = r.current_division?.name || divisionsById.get(r.current_division_id)?.name || '';
                   const newName = r.new_division?.name || divisionsById.get(r.new_division_id)?.name || '';
                   return (
-                    <tr key={r.id} className="border-t hover:bg-gray-50">
-                      <td className="px-3 py-2 whitespace-nowrap font-medium text-gray-500">
-                        {index + 1}
-                      </td>
+                    <tr key={r.id} className="border-t">
                       <td className="px-3 py-2 whitespace-nowrap">{name}</td>
                       <td className="px-3 py-2">{r.parent_request || ''}</td>
                       <td className="px-3 py-2 whitespace-nowrap">
                         {bday ? new Date(bday).toLocaleDateString() : ''}
                       </td>
                       <td className="px-3 py-2 whitespace-nowrap">{ageVal}</td>
-                      <td className="px-3 py-2 whitespace-nowrap">
-                        <span className={`px-2 py-1 rounded-full text-xs ${
-                          r.status === 'Approved' ? 'bg-green-100 text-green-800' :
-                          r.status === 'Denied' ? 'bg-red-100 text-red-800' :
-                          'bg-yellow-100 text-yellow-800'
-                        }`}>
-                          {r.status || 'Pending'}
-                        </span>
-                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap">{r.status || 'Pending'}</td>
                       <td className="px-3 py-2 whitespace-nowrap">{r.type || ''}</td>
                       <td className="px-3 py-2 whitespace-nowrap">{r.program || ''}</td>
                       <td className="px-3 py-2">{r.comments || ''}</td>
@@ -871,214 +863,6 @@ const getRequestCounts = useMemo(() => {
           </table>
         </div>
       </div>
-	  
-	    {/* Edit Request Modal */}
-      <Modal
-        isOpen={showEditModal}
-        onClose={resetForm}
-        title="Edit Request"
-        footer={
-          <div className="flex justify-end gap-3">
-            <button
-              onClick={resetForm}
-              className="px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={onSave}
-              disabled={saving}
-              className="inline-flex items-center px-4 py-2 rounded-md bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-60"
-            >
-              <Save className="h-4 w-4 mr-2" />
-              {saving ? 'Saving...' : 'Save Changes'}
-            </button>
-          </div>
-        }
-      >
-        <div className="space-y-4">
-          {/* Player Selection (Editable) */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Player Name *</label>
-            <select
-              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm bg-white"
-              value={form.player_id}
-              onChange={(e) => setForm((p) => ({ ...p, player_id: e.target.value }))}
-            >
-              <option value="">Select a player…</option>
-              {players
-                .slice()
-                .sort((a, b) => {
-                  const an = `${a.last_name || ''}, ${a.first_name || ''}`.toLowerCase();
-                  const bn = `${b.last_name || ''}, ${b.first_name || ''}`.toLowerCase();
-                  return an.localeCompare(bn);
-                })
-                .map((p) => {
-                  // Format parent info for display in the dropdown
-                  const parentInfo = [];
-                  
-                  // Add primary guardian if exists
-                  if (p.family?.primary_contact_name) {
-                    const primaryPhone = p.family.primary_contact_phone ? ` (${p.family.primary_contact_phone})` : '';
-                    const primaryEmail = p.family.primary_contact_email ? ` - ${p.family.primary_contact_email}` : '';
-                    parentInfo.push(`${p.family.primary_contact_name}${primaryPhone}${primaryEmail}`);
-                  }
-                  
-                  // Add secondary guardian if exists
-                  if (p.family?.parent2_first_name) {
-                    const secondaryName = `${p.family.parent2_first_name} ${p.family.parent2_last_name || ''}`.trim();
-                    const secondaryPhone = p.family.parent2_phone ? ` (${p.family.parent2_phone})` : '';
-                    const secondaryEmail = p.family.parent2_email ? ` - ${p.family.parent2_email}` : '';
-                    parentInfo.push(`${secondaryName}${secondaryPhone}${secondaryEmail}`);
-                  }
-                  
-                  const parentDisplay = parentInfo.length > 0 ? ` - Parents: ${parentInfo.join('; ')}` : '';
-                  
-                  return (
-                    <option key={p.id} value={p.id}>
-                      {(p.last_name || '') + ', ' + (p.first_name || '')}{parentDisplay}
-                    </option>
-                  );
-                })}
-            </select>
-          </div>
-
-          {/* Player Info Card - Shows when player is selected */}
-          {selectedPlayer && (
-            <div className="bg-blue-50 p-3 rounded-md border border-blue-200">
-              <div className="text-sm font-medium text-blue-800 mb-2">Player Details</div>
-              <div className="grid grid-cols-2 gap-2 text-sm">
-                <div>
-                  <span className="text-blue-600">Birthday:</span>
-                  <span className="text-blue-800 ml-2">
-                    {selectedPlayer.birth_date ? new Date(selectedPlayer.birth_date).toLocaleDateString() : 'N/A'}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-blue-600">Age:</span>
-                  <span className="text-blue-800 ml-2">
-                    {selectedPlayer.birth_date ? calcAge(selectedPlayer.birth_date) : 'N/A'}
-                  </span>
-                </div>
-                <div className="col-span-2">
-                  <span className="text-blue-600">Current Division:</span>
-                  <span className="text-blue-800 ml-2">
-                    {selectedPlayer.division?.name || 'Not assigned'}
-                  </span>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Form Fields */}
-          <div className="grid grid-cols-1 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Parent Requests</label>
-              <input
-                className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-                value={form.parent_request}
-                onChange={(e) => setForm((p) => ({ ...p, parent_request: e.target.value }))}
-                placeholder="e.g., Move up to Minors"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
-              <select
-                className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm bg-white"
-                value={form.status}
-                onChange={(e) => setForm((p) => ({ ...p, status: e.target.value }))}
-              >
-                <option value="">Pending</option>
-                <option value="Approved">Approved</option>
-                <option value="Denied">Denied</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
-              <select
-                className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm bg-white"
-                value={form.type}
-                onChange={(e) => setForm((p) => ({ ...p, type: e.target.value }))}
-              >
-                <option value="">Select…</option>
-                <option value="Move Up">Move Up</option>
-                <option value="Move Down">Move Down</option>
-                <option value="Teammate Request">Teammate Request</option>
-                <option value="Volunteer Request">Volunteer Request</option>
-                <option value="Admin">Admin</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Teammate Name</label>
-              <input
-                className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-                value={form.requested_teammate_name || ''}
-                onChange={(e) => setForm((p) => ({ ...p, requested_teammate_name: e.target.value }))}
-                placeholder="Enter teammate's name"
-                disabled={form.type !== 'Teammate Request'}
-              />
-              <p className="text-xs text-gray-500 mt-1">
-                Only enabled for "Teammate Request" type
-              </p>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Programs</label>
-              <select
-                className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm bg-white"
-                value={form.program}
-                onChange={(e) => setForm((p) => ({ ...p, program: e.target.value }))}
-              >
-                <option value="">Select…</option>
-                <option value="Baseball">Baseball</option>
-                <option value="Softball">Softball</option>
-                <option value="Admin">Admin</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Comments</label>
-              <input
-                className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-                value={form.comments}
-                onChange={(e) => setForm((p) => ({ ...p, comments: e.target.value }))}
-                placeholder="Any notes…"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Current Division</label>
-              <input
-                className="w-full border border-gray-200 rounded-md px-3 py-2 text-sm bg-gray-50"
-                value={currentDivisionName}
-                readOnly
-              />
-              <p className="text-xs text-gray-500 mt-1">
-                Automatically updates when you change the player
-              </p>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">New Division</label>
-              <select
-                className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm bg-white"
-                value={form.new_division_id}
-                onChange={(e) => setForm((p) => ({ ...p, new_division_id: e.target.value }))}
-              >
-                <option value="">Select…</option>
-                {orderedDivisionRows.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {d.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-        </div>
-      </Modal>
 
       {/* Totals table */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">

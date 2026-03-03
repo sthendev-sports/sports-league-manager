@@ -72,6 +72,35 @@ export default function MailingList() {
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  
+  const [boardMembers, setBoardMembers] = useState([]);
+  
+  // Load board members
+const loadBoardMembers = async () => {
+  try {
+    const token = localStorage.getItem('slm_token');
+    const response = await fetch('/api/board-members', {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    if (response.ok) {
+      const data = await response.json();
+      // Handle both array and {data: []} response formats
+      const boardMembersData = Array.isArray(data) ? data : (data.data || []);
+      // Filter to active board members with family_ids
+      const activeBoardMembers = boardMembersData.filter(bm => 
+        bm.is_active === true && bm.family_id
+      );
+      setBoardMembers(activeBoardMembers);
+      console.log('Loaded board members:', activeBoardMembers.length);
+    }
+  } catch (error) {
+    console.error('Error loading board members:', error);
+  }
+};
 
   // -------------------- LOAD SEASONS (default active) --------------------
   useEffect(() => {
@@ -186,7 +215,7 @@ export default function MailingList() {
             family_ids: activeFamilyIds
           })
         ]);
-        
+        await loadBoardMembers();
         if (!mounted) return;
         
         // 4. Process workbond data
@@ -531,11 +560,24 @@ export default function MailingList() {
 
       // UPDATED: Get workbond status from enhanced family object
       const checkReceived = !!fam.work_bond_check_received;
-      const isExempt = fam.is_exempt || fam.work_bond_check_status?.includes('Exempt');
-      
-      // Apply workbond filter
-      if (selectedWorkbondCheck === 'Received' && !checkReceived && !isExempt) continue;
-      if (selectedWorkbondCheck === 'Not Received' && (checkReceived || isExempt)) continue;
+const workbondNotes = fam.work_bond_check_status || '';
+
+// Check if this family has a board member (direct from boardMembers table)
+const hasBoardMember = boardMembers.some(bm => 
+  String(bm.family_id).trim() === String(fam.id || fam.family_id || '').trim()
+);
+
+// Check if they're exempt (either board member OR notes contain "Exempt")
+const isExempt = hasBoardMember || workbondNotes.toLowerCase().includes('exempt');
+
+// Apply workbond filter
+if (selectedWorkbondCheck === 'Received') {
+  // Show only if received AND not exempt
+  if (!checkReceived || isExempt) continue;
+} else if (selectedWorkbondCheck === 'Not Received') {
+  // Show only if not received AND not exempt
+  if (checkReceived || isExempt) continue;
+}
 
       const guardians = [
         {
@@ -598,7 +640,8 @@ export default function MailingList() {
     selectedVolunteerRole,
     selectedWorkbondCheck,
     familyMatchesSelectedDivision,
-    getFamilyDivisionText
+    getFamilyDivisionText,
+	boardMembers
   ]);
 
   // -------------------- TAB 2: WORKBOND INCOMPLETE --------------------

@@ -10,6 +10,7 @@ const Players = () => {
   const [players, setPlayers] = useState([]);
   const [seasons, setSeasons] = useState([]);
   const [teams, setTeams] = useState([]);
+  const [boardMembers, setBoardMembers] = useState([]); // ADDED: Board members state
 
   // Team edit (only team assignment)
   const [showTeamEditModal, setShowTeamEditModal] = useState(false);
@@ -91,6 +92,16 @@ const [loadingUnlinkedVolunteers, setLoadingUnlinkedVolunteers] = useState(false
   // Prevent race conditions when season changes rapidly
   const playersLoadSeq = useRef(0);
 
+  // ADDED: Helper function to check if a family has any board members
+  const checkIfBoardMemberFamily = (player) => {
+    if (!player?.family_id || !boardMembers || boardMembers.length === 0) {
+      return false;
+    }
+    
+    // Check if this player's family_id matches any board member's family_id
+    return boardMembers.some(bm => bm.family_id === player.family_id);
+  };
+
   const playerStats = useMemo(() => {
   const total = players.length;
   let paid = 0;
@@ -117,27 +128,34 @@ const [loadingUnlinkedVolunteers, setLoadingUnlinkedVolunteers] = useState(false
       received: p.season_workbond?.received
     });
     
-    // Count workbond check ONCE per family
-    if (p.season_workbond?.received && p.family_id) {
-      if (!countedFamilies.has(p.family_id)) {
-        workbondCheckFamilies += 1;
-        countedFamilies.add(p.family_id);
-        console.log(`✅ Family ${p.family_id} workbond received (${p.first_name} ${p.last_name})`);
-      } else {
-        console.log(`↩️ Family ${p.family_id} already counted (${p.first_name} ${p.last_name})`);
+    // UPDATED: Check if this family has any board members
+    const isBoardMemberFamily = checkIfBoardMemberFamily(p);
+    
+    // Only count workbond if family is NOT a board member family
+    if (!isBoardMemberFamily) {
+      // Count workbond check ONCE per family
+      if (p.season_workbond?.received && p.family_id) {
+        if (!countedFamilies.has(p.family_id)) {
+          workbondCheckFamilies += 1;
+          countedFamilies.add(p.family_id);
+          console.log(`✅ Family ${p.family_id} workbond received (${p.first_name} ${p.last_name})`);
+        } else {
+          console.log(`↩️ Family ${p.family_id} already counted (${p.first_name} ${p.last_name})`);
+        }
+      } else if (p.family_id) {
+        console.log(`❌ Family ${p.family_id} workbond NOT received (${p.first_name} ${p.last_name})`);
       }
-    } else if (p.family_id) {
-      console.log(`❌ Family ${p.family_id} workbond NOT received (${p.first_name} ${p.last_name})`);
+    } else {
+      console.log(`🚫 Family ${p.family_id} is board member family - exempt from workbond count (${p.first_name} ${p.last_name})`);
     }
     
     if (p.status === 'active') activePlayers += 1;
     if (p.status === 'withdrawn') withdrawnPlayers += 1;
   }
 
-  // Log summary
   console.log('=== WORKBOND STATS DEBUG ===');
   console.log('Total players:', total);
-  console.log('Unique families with workbond:', workbondCheckFamilies);
+  console.log('Unique families with workbond (excluding board families):', workbondCheckFamilies);
   console.log('Workbond details:', workbondDetails);
   console.log('Counted families:', Array.from(countedFamilies));
   console.log('===========================');
@@ -150,10 +168,11 @@ const [loadingUnlinkedVolunteers, setLoadingUnlinkedVolunteers] = useState(false
     activePlayers, 
     withdrawnPlayers 
   };
-}, [players]);
+}, [players, boardMembers]); // UPDATED: Added boardMembers to dependency array
 
   useEffect(() => {
     loadSeasons();
+    loadBoardMembers(); // ADDED: Load board members when component mounts
   }, []);
 
   // Debounce global search to keep filtering responsive on large datasets
@@ -171,7 +190,60 @@ const [loadingUnlinkedVolunteers, setLoadingUnlinkedVolunteers] = useState(false
     // Wait until we have initialized selectedSeason from active season
     if (selectedSeason === null) return;
     loadPlayers();
+    loadBoardMembers(); // ADDED: Reload board members when season changes
   }, [selectedSeason]);
+  
+  // ADDED: Function to load board members
+const loadBoardMembers = async () => {
+  try {
+    console.log('Loading board members...');
+    const token = localStorage.getItem('slm_token');
+    const response = await fetch('/api/board-members', {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    console.log('Board members response status:', response.status);
+    
+    if (response.ok) {
+      const responseData = await response.json();
+      console.log('Board members raw response:', responseData);
+      
+      // Handle different possible response formats
+      let boardMembersData = [];
+      
+      if (Array.isArray(responseData)) {
+        // Response is directly an array
+        boardMembersData = responseData;
+        console.log('Board members data is array with length:', boardMembersData.length);
+      } else if (responseData.data && Array.isArray(responseData.data)) {
+        // Response has a data property that is an array (common API pattern)
+        boardMembersData = responseData.data;
+        console.log('Board members data.data is array with length:', boardMembersData.length);
+      } else {
+        console.log('Unexpected board members response format:', responseData);
+      }
+      
+      // Filter to only active board members with family_ids
+      const activeBoardMembers = boardMembersData.filter(bm => 
+        bm.is_active === true && bm.family_id
+      );
+      
+      console.log('Active board members with family_ids:', activeBoardMembers.length);
+      console.log('Board member family IDs:', activeBoardMembers.map(bm => bm.family_id));
+      
+      setBoardMembers(activeBoardMembers);
+    } else {
+      console.error('Failed to load board members, status:', response.status);
+      const errorText = await response.text();
+      console.error('Error response:', errorText);
+    }
+  } catch (error) {
+    console.error('Error loading board members:', error);
+  }
+};
   
   const loadUnlinkedVolunteers = async () => {
   try {
@@ -265,13 +337,48 @@ const [loadingUnlinkedVolunteers, setLoadingUnlinkedVolunteers] = useState(false
     // Ignore stale responses
     if (seqId !== playersLoadSeq.current) return;
     
-    // Remove or comment out the enhancePlayersWithSeasonWorkbond call
-    // const playersWithWorkbond = await enhancePlayersWithSeasonWorkbond(playersData, selectedSeason);
-    
     // Just use the data directly from the API
     const playersWithVolunteers = await enhancePlayersWithVolunteerData(playersData);
     setPlayers(playersWithVolunteers);
-    
+        // ========== ADD THIS DEBUG CODE HERE ==========
+    // This will run after players are set
+    setTimeout(() => {
+      if (boardMembers.length > 0) {
+        console.log('=== DEBUG: Checking all board member matches ===');
+        
+        // Create a map of board member family_ids for quick lookup
+        const boardFamilyIds = new Set(
+          boardMembers
+            .filter(bm => bm.is_active) // Only active board members
+            .map(bm => String(bm.family_id || '').trim())
+        );
+        
+        console.log('Active board member family IDs:', Array.from(boardFamilyIds));
+        
+        // Check each player
+        playersWithVolunteers.forEach(player => {
+          const playerFamilyId = String(player.family_id || '').trim();
+          const isMatch = boardFamilyIds.has(playerFamilyId);
+          
+          // Check for Humphrey family specifically
+          if (player.last_name === 'Humphrey') {
+            console.log(`Player ${player.first_name} ${player.last_name}:`, {
+              playerFamilyId,
+              isMatch,
+              boardFamilyIds: Array.from(boardFamilyIds),
+              boardMembersForThisFamily: boardMembers.filter(bm => 
+                String(bm.family_id || '').trim() === playerFamilyId
+              ).map(bm => ({
+                name: bm.name,
+                is_active: bm.is_active,
+                family_id: bm.family_id
+              }))
+            });
+          }
+        });
+      }
+    }, 500); // Small delay to ensure boardMembers are loaded
+    // ========== END OF DEBUG CODE ==========
   } catch (error) {
     console.error('Error loading players:', error);
     if (seqId !== playersLoadSeq.current) return;
@@ -1015,7 +1122,7 @@ const enhancePlayersWithVolunteerData = async (playersData) => {
     });
   }, [players]);
 
-  // UPDATED: Memoized filtering to use season_workbond
+  // UPDATED: Memoized filtering to use season_workbond and board member exemption
   const filteredPlayers = useMemo(() => {
     const nameTerm = String(debouncedSearchTerm || '').trim().toLowerCase();
     const guardianTerm = String(columnFilters.guardianName || '').trim().toLowerCase();
@@ -1058,11 +1165,26 @@ const enhancePlayersWithVolunteerData = async (playersData) => {
         (columnFilters.registrationPaid === 'paid' && player.payment_received) ||
         (columnFilters.registrationPaid === 'pending' && !player.payment_received);
 
-      // Workbond Check - CHANGED to use season_workbond
-      const matchesWorkbondCheck =
-        !columnFilters.workbondCheck ||
-        (columnFilters.workbondCheck === 'received' && player.season_workbond?.received) ||
-        (columnFilters.workbondCheck === 'not_received' && !player.season_workbond?.received);
+      // UPDATED: Workbond Check - Handle board member exemption
+      const matchesWorkbondCheck = (() => {
+        if (!columnFilters.workbondCheck) return true;
+        
+        // Check if this family has any board members
+        const hasBoardMember = boardMembers.some(bm => bm.family_id === player.family_id);
+        
+        // If board member family, they should NOT appear in "received" or "not_received" filters
+        if (hasBoardMember) {
+          return false; // Board families don't count for workbond at all
+        }
+        
+        if (columnFilters.workbondCheck === 'received') {
+          return player.season_workbond?.received === true;
+        }
+        if (columnFilters.workbondCheck === 'not_received') {
+          return !player.season_workbond?.received;
+        }
+        return true;
+      })();
 
       // Medical Conditions
       const medical = String(player.medical_conditions || '').trim().toLowerCase();
@@ -1084,7 +1206,7 @@ const enhancePlayersWithVolunteerData = async (playersData) => {
         matchesMedicalConditions
       );
     });
-  }, [players, searchIndex, debouncedSearchTerm, columnFilters]);
+  }, [players, searchIndex, debouncedSearchTerm, columnFilters, boardMembers]); // UPDATED: Added boardMembers dependency
 
   const displayedPlayers = useMemo(() => {
     const start = (page - 1) * PAGE_SIZE;
@@ -1426,7 +1548,7 @@ const enhancePlayersWithVolunteerData = async (playersData) => {
         {FamilyLinkerFormContent}
       </Modal>
 
-      {/* Stats Summary - UPDATED to use season_workbond */}
+      {/* Stats Summary - UPDATED to use board member exemption */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-8">
         <div className="bg-white overflow-hidden shadow rounded-lg">
           <div className="px-4 py-5 sm:p-6">
@@ -1457,7 +1579,7 @@ const enhancePlayersWithVolunteerData = async (playersData) => {
               {playerStats.workbondCheck}
             </dd>
             <p className="text-xs text-gray-500 mt-1">
-              For {selectedSeason ? 'selected season' : 'current season'}
+              For {selectedSeason ? 'selected season' : 'current season'} (excludes board families)
             </p>
           </div>
         </div>
@@ -1617,7 +1739,7 @@ const enhancePlayersWithVolunteerData = async (playersData) => {
                 </select>
               </div>
 
-              {/* Workbond Check Filter - UPDATED to use season_workbond */}
+              {/* Workbond Check Filter - UPDATED to handle board member exemption */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Workbond Check</label>
                 <select
@@ -1838,34 +1960,60 @@ const enhancePlayersWithVolunteerData = async (playersData) => {
                     )}
                   </td>
 
-                  {/* UPDATED: Workbond Check Status Column - Now using season_workbond */}
+                  {/* UPDATED: Workbond Check Status Column - Now with board member exemption */}
                   <td className="px-4 py-4">
                     <div className="flex items-center justify-between gap-2">
                       <div>
-                        {player.season_workbond?.notes && player.season_workbond.notes.trim() !== '' ? (
-                          <div>
-                            {player.season_workbond.notes.includes('Exempt') ? (
-                              <span className="inline-flex items-center px-2 py-1 text-xs bg-purple-100 text-purple-800 rounded-full mb-1">
-                                Exempt
-                              </span>
-                            ) : player.season_workbond.received ? (
-                              <span className="inline-flex items-center px-2 py-1 text-xs bg-green-100 text-green-800 rounded-full mb-1">
-                                Received
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center px-2 py-1 text-xs bg-yellow-100 text-yellow-800 rounded-full mb-1">
-                                Not Received
-                              </span>
-                            )}
-                            <div className="text-xs text-gray-500 whitespace-pre-line">
-                              {player.season_workbond.notes}
+                        {(() => {
+                          // Check if this family has any board members
+                          const hasBoardMember = boardMembers.some(bm => bm.family_id === player.family_id);
+                          
+                          // If this is a board member family, show EXEMPT regardless of workbond status
+                          if (hasBoardMember) {
+                            return (
+                              <div>
+                                <span className="inline-flex items-center px-2 py-1 text-xs bg-purple-100 text-purple-800 rounded-full mb-1">
+                                  Board Member - Exempt
+                                </span>
+                                {player.season_workbond?.notes && player.season_workbond.notes.trim() !== '' && (
+                                  <div className="text-xs text-gray-500 whitespace-pre-line mt-1">
+                                    {player.season_workbond.notes}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          }
+                          
+                          // Regular workbond display for non-board families
+                          return (
+                            <div>
+                              {player.season_workbond?.notes && player.season_workbond.notes.trim() !== '' ? (
+                                <div>
+                                  {player.season_workbond.notes.includes('Exempt') ? (
+                                    <span className="inline-flex items-center px-2 py-1 text-xs bg-purple-100 text-purple-800 rounded-full mb-1">
+                                      Exempt
+                                    </span>
+                                  ) : player.season_workbond.received ? (
+                                    <span className="inline-flex items-center px-2 py-1 text-xs bg-green-100 text-green-800 rounded-full mb-1">
+                                      Received
+                                    </span>
+                                  ) : (
+                                    <span className="inline-flex items-center px-2 py-1 text-xs bg-yellow-100 text-yellow-800 rounded-full mb-1">
+                                      Not Received
+                                    </span>
+                                  )}
+                                  <div className="text-xs text-gray-500 whitespace-pre-line">
+                                    {player.season_workbond.notes}
+                                  </div>
+                                </div>
+                              ) : (
+                                <span className="inline-flex items-center px-2 py-1 text-xs bg-yellow-100 text-yellow-800 rounded-full">
+                                  Not Received
+                                </span>
+                              )}
                             </div>
-                          </div>
-                        ) : (
-                          <span className="inline-flex items-center px-2 py-1 text-xs bg-yellow-100 text-yellow-800 rounded-full">
-                            Not Received
-                          </span>
-                        )}
+                          );
+                        })()}
                       </div>
                       <button
                         type="button"

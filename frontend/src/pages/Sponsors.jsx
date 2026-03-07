@@ -56,7 +56,9 @@ const Sponsors = () => {
   // Filter states
   const [showActiveOnly, setShowActiveOnly] = useState(true);
   const [showContactedFilter, setShowContactedFilter] = useState('all'); // 'all', 'contacted', 'not-contacted'
-  
+  const [locationFilter, setLocationFilter] = useState('all');
+  const [paymentFilter, setPaymentFilter] = useState('all'); // 'all', 'paid', 'unpaid'
+const [sponsorTypeFilter, setSponsorTypeFilter] = useState('all'); // 'all', 'new', 'returning'
   // Form states
   const [showForm, setShowForm] = useState(false);
   const [editingSponsor, setEditingSponsor] = useState(null);
@@ -89,7 +91,7 @@ const [editLocationForm, setEditLocationForm] = useState({
   price: '',
   is_active: true
 });
-  
+ 
   // Location management modal states
   const [showManageLocationsModal, setShowManageLocationsModal] = useState(false);
   const [newField, setNewField] = useState('');
@@ -121,6 +123,17 @@ const [editLocationForm, setEditLocationForm] = useState({
     total_amount: 0,
     is_active: true
   });
+  
+  // Get unique field names for filter dropdown
+const getUniqueFields = () => {
+  const fields = new Set();
+  sponsors.forEach(sponsor => {
+    (sponsor.locations || []).forEach(loc => {
+      if (loc.field) fields.add(loc.field);
+    });
+  });
+  return Array.from(fields).sort();
+};
   
 const handleEditLocation = (config) => {
   console.log('Editing location:', config);
@@ -230,13 +243,16 @@ const loadLocationConfig = async () => {
     setLocationOptions(data.locationOptions || {});
     setLocationConfigs(data.allConfigs || []);
     
+    // Debug log
+    console.log('Location configs loaded:', data.allConfigs);
+    console.log('Field names:', data.allConfigs.map(c => c.field_name));
+    
     // Update LOCATION_PRICES with data from API
-const priceMap = {};
-data.allConfigs.forEach(config => {
-  // Use cost from database, fallback to price if cost doesn't exist
-  priceMap[config.location_name] = config.cost || config.price || 0;
-});
-Object.assign(LOCATION_PRICES, priceMap);
+    const priceMap = {};
+    data.allConfigs.forEach(config => {
+      priceMap[config.location_name] = config.cost || config.price || 0;
+    });
+    Object.assign(LOCATION_PRICES, priceMap);
     
     console.log('Location config loaded:', data);
   } catch (error) {
@@ -647,19 +663,34 @@ const handleAddLocationOption = async () => {
     };
   };
 
-  // Filter sponsors based on active/contacted filters
-  const getFilteredSponsors = () => {
-    return sponsors.filter(sponsor => {
-      // Active filter
-      if (showActiveOnly && !sponsor.is_active) return false;
-      
-      // Contacted filter
-      if (showContactedFilter === 'contacted' && !sponsor.contacted_this_season) return false;
-      if (showContactedFilter === 'not-contacted' && sponsor.contacted_this_season) return false;
-      
-      return true;
-    });
-  };
+  // Filter sponsors based on all filters
+const getFilteredSponsors = () => {
+  return sponsors.filter(sponsor => {
+    // Active filter
+    if (showActiveOnly && !sponsor.is_active) return false;
+    
+    // Contacted filter
+    if (showContactedFilter === 'contacted' && !sponsor.contacted_this_season) return false;
+    if (showContactedFilter === 'not-contacted' && sponsor.contacted_this_season) return false;
+    
+    // Payment filter
+    if (paymentFilter === 'paid' && !sponsor.has_paid) return false;
+    if (paymentFilter === 'unpaid' && sponsor.has_paid) return false;
+    
+    // Sponsor type filter
+    if (sponsorTypeFilter === 'new' && !sponsor.is_new_sponsor) return false;
+    if (sponsorTypeFilter === 'returning' && !sponsor.is_returning) return false;
+    
+    // Location filter
+    if (locationFilter !== 'all') {
+      // Check if sponsor has any location in the selected field
+      const hasLocation = (sponsor.locations || []).some(loc => loc.field === locationFilter);
+      if (!hasLocation) return false;
+    }
+    
+    return true;
+  });
+};
 
   // Get all emails for current filter
   const getAllEmails = () => {
@@ -951,39 +982,117 @@ const handleAddLocationOption = async () => {
       {/* Sponsors Tab */}
       {activeTab === 'sponsors' && (
         <>
-          {/* Filters */}
-          <div className="mb-6 bg-white rounded-lg shadow p-4 border border-gray-200">
-            <div className="flex items-center gap-4 flex-wrap">
-              <div className="flex items-center">
-                <Filter className="h-4 w-4 text-gray-500 mr-2" />
-                <span className="text-sm font-medium text-gray-700">Filters:</span>
-              </div>
-              
-              {/* Active filter */}
-              <button
-                onClick={() => setShowActiveOnly(!showActiveOnly)}
-                className={`inline-flex items-center px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                  showActiveOnly
-                    ? 'bg-blue-100 text-blue-800 border border-blue-200'
-                    : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
-                }`}
-              >
-                {showActiveOnly ? <Eye className="h-4 w-4 mr-1" /> : <EyeOff className="h-4 w-4 mr-1" />}
-                {showActiveOnly ? 'Active Only' : 'All Sponsors'}
-              </button>
-              
-              {/* Contacted filter */}
-              <select
-                value={showContactedFilter}
-                onChange={(e) => setShowContactedFilter(e.target.value)}
-                className="px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:ring-blue-500 focus:border-blue-500"
-              >
-                <option value="all">All Contact Status</option>
-                <option value="contacted">Contacted</option>
-                <option value="not-contacted">Not Contacted</option>
-              </select>
-            </div>
-          </div>
+         {/* Filters */}
+<div className="mb-6 bg-white rounded-lg shadow p-4 border border-gray-200">
+  <div className="flex items-center gap-4 flex-wrap">
+    <div className="flex items-center">
+      <Filter className="h-4 w-4 text-gray-500 mr-2" />
+      <span className="text-sm font-medium text-gray-700">Filters:</span>
+    </div>
+    
+    {/* Active filter */}
+    <button
+      onClick={() => setShowActiveOnly(!showActiveOnly)}
+      className={`inline-flex items-center px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+        showActiveOnly
+          ? 'bg-blue-100 text-blue-800 border border-blue-200'
+          : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
+      }`}
+    >
+      {showActiveOnly ? <Eye className="h-4 w-4 mr-1" /> : <EyeOff className="h-4 w-4 mr-1" />}
+      {showActiveOnly ? 'Active Only' : 'All Sponsors'}
+    </button>
+    
+    {/* Contacted filter */}
+    <select
+      value={showContactedFilter}
+      onChange={(e) => setShowContactedFilter(e.target.value)}
+      className="px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:ring-blue-500 focus:border-blue-500"
+    >
+      <option value="all">All Contact Status</option>
+      <option value="contacted">Contacted</option>
+      <option value="not-contacted">Not Contacted</option>
+    </select>
+
+    {/* Payment filter */}
+    <select
+      value={paymentFilter}
+      onChange={(e) => setPaymentFilter(e.target.value)}
+      className="px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:ring-blue-500 focus:border-blue-500 min-w-[120px]"
+    >
+      <option value="all">All Payments</option>
+      <option value="paid">Paid</option>
+      <option value="unpaid">Unpaid</option>
+    </select>
+
+    {/* Sponsor Type filter */}
+    <select
+      value={sponsorTypeFilter}
+      onChange={(e) => setSponsorTypeFilter(e.target.value)}
+      className="px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:ring-blue-500 focus:border-blue-500 min-w-[140px]"
+    >
+      <option value="all">All Sponsor Types</option>
+      <option value="new">New Sponsors</option>
+      <option value="returning">Returning Sponsors</option>
+    </select>
+
+    {/* Location filter */}
+    <select
+      value={locationFilter}
+      onChange={(e) => setLocationFilter(e.target.value)}
+      className="px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:ring-blue-500 focus:border-blue-500 min-w-[150px]"
+    >
+      <option value="all">All Locations</option>
+      {/* Show fields from locationConfigs directly */}
+      {locationConfigs
+        .map(config => config.field_name)
+        .filter((value, index, self) => self.indexOf(value) === index) // Get unique values
+        .sort()
+        .map(field => (
+          <option key={field} value={field}>{field}</option>
+        ))}
+    </select>
+
+    {/* Active filter badges */}
+    <div className="flex gap-2 flex-wrap">
+      {locationFilter !== 'all' && (
+        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs bg-blue-100 text-blue-800">
+          Location: {locationFilter}
+          <button
+            onClick={() => setLocationFilter('all')}
+            className="ml-1 hover:text-blue-600"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        </span>
+      )}
+      
+      {paymentFilter !== 'all' && (
+        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs bg-green-100 text-green-800">
+          Payment: {paymentFilter === 'paid' ? 'Paid' : 'Unpaid'}
+          <button
+            onClick={() => setPaymentFilter('all')}
+            className="ml-1 hover:text-green-600"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        </span>
+      )}
+
+      {sponsorTypeFilter !== 'all' && (
+        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs bg-purple-100 text-purple-800">
+          Type: {sponsorTypeFilter === 'new' ? 'New' : 'Returning'}
+          <button
+            onClick={() => setSponsorTypeFilter('all')}
+            className="ml-1 hover:text-purple-600"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        </span>
+      )}
+    </div>
+  </div>
+</div>
 
           {/* Summary Cards */}
           <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">

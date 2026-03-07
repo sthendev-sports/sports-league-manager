@@ -45,6 +45,13 @@ const Requests = () => {
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingRequest, setEditingRequest] = useState(null);
   
+  // ADD THESE FILTER STATE VARIABLES
+  const [filters, setFilters] = useState({
+    program: '',
+    type: '',
+    status: ''
+  });
+  
   const [form, setForm] = useState({
     player_id: '',
     parent_request: '',
@@ -259,6 +266,19 @@ const Requests = () => {
     }
   };
 
+  const onDelete = async (request) => {
+    if (!window.confirm('Are you sure you want to delete this request?')) return;
+    
+    try {
+      await requestsAPI.delete(request.id);
+      toast.success('Request deleted');
+      await loadData();
+    } catch (err) {
+      console.error('Error deleting request:', err);
+      toast.error('Failed to delete request');
+    }
+  };
+
   // Build a stable division list for dropdowns + totals table
   const divisionsById = useMemo(() => {
     const map = new Map();
@@ -369,7 +389,7 @@ const Requests = () => {
     return rows;
   }, [players, requests, orderedDivisionRows]);
 
-const getRequestCounts = useMemo(() => {
+  const getRequestCounts = useMemo(() => {
     const counts = {
       total: 0,
       moveUp: 0,
@@ -379,7 +399,11 @@ const getRequestCounts = useMemo(() => {
       admin: 0,
       pending: 0,
       approved: 0,
-      denied: 0
+      denied: 0,
+      // ADD PROGRAM COUNTS
+      baseball: 0,
+      softball: 0,
+      admin_program: 0
     };
 
     if (!requests || requests.length === 0) return counts;
@@ -398,12 +422,45 @@ const getRequestCounts = useMemo(() => {
       if (status === 'approved') counts.approved++;
       else if (status === 'denied') counts.denied++;
       else if (status === '' || status === 'pending') counts.pending++;
+      
+      // ADD PROGRAM COUNTS
+      const program = req.program?.toLowerCase() || '';
+      if (program === 'baseball') counts.baseball++;
+      else if (program === 'softball') counts.softball++;
+      else if (program === 'admin') counts.admin_program++;
     });
 
     counts.total = requests.length;
     
     return counts;
   }, [requests]);
+
+  // ADD FILTERED REQUESTS COMPUTATION
+  const filteredRequests = useMemo(() => {
+    if (!requests || requests.length === 0) return [];
+    
+    return requests.filter(req => {
+      // Filter by program
+      if (filters.program && req.program !== filters.program) {
+        return false;
+      }
+      
+      // Filter by type
+      if (filters.type && req.type !== filters.type) {
+        return false;
+      }
+      
+      // Filter by status
+      if (filters.status) {
+        const reqStatus = req.status || 'Pending';
+        if (reqStatus !== filters.status) {
+          return false;
+        }
+      }
+      
+      return true;
+    });
+  }, [requests, filters]);
 
   return (
     <div className="p-6 space-y-6">
@@ -464,7 +521,7 @@ const getRequestCounts = useMemo(() => {
             </div>
           </div>
           
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4 mb-6">
             {/* By Type */}
             <div className="bg-purple-50 rounded-lg p-3 border border-purple-100">
               <div className="text-xs text-purple-600 font-medium uppercase tracking-wider">Move Up</div>
@@ -490,21 +547,47 @@ const getRequestCounts = useMemo(() => {
               <div className="text-xs text-gray-600 font-medium uppercase tracking-wider">Admin</div>
               <div className="text-2xl font-bold text-gray-700">{getRequestCounts.admin}</div>
             </div>
-            
-            {/* By Status */}
-            <div className="bg-green-50 rounded-lg p-3 border border-green-100">
-              <div className="text-xs text-green-600 font-medium uppercase tracking-wider">Approved</div>
-              <div className="text-2xl font-bold text-green-700">{getRequestCounts.approved}</div>
+          </div>
+          
+          {/* Program Counts - NEW ROW */}
+          <div className="mb-6">
+            <h3 className="text-sm font-medium text-gray-700 mb-3">By Program</h3>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+              <div className="bg-blue-50 rounded-lg p-3 border border-blue-100">
+                <div className="text-xs text-blue-600 font-medium uppercase tracking-wider">Baseball</div>
+                <div className="text-2xl font-bold text-blue-700">{getRequestCounts.baseball}</div>
+              </div>
+              
+              <div className="bg-amber-50 rounded-lg p-3 border border-amber-100">
+                <div className="text-xs text-amber-600 font-medium uppercase tracking-wider">Softball</div>
+                <div className="text-2xl font-bold text-amber-700">{getRequestCounts.softball}</div>
+              </div>
+              
+              <div className="bg-gray-50 rounded-lg p-3 border border-gray-200">
+                <div className="text-xs text-gray-600 font-medium uppercase tracking-wider">Admin</div>
+                <div className="text-2xl font-bold text-gray-700">{getRequestCounts.admin_program}</div>
+              </div>
             </div>
-            
-            <div className="bg-yellow-50 rounded-lg p-3 border border-yellow-100">
-              <div className="text-xs text-yellow-600 font-medium uppercase tracking-wider">Pending</div>
-              <div className="text-2xl font-bold text-yellow-700">{getRequestCounts.pending}</div>
-            </div>
-            
-            <div className="bg-red-50 rounded-lg p-3 border border-red-100">
-              <div className="text-xs text-red-600 font-medium uppercase tracking-wider">Denied</div>
-              <div className="text-2xl font-bold text-red-700">{getRequestCounts.denied}</div>
+          </div>
+          
+          {/* By Status */}
+          <div>
+            <h3 className="text-sm font-medium text-gray-700 mb-3">By Status</h3>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+              <div className="bg-green-50 rounded-lg p-3 border border-green-100">
+                <div className="text-xs text-green-600 font-medium uppercase tracking-wider">Approved</div>
+                <div className="text-2xl font-bold text-green-700">{getRequestCounts.approved}</div>
+              </div>
+              
+              <div className="bg-yellow-50 rounded-lg p-3 border border-yellow-100">
+                <div className="text-xs text-yellow-600 font-medium uppercase tracking-wider">Pending</div>
+                <div className="text-2xl font-bold text-yellow-700">{getRequestCounts.pending}</div>
+              </div>
+              
+              <div className="bg-red-50 rounded-lg p-3 border border-red-100">
+                <div className="text-xs text-red-600 font-medium uppercase tracking-wider">Denied</div>
+                <div className="text-2xl font-bold text-red-700">{getRequestCounts.denied}</div>
+              </div>
             </div>
           </div>
           
@@ -777,6 +860,74 @@ const getRequestCounts = useMemo(() => {
         </div>
       </form>
 
+      {/* Filter Controls */}
+      {selectedSeason && requests.length > 0 && (
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-medium text-gray-700">Filter Requests</h2>
+            {(filters.program || filters.type || filters.status) && (
+              <button
+                onClick={() => setFilters({ program: '', type: '', status: '' })}
+                className="text-xs text-blue-600 hover:text-blue-800"
+              >
+                Clear Filters
+              </button>
+            )}
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Program</label>
+              <select
+                className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm bg-white"
+                value={filters.program}
+                onChange={(e) => setFilters({ ...filters, program: e.target.value })}
+              >
+                <option value="">All Programs</option>
+                <option value="Baseball">Baseball</option>
+                <option value="Softball">Softball</option>
+                <option value="Admin">Admin</option>
+              </select>
+            </div>
+            
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Type</label>
+              <select
+                className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm bg-white"
+                value={filters.type}
+                onChange={(e) => setFilters({ ...filters, type: e.target.value })}
+              >
+                <option value="">All Types</option>
+                <option value="Move Up">Move Up</option>
+                <option value="Move Down">Move Down</option>
+                <option value="Teammate Request">Teammate Request</option>
+                <option value="Volunteer Request">Volunteer Request</option>
+                <option value="Admin">Admin</option>
+              </select>
+            </div>
+            
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Status</label>
+              <select
+                className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm bg-white"
+                value={filters.status}
+                onChange={(e) => setFilters({ ...filters, status: e.target.value })}
+              >
+                <option value="">All Statuses</option>
+                <option value="Pending">Pending</option>
+                <option value="Approved">Approved</option>
+                <option value="Denied">Denied</option>
+              </select>
+            </div>
+            
+            <div className="flex items-end">
+              <div className="text-sm text-gray-600">
+                Showing {filteredRequests.length} of {requests.length} requests
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Requests table */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
         <h2 className="text-lg font-semibold text-gray-900 mb-3">Request List</h2>
@@ -807,8 +958,14 @@ const getRequestCounts = useMemo(() => {
                     {loading ? 'Loading…' : 'No requests yet.'}
                   </td>
                 </tr>
+              ) : filteredRequests.length === 0 ? (
+                <tr>
+                  <td colSpan={13} className="px-3 py-6 text-center text-gray-500">
+                    No requests match the selected filters.
+                  </td>
+                </tr>
               ) : (
-                requests.map((r, index) => {
+                filteredRequests.map((r, index) => {
                   const player = r.requesting_player || r.player || null;
                   const name = player
                     ? `${player.last_name || ''}, ${player.first_name || ''}`.replace(/^,\s*/, '').trim()

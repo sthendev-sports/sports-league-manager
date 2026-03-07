@@ -39,13 +39,14 @@ const RESOURCE_CATEGORIES = {
       { key: 'dashboard', name: 'Dashboard' },
       { key: 'players', name: 'Players' },
       { key: 'teams', name: 'Teams' },
-	  { key: 'uniforms', name: 'Team Uniforms' },
+      { key: 'uniforms', name: 'Team Uniforms' },
       { key: 'draft', name: 'Draft' },
       { key: 'game_scheduler', name: 'Game Scheduler' },
-	  { key: 'families', name: 'Family Manager' },
+      { key: 'families', name: 'Family Manager' },
       { key: 'workbond_management', name: 'Workbond Management' },
       { key: 'volunteers', name: 'Volunteers' },
-      { key: 'mailing_list', name: 'Mailing List' }
+      { key: 'mailing_list', name: 'Mailing List' },
+      { key: 'sponsors', name: 'Sponsors' } // NEW
     ]
   },
   administration: {

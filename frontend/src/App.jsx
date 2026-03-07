@@ -18,6 +18,7 @@ import Requests from './pages/Requests';
 import GameScheduler from './pages/GameScheduler';
 import BoardMembers from './pages/BoardMembers';
 import WorkbondManagement from './pages/WorkbondManagement';
+import Sponsors from './pages/Sponsors';
 import Login from './pages/Login';
 import Users from './pages/Users';
 import EmailSettings from './pages/EmailSettings';
@@ -120,7 +121,19 @@ function App() {
                     />
                   }
                 />
-
+				
+				 {/* Sponsors management: restricted roles */}
+<Route path="/sponsors" 
+					element={
+                    <ProtectedRoute
+                      element={<Sponsors />}
+                      requiredRoles={[
+                        'Administrator',
+                        'President',
+                      ]}
+                    />
+                  }
+                />
                 {/* Users management: Admin / President only */}
                 <Route
                   path="/users"

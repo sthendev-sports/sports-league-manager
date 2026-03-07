@@ -19,6 +19,7 @@ import {
   ClipboardList,
   Shield,
   LogOut,
+  Building2,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
@@ -54,6 +55,7 @@ const Layout = ({ children }) => {
       //roles: ['Administrator', 'President', 'Treasurer'] 
     },
     { name: 'Mailing List', href: '/mailing-list', icon: Mail },
+	  { name: 'Sponsors', href: '/sponsors', icon: Building2 },
     { name: 'Board Members', href: '/boardmembers', icon: UserCheck },
     {
       name: 'Users',
@@ -68,6 +70,7 @@ const Layout = ({ children }) => {
       roles: ['Administrator', 'President'],
     },
     { name: 'Configuration', href: '/configuration', icon: Settings },
+	
   ];
 
   // Map routes to permission resources (MUST match backend)
@@ -83,6 +86,7 @@ const Layout = ({ children }) => {
     '/volunteers': 'volunteers',
     '/requests': 'requests',
     '/mailing-list': 'mailing_list',
+	'/sponsors': 'sponsors',
     '/boardmembers': 'board_members',
     '/users': 'users',
     '/email-settings': 'email_settings',

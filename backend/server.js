@@ -54,6 +54,7 @@ const familySeasonWorkbondRoutes = require('./routes/familySeasonWorkbond');
 const trainingsRouter = require('./routes/trainings');
 const { authMiddleware } = require('./middleware/auth');
 const { permissionEnforcer } = require('./middleware/permissionEnforcer');
+const sponsorRoutes = require('./routes/sponsors');
 // const workbondImportRoutes = require('./routes/import-shifts');
 //app.use('/api/draft-new', require('./routes/draft-new'));
 
@@ -89,6 +90,7 @@ app.use('/api/public/workbond-status', publicCheckWorkbondRoutes); // backward c
 app.use('/api/families', require('./routes/families'));
 //app.use('/api/seasons', require('./routes/seasons'));
 app.use('/api/role-permissions', permissionEnforcer, require('./routes/rolePermissions'));
+app.use('/api/sponsors', permissionEnforcer, require('./routes/sponsors'));
 // app.use('/api/workbond', workbondImportRoutes); // enable later if needed
 
 // Basic health check

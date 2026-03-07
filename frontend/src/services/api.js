@@ -154,6 +154,21 @@ export const emailSettingsAPI = {
   testSend: (data = {}) => api.post('/email-settings/test-send', data),
 };
 
+// Sponsors API
+export const sponsorsAPI = {
+  getAll: (params) => api.get('/sponsors', { params }),
+  getById: (id) => api.get(`/sponsors/${id}`),
+  create: (data) => api.post('/sponsors', data),
+  update: (id, data) => api.put(`/sponsors/${id}`, data),
+  delete: (id) => api.delete(`/sponsors/${id}`),
+  getLocationConfig: () => api.get('/sponsors/locations/config'),
+  addLocationConfig: (data) => api.post('/sponsors/locations/config', data),
+  updateLocationConfig: (id, data) => api.put(`/sponsors/locations/config/${id}`, data),
+  deleteLocationConfig: (id) => api.delete(`/sponsors/locations/config/${id}`),
+  import: (data) => api.post('/sponsors/import', data),
+  getStats: () => api.get('/sponsors/stats/summary')
+};
+
 // Notifications API (new)
 export const notificationsAPI = {
   sendManagerRosters: (data) => api.post('/notifications/send-manager-rosters', data),

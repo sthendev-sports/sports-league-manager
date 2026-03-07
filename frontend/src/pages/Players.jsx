@@ -47,7 +47,8 @@ const [deleteError, setDeleteError] = useState('');
     workbondCheck: '',
     guardianName: '',
     medicalConditions: '',
-    status: '' // ADD: Status filter
+    status: '',
+	travelPlayer: ''	
   });
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 50;
@@ -1062,7 +1063,8 @@ const enhancePlayersWithVolunteerData = async (playersData) => {
       workbondCheck: '',
       guardianName: '',
       medicalConditions: '',
-      status: ''
+      status: '',
+	  travelPlayer: ''
     });
     setSearchTerm('');
   };
@@ -1117,12 +1119,15 @@ const enhancePlayersWithVolunteerData = async (playersData) => {
       // CHANGED: Add workbond status to search index
       const workbondNotes = String(p?.season_workbond?.notes || '').toLowerCase().trim();
       const workbondReceived = p?.season_workbond?.received || false;
+ 
+	  // ADD: Travel player flag
+      const travelPlayer = p?.is_travel_player || false;
 
-      return { playerName, guardian, division, team, gender, reg, familyId, status, workbondNotes, workbondReceived };
+      return { playerName, guardian, division, team, gender, reg, familyId, status, workbondNotes, workbondReceived, travelPlayer };
     });
   }, [players]);
 
-  // UPDATED: Memoized filtering to use season_workbond and board member exemption
+   // UPDATED: Memoized filtering to use season_workbond and board member exemption
   const filteredPlayers = useMemo(() => {
     const nameTerm = String(debouncedSearchTerm || '').trim().toLowerCase();
     const guardianTerm = String(columnFilters.guardianName || '').trim().toLowerCase();
@@ -1131,6 +1136,7 @@ const enhancePlayersWithVolunteerData = async (playersData) => {
     const teamFilter = String(columnFilters.team || '').trim().toLowerCase();
     const genderFilter = String(columnFilters.gender || '').trim().toLowerCase();
     const statusFilter = String(columnFilters.status || '').trim().toLowerCase();
+    const travelFilter = String(columnFilters.travelPlayer || '').trim().toLowerCase();
 
     return (players || []).filter((player, idx) => {
       const s = searchIndex[idx] || {};
@@ -1158,6 +1164,11 @@ const enhancePlayersWithVolunteerData = async (playersData) => {
 
       // Status (ADD: new filter)
       const matchesStatus = !statusFilter || s.status === statusFilter;
+
+      // Travel Player (ADD: new filter)
+      const matchesTravelPlayer = !travelFilter || 
+        (travelFilter === 'travel' && s.travelPlayer === true) ||
+        (travelFilter === 'non_travel' && s.travelPlayer === false);
 
       // Registration Paid
       const matchesRegistrationPaid =
@@ -1201,12 +1212,13 @@ const enhancePlayersWithVolunteerData = async (playersData) => {
         matchesTeam &&
         matchesGender &&
         matchesStatus &&
+        matchesTravelPlayer && // ADDED
         matchesRegistrationPaid &&
         matchesWorkbondCheck &&
         matchesMedicalConditions
       );
     });
-  }, [players, searchIndex, debouncedSearchTerm, columnFilters, boardMembers]); // UPDATED: Added boardMembers dependency
+  }, [players, searchIndex, debouncedSearchTerm, columnFilters, boardMembers]);
 
   const displayedPlayers = useMemo(() => {
     const start = (page - 1) * PAGE_SIZE;
@@ -1650,7 +1662,7 @@ const enhancePlayersWithVolunteerData = async (playersData) => {
           )}
         </div>
 
-        {/* Expandable Filter Panel */}
+                {/* Expandable Filter Panel */}
         {showFilters && (
           <div className="mt-4 pt-4 border-t border-gray-200">
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -1684,7 +1696,6 @@ const enhancePlayersWithVolunteerData = async (playersData) => {
                 </select>
               </div>
 
-              
               {/* Guardian Filter */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Guardian Name</label>
@@ -1696,6 +1707,7 @@ const enhancePlayersWithVolunteerData = async (playersData) => {
                   onChange={(e) => handleFilterChange('guardianName', e.target.value)}
                 />
               </div>
+              
               {/* Gender Filter */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Gender</label>
@@ -1710,7 +1722,21 @@ const enhancePlayersWithVolunteerData = async (playersData) => {
                 </select>
               </div>
 
-              {/* ADD: Status Filter */}
+              {/* Travel Player Filter - NEW */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Travel Player</label>
+                <select
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+                  value={columnFilters.travelPlayer}
+                  onChange={(e) => handleFilterChange('travelPlayer', e.target.value)}
+                >
+                  <option value="">All Players</option>
+                  <option value="travel">Travel Players Only</option>
+                  <option value="non_travel">Non-Travel Players Only</option>
+                </select>
+              </div>
+
+              {/* Status Filter */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
                 <select
@@ -1739,7 +1765,7 @@ const enhancePlayersWithVolunteerData = async (playersData) => {
                 </select>
               </div>
 
-              {/* Workbond Check Filter - UPDATED to handle board member exemption */}
+              {/* Workbond Check Filter */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Workbond Check</label>
                 <select

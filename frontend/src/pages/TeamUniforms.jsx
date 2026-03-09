@@ -63,7 +63,7 @@ const TeamUniforms = () => {
     return colors;
   };
 
-  // NEW: Calculate pants counts for ALL active players (not withdrawn) regardless of team
+  // Calculate pants counts for ALL active players (not withdrawn) regardless of team
   const getAllActivePlayersPantsCounts = () => {
     // Filter to only active players (exclude withdrawn)
     const activePlayers = (players || []).filter(p => p.status !== 'withdrawn');
@@ -83,6 +83,67 @@ const TeamUniforms = () => {
       allActivePlayersPantsCounts: pantsCountsBySize,
       allActivePlayersTotal: activePlayers.length,
       allPantsSizes
+    };
+  };
+
+  // NEW: Calculate shirt counts by division
+  const getShirtCountsByDivision = () => {
+    // Only count drafted players (players assigned to a team)
+    const draftedPlayers = (players || []).filter(p => p.team_id && p.status !== 'withdrawn');
+    
+    // Get all unique shirt sizes
+    const shirtSizes = Array.from(
+      new Set(draftedPlayers.map(p => p.uniform_shirt_size).filter(Boolean))
+    ).sort();
+
+    // Custom division display order
+    const divisionOrder = [
+      'T-Ball Division',
+      'Baseball - Coach Pitch Division',
+      'Baseball - Rookies Division',
+      'Baseball - Minors Division',
+      'Baseball - Majors Division',
+      'Softball - Rookies Division (Coach Pitch)',
+      'Softball - Minors Division',
+      'Softball - Majors Division',
+      'Challenger Division'
+    ];
+
+    const divisionRankMap = new Map(divisionOrder.map((name, idx) => [name, idx]));
+    const getDivisionRank = (name) => (divisionRankMap.has(name) ? divisionRankMap.get(name) : 999);
+
+    // Group players by division
+    const divisionShirtDetails = divisions.map(division => {
+      // Find all teams in this division
+      const teamsInDivision = teams.filter(t => t.division_id === division.id);
+      const teamIdsInDivision = teamsInDivision.map(t => t.id);
+      
+      // Find all drafted players in this division's teams
+      const playersInDivision = draftedPlayers.filter(p => teamIdsInDivision.includes(p.team_id));
+
+      // Count shirts by size for this division
+      const shirtCountsBySize = shirtSizes.reduce((acc, size) => {
+        acc[size] = playersInDivision.filter(p => p.uniform_shirt_size === size).length;
+        return acc;
+      }, {});
+
+      return {
+        division: division.name,
+        shirtCounts: shirtCountsBySize,
+        totalShirts: playersInDivision.length
+      };
+    }).filter(d => d.totalShirts > 0); // Only include divisions with players
+
+    // Sort divisions by custom order
+    divisionShirtDetails.sort((a, b) => {
+      const d = getDivisionRank(a.division) - getDivisionRank(b.division);
+      if (d !== 0) return d;
+      return (a.division || '').localeCompare(b.division || '');
+    });
+
+    return {
+      divisionShirtDetails,
+      shirtSizes
     };
   };
 
@@ -242,8 +303,11 @@ const TeamUniforms = () => {
 
   // Get the pants counts for all active players
   const { allActivePlayersPantsCounts, allActivePlayersTotal, allPantsSizes } = getAllActivePlayersPantsCounts();
+  
+  // Get shirt counts by division
+  const { divisionShirtDetails, shirtSizes: divisionShirtSizes } = getShirtCountsByDivision();
 
-  // NEW: Export to CSV function
+  // Export to CSV function
   const exportToCSV = () => {
     // Get current season name
     const currentSeason = seasons.find(s => s.id === selectedSeason)?.name || 'Unknown Season';
@@ -263,7 +327,20 @@ const TeamUniforms = () => {
     });
     csvContent += "\n";
     
-    // SECTION 2: Uniform Shirts Summary by Size and Color
+    // SECTION 2: Shirt Counts by Division
+    csvContent += "=== SHIRT COUNTS BY DIVISION ===\n";
+    csvContent += "Division," + divisionShirtSizes.join(",") + ",Total\n";
+    divisionShirtDetails.forEach(division => {
+      const row = [division.division];
+      divisionShirtSizes.forEach(size => {
+        row.push(division.shirtCounts[size] || 0);
+      });
+      row.push(division.totalShirts);
+      csvContent += row.join(",") + "\n";
+    });
+    csvContent += "\n";
+    
+    // SECTION 3: Uniform Shirts Summary by Size and Color
     csvContent += "=== UNIFORM SHIRTS SUMMARY ===\n";
     csvContent += "Size,Total Count," + colors.join(",") + "\n";
     shirtSizes.forEach(size => {
@@ -284,7 +361,7 @@ const TeamUniforms = () => {
     });
     csvContent += shirtTotalRow.join(",") + "\n\n";
     
-    // SECTION 3: Team Shirt Distribution
+    // SECTION 4: Team Shirt Distribution
     csvContent += "=== TEAM SHIRT DISTRIBUTION ===\n";
     csvContent += "Division,Team,Color," + shirtSizes.join(",") + ",Total\n";
     teamShirtDetails.forEach(team => {
@@ -297,7 +374,7 @@ const TeamUniforms = () => {
     });
     csvContent += "\n";
     
-    // SECTION 4: Uniform Pants Summary
+    // SECTION 5: Uniform Pants Summary
     csvContent += "=== UNIFORM PANTS SUMMARY ===\n";
     csvContent += "Size,Total Count\n";
     pantsSizes.forEach(size => {
@@ -305,7 +382,7 @@ const TeamUniforms = () => {
     });
     csvContent += `Totals,${Object.values(overallPantsCounts).reduce((sum, count) => sum + count, 0)}\n\n`;
     
-    // SECTION 5: Team Pants Distribution
+    // SECTION 6: Team Pants Distribution
     csvContent += "=== TEAM PANTS DISTRIBUTION ===\n";
     csvContent += "Division,Team," + pantsSizes.join(",") + ",Total\n";
     teamPantsDetails.forEach(team => {
@@ -358,7 +435,7 @@ const TeamUniforms = () => {
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-3xl font-bold">Team Uniforms</h1>
         
-        {/* NEW: Export CSV Button */}
+        {/* Export CSV Button */}
         <button
           onClick={exportToCSV}
           className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
@@ -441,7 +518,7 @@ const TeamUniforms = () => {
         </div>
       </div>
 
-      {/* NEW SECTION: All Active Players Pants Count (Before Team Assignment) */}
+      {/* SECTION 1: All Active Players Pants Count (Before Team Assignment) */}
       <div className="bg-white rounded-lg shadow-md p-6 mb-8">
         <h2 className="text-xl font-semibold mb-4">ALL ACTIVE PLAYERS - PANTS SUMMARY (Before Team Assignment)</h2>
         <p className="text-sm text-gray-600 mb-4">
@@ -468,6 +545,56 @@ const TeamUniforms = () => {
                 <td className="border border-gray-300 p-2">TOTAL</td>
                 <td className="border border-gray-300 p-2 text-center">
                   {allActivePlayersTotal}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* SECTION 2: NEW - Shirt Counts by Division */}
+      <div className="bg-white rounded-lg shadow-md p-6 mb-8">
+        <h2 className="text-xl font-semibold mb-4">SHIRT COUNTS BY DIVISION</h2>
+        <p className="text-sm text-gray-600 mb-4">
+          Shirt distribution across divisions (drafted players only, excluding withdrawn)
+        </p>
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse border border-gray-300 text-sm">
+            <thead>
+              <tr className="bg-gray-100">
+                <th className="border border-gray-300 p-2 text-left">Division</th>
+                {divisionShirtSizes.map(size => (
+                  <th key={size} className="border border-gray-300 p-2 text-center">{size}</th>
+                ))}
+                <th className="border border-gray-300 p-2 text-center">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {divisionShirtDetails.map((division, index) => (
+                <tr key={index} className="hover:bg-gray-50">
+                  <td className="border border-gray-300 p-2 font-medium">{division.division}</td>
+                  {divisionShirtSizes.map(size => (
+                    <td key={size} className="border border-gray-300 p-2 text-center">
+                      {division.shirtCounts[size] || 0}
+                    </td>
+                  ))}
+                  <td className="border border-gray-300 p-2 text-center font-bold">
+                    {division.totalShirts}
+                  </td>
+                </tr>
+              ))}
+              <tr className="bg-gray-100 font-bold">
+                <td className="border border-gray-300 p-2">TOTALS</td>
+                {divisionShirtSizes.map(size => {
+                  const total = divisionShirtDetails.reduce((sum, div) => sum + (div.shirtCounts[size] || 0), 0);
+                  return (
+                    <td key={size} className="border border-gray-300 p-2 text-center">
+                      {total}
+                    </td>
+                  );
+                })}
+                <td className="border border-gray-300 p-2 text-center">
+                  {divisionShirtDetails.reduce((sum, div) => sum + div.totalShirts, 0)}
                 </td>
               </tr>
             </tbody>

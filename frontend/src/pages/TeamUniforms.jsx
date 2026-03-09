@@ -63,6 +63,29 @@ const TeamUniforms = () => {
     return colors;
   };
 
+  // NEW: Calculate pants counts for ALL active players (not withdrawn) regardless of team
+  const getAllActivePlayersPantsCounts = () => {
+    // Filter to only active players (exclude withdrawn)
+    const activePlayers = (players || []).filter(p => p.status !== 'withdrawn');
+    
+    // Get unique pants sizes from active players
+    const allPantsSizes = Array.from(
+      new Set(activePlayers.map(p => p.uniform_pants_size).filter(Boolean))
+    ).sort();
+
+    // Count pants by size for all active players
+    const pantsCountsBySize = allPantsSizes.reduce((acc, size) => {
+      acc[size] = activePlayers.filter(p => p.uniform_pants_size === size).length;
+      return acc;
+    }, {});
+
+    return {
+      allActivePlayersPantsCounts: pantsCountsBySize,
+      allActivePlayersTotal: activePlayers.length,
+      allPantsSizes
+    };
+  };
+
   // Filter data based on selections
   const getFilteredData = () => {
     let filteredTeamsData = teams;
@@ -90,7 +113,7 @@ const TeamUniforms = () => {
   };
 
   const { filteredTeams, filteredPlayers } = getFilteredData();
-  const colors = getUniqueColors(); // Renamed from uniqueColors to avoid conflict
+  const colors = getUniqueColors();
 
   // Calculate comprehensive uniform counts using FILTERED data
   const getAllUniformCounts = () => {
@@ -187,8 +210,7 @@ const TeamUniforms = () => {
       return (a.team || '').localeCompare(b.team || '');
     });
 
-
-// Color distribution across all shirts (using filtered data)
+    // Color distribution across all shirts (using filtered data)
     const colorDistribution = colors.reduce((acc, color) => {
       acc[color] = draftedPlayers.filter(p => {
         const playerTeam = teamsWithPlayers.find(t => t.id === p.team_id);
@@ -218,6 +240,94 @@ const TeamUniforms = () => {
     pantsSizes
   } = getAllUniformCounts();
 
+  // Get the pants counts for all active players
+  const { allActivePlayersPantsCounts, allActivePlayersTotal, allPantsSizes } = getAllActivePlayersPantsCounts();
+
+  // NEW: Export to CSV function
+  const exportToCSV = () => {
+    // Get current season name
+    const currentSeason = seasons.find(s => s.id === selectedSeason)?.name || 'Unknown Season';
+    
+    // Create CSV content
+    let csvContent = "DATA EXPORT - Team Uniforms\n";
+    csvContent += `Season: ${currentSeason}\n`;
+    csvContent += `Export Date: ${new Date().toLocaleDateString()}\n`;
+    csvContent += `Filters Applied: ${selectedDivision ? 'Division: ' + divisions.find(d => d.id === selectedDivision)?.name : 'All Divisions'}, ${selectedTeam ? 'Team: ' + teams.find(t => t.id === selectedTeam)?.name : 'All Teams'}\n\n`;
+    
+    // SECTION 1: All Active Players Pants Summary
+    csvContent += "=== ALL ACTIVE PLAYERS PANTS SUMMARY (Excluding Withdrawn) ===\n";
+    csvContent += `Total Active Players,${allActivePlayersTotal}\n`;
+    csvContent += "Pants Size,Count\n";
+    allPantsSizes.forEach(size => {
+      csvContent += `${size},${allActivePlayersPantsCounts[size] || 0}\n`;
+    });
+    csvContent += "\n";
+    
+    // SECTION 2: Uniform Shirts Summary by Size and Color
+    csvContent += "=== UNIFORM SHIRTS SUMMARY ===\n";
+    csvContent += "Size,Total Count," + colors.join(",") + "\n";
+    shirtSizes.forEach(size => {
+      const row = [size, overallShirtCounts[size] || 0];
+      colors.forEach(color => {
+        const count = teamShirtDetails
+          .filter(team => team.color === color)
+          .reduce((sum, team) => sum + (team.shirtCounts[size] || 0), 0);
+        row.push(count);
+      });
+      csvContent += row.join(",") + "\n";
+    });
+    
+    // Totals row for shirts
+    const shirtTotalRow = ["Totals", Object.values(overallShirtCounts).reduce((sum, count) => sum + count, 0)];
+    colors.forEach(color => {
+      shirtTotalRow.push(colorDistribution[color] || 0);
+    });
+    csvContent += shirtTotalRow.join(",") + "\n\n";
+    
+    // SECTION 3: Team Shirt Distribution
+    csvContent += "=== TEAM SHIRT DISTRIBUTION ===\n";
+    csvContent += "Division,Team,Color," + shirtSizes.join(",") + ",Total\n";
+    teamShirtDetails.forEach(team => {
+      const row = [team.division, team.team, team.color];
+      shirtSizes.forEach(size => {
+        row.push(team.shirtCounts[size] || 0);
+      });
+      row.push(team.totalShirts);
+      csvContent += row.join(",") + "\n";
+    });
+    csvContent += "\n";
+    
+    // SECTION 4: Uniform Pants Summary
+    csvContent += "=== UNIFORM PANTS SUMMARY ===\n";
+    csvContent += "Size,Total Count\n";
+    pantsSizes.forEach(size => {
+      csvContent += `${size},${overallPantsCounts[size] || 0}\n`;
+    });
+    csvContent += `Totals,${Object.values(overallPantsCounts).reduce((sum, count) => sum + count, 0)}\n\n`;
+    
+    // SECTION 5: Team Pants Distribution
+    csvContent += "=== TEAM PANTS DISTRIBUTION ===\n";
+    csvContent += "Division,Team," + pantsSizes.join(",") + ",Total\n";
+    teamPantsDetails.forEach(team => {
+      const row = [team.division, team.team];
+      pantsSizes.forEach(size => {
+        row.push(team.pantsCounts[size] || 0);
+      });
+      row.push(team.totalPants);
+      csvContent += row.join(",") + "\n";
+    });
+    
+    // Create download link
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `uniforms_${currentSeason.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   if (loading) {
     return (
       <div className="flex justify-center items-center h-64">
@@ -245,7 +355,20 @@ const TeamUniforms = () => {
 
   return (
     <div className="container mx-auto px-4 py-8">
-      <h1 className="text-3xl font-bold mb-6">Team Uniforms</h1>
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="text-3xl font-bold">Team Uniforms</h1>
+        
+        {/* NEW: Export CSV Button */}
+        <button
+          onClick={exportToCSV}
+          className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
+        >
+          <svg className="h-4 w-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          </svg>
+          Export to CSV
+        </button>
+      </div>
       
       {/* Season Filter */}
       <div className="bg-white rounded-lg shadow-md p-6 mb-6">
@@ -315,6 +438,40 @@ const TeamUniforms = () => {
             {selectedDivision && ` in selected division`}
             {selectedTeam && ` on selected team`}
           </p>
+        </div>
+      </div>
+
+      {/* NEW SECTION: All Active Players Pants Count (Before Team Assignment) */}
+      <div className="bg-white rounded-lg shadow-md p-6 mb-8">
+        <h2 className="text-xl font-semibold mb-4">ALL ACTIVE PLAYERS - PANTS SUMMARY (Before Team Assignment)</h2>
+        <p className="text-sm text-gray-600 mb-4">
+          Total Active Players (excluding withdrawn): {allActivePlayersTotal}
+        </p>
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse border border-gray-300 text-sm">
+            <thead>
+              <tr className="bg-gray-100">
+                <th className="border border-gray-300 p-2 text-left">Pants Size</th>
+                <th className="border border-gray-300 p-2 text-center">Count</th>
+              </tr>
+            </thead>
+            <tbody>
+              {allPantsSizes.map(size => (
+                <tr key={size}>
+                  <td className="border border-gray-300 p-2 font-medium">{size}</td>
+                  <td className="border border-gray-300 p-2 text-center">
+                    {allActivePlayersPantsCounts[size] || 0}
+                  </td>
+                </tr>
+              ))}
+              <tr className="bg-gray-50 font-bold">
+                <td className="border border-gray-300 p-2">TOTAL</td>
+                <td className="border border-gray-300 p-2 text-center">
+                  {allActivePlayersTotal}
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
 

@@ -110,29 +110,12 @@ function App() {
                 {/* Workbond management: restricted roles */}
                 <Route
                   path="/workbond-management"
-                  element={
-                    <ProtectedRoute
-                      element={<WorkbondManagement />}
-                      requiredRoles={[
-                        'Administrator',
-                        'President',
-                        'Work Bond Manager',
-                      ]}
-                    />
-                  }
-                />
+                  element={<ProtectedRoute element={<WorkbondManagement />} />}
+                   />   
 				
 				 {/* Sponsors management: restricted roles */}
 <Route path="/sponsors" 
-					element={
-                    <ProtectedRoute
-                      element={<Sponsors />}
-                      requiredRoles={[
-                        'Administrator',
-                        'President',
-                      ]}
-                    />
-                  }
+					element={<ProtectedRoute element={<Sponsors />} />}
                 />
                 {/* Users management: Admin / President only */}
                 <Route

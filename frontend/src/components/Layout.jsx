@@ -45,7 +45,7 @@ const Layout = ({ children }) => {
       name: 'Workbond Management', 
       href: '/workbond-management', 
       icon: ClipboardCheck,
-      roles: ['Administrator', 'President', 'Work Bond Manager'], // Keep roles for these
+      //roles: ['Administrator', 'President', 'Work Bond Manager','Treasurer'], // Keep roles for these
     },
     { name: 'Volunteers', href: '/volunteers', icon: HandHelping },
     { 
@@ -61,13 +61,13 @@ const Layout = ({ children }) => {
       name: 'Users',
       href: '/users',
       icon: Shield,
-      roles: ['Administrator', 'President'],
+      //roles: ['Administrator', 'President'],
     },
     {
       name: 'Email Settings',
       href: '/email-settings',
       icon: Mail,
-      roles: ['Administrator', 'President'],
+      //roles: ['Administrator', 'President'],
     },
     { name: 'Configuration', href: '/configuration', icon: Settings },
 	

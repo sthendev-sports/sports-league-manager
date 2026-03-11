@@ -581,19 +581,45 @@ function findExistingVolunteer(existingVolunteers, volunteerRecord, divisionId, 
     return null;
   }
 
+  const volunteerId = volunteerRecord.volunteer_id;
   const email = (volunteerRecord.email || '').trim().toLowerCase();
   const phone = normalizePhone(volunteerRecord.phone);
   const name = (volunteerRecord.name || '').trim().toLowerCase();
 
+  console.log(`\n=== FIND EXISTING VOLUNTEER DEBUG ===`);
   console.log(`Looking for existing volunteer:`);
-  console.log(`  Email: ${email}`);
-  console.log(`  Phone: ${phone}`);
-  console.log(`  Name: ${name}`);
-  console.log(`  Division: ${divisionId}`);
-  console.log(`  Season: ${seasonId}`);
+  console.log(`  Volunteer ID from CSV: "${volunteerId}"`);
+  console.log(`  Email: "${email}"`);
+  console.log(`  Phone: "${phone}"`);
+  console.log(`  Name: "${name}"`);
+  console.log(`  Division ID: ${divisionId}`);
+  console.log(`  Season ID: ${seasonId}`);
+  
+  // Log all existing volunteers' volunteer_ids for comparison
+  console.log(`\nExisting volunteers in database for this season:`);
+  existingVolunteers.forEach(v => {
+    console.log(`  - ID: ${v.id}, Name: ${v.name}, Volunteer ID in DB: "${v.volunteer_id || 'NULL'}", Division: ${v.division_id}`);
+  });
 
-  // Strategy 1: exact match by season, division, email
+  // STRATEGY 1: Match by volunteer_id (MOST RELIABLE)
+  if (volunteerId) {
+    console.log(`\nTrying Strategy 1: Match by volunteer_id = "${volunteerId}"`);
+    const matchById = existingVolunteers.find(
+      (v) => String(v.volunteer_id) === String(volunteerId) && v.season_id === seasonId
+    );
+    if (matchById) {
+      console.log(`✅ Found existing volunteer by volunteer_id: ${matchById.name}`);
+      console.log(`   Current division in DB: ${matchById.division_id}`);
+      console.log(`   New division from CSV: ${divisionId}`);
+      return matchById;
+    } else {
+      console.log(`❌ No match found by volunteer_id`);
+    }
+  }
+
+  // STRATEGY 2: exact match by season, division, email
   if (email) {
+    console.log(`\nTrying Strategy 2: Match by email+season+division`);
     const match1 = existingVolunteers.find(
       (v) =>
         v.season_id === seasonId &&
@@ -601,32 +627,42 @@ function findExistingVolunteer(existingVolunteers, volunteerRecord, divisionId, 
         (v.email || '').trim().toLowerCase() === email
     );
     if (match1) {
-      console.log(`✅ Found existing volunteer by email+season+division: ${match1.name}, family_id: ${match1.family_id}`);
+      console.log(`✅ Found existing volunteer by email+season+division: ${match1.name}`);
       return match1;
     }
   }
 
-  // Strategy 2: same season + same email
+  // STRATEGY 3: same season + same email
   if (email) {
+    console.log(`\nTrying Strategy 3: Match by email+season`);
     const match2 = existingVolunteers.find(
       (v) =>
         v.season_id === seasonId &&
         (v.email || '').trim().toLowerCase() === email
     );
-    if (match2) return match2;
+    if (match2) {
+      console.log(`✅ Found existing volunteer by email+season: ${match2.name}`);
+      return match2;
+    }
   }
 
-  // Strategy 3: same season + same normalized phone + same name
+  // STRATEGY 4: same season + same normalized phone + same name
   if (phone && name) {
+    console.log(`\nTrying Strategy 4: Match by phone+name+season`);
     const match3 = existingVolunteers.find(
       (v) =>
         v.season_id === seasonId &&
         normalizePhone(v.phone) === phone &&
         (v.name || '').trim().toLowerCase() === name
     );
-    if (match3) return match3;
+    if (match3) {
+      console.log(`✅ Found existing volunteer by phone+name+season: ${match3.name}`);
+      return match3;
+    }
   }
 
+  console.log(`❌ No existing volunteer found`);
+  console.log(`=== END DEBUG ===\n`);
   return null;
 }
 
@@ -696,6 +732,13 @@ async function updateExistingVolunteer(existingVolunteer, newVolunteerData) {
   console.log(`\n🔄 [UPDATE CHECK] for ${existingVolunteer.name}`);
   console.log(`   Existing family_id: ${existingVolunteer.family_id}`);
   console.log(`   New family_id: ${newVolunteerData.family_id}`);
+  
+  if (newVolunteerData.division_id !== undefined && 
+      newVolunteerData.division_id !== existingVolunteer.division_id) {
+    updates.division_id = newVolunteerData.division_id;
+    hasChanges = true;
+    console.log(`   ✅ Division ID needs update: ${existingVolunteer.division_id} -> ${newVolunteerData.division_id}`);
+  }
  // ==== CRITICAL FIX: Never clear an existing family_id ====
   // If we have existing family_id and import doesn't provide a new one, keep existing
   if (existingVolunteer.family_id && (!newVolunteerData.family_id || newVolunteerData.family_id === null)) {
@@ -714,6 +757,7 @@ async function updateExistingVolunteer(existingVolunteer, newVolunteerData) {
     updates.family_id = newVolunteerData.family_id;
     hasChanges = true;
     console.log(`   ✅ Family ID needs update: ${existingVolunteer.family_id} -> ${newVolunteerData.family_id}`);
+	console.log(`   ✅ Division ID needs update: ${existingVolunteer.division_id} -> ${newVolunteerData.division_id}`);
   }
 
   // Email

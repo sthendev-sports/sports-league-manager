@@ -1267,6 +1267,59 @@ const Volunteers = () => {
       </div>
     );
   };
+// Helper function to export volunteers to CSV
+const exportVolunteersToCSV = () => {
+  // Define CSV headers
+  const headers = [
+    'Name',
+    'Email',
+    'Phone',
+    'Assigned Role',
+    'Interested Roles',
+    'Division',
+    'Team',
+    'Season',
+    'Training Status',
+    'Background Check'
+  ];
+
+  // Convert filtered volunteers to CSV rows
+  const csvRows = filteredVolunteers.map(volunteer => [
+    volunteer.name || '',
+    volunteer.email || '',
+    volunteer.phone || '',
+    volunteer.role || '',
+    volunteer.interested_roles || '',
+    volunteer.division?.name || 'Any Division',
+    volunteer.team?.name || 'Unallocated',
+    volunteer.season?.name || 'N/A',
+    volunteer.trainings_summary ? 
+      `${volunteer.trainings_summary.completed}/${volunteer.trainings_summary.total} completed` : 
+      'No trainings',
+    volunteer.background_check_completed || 'pending'
+  ]);
+
+  // Combine headers and rows
+  const csvContent = [
+    headers.join(','),
+    ...csvRows.map(row => row.map(cell => 
+      // Wrap cells with commas in quotes
+      typeof cell === 'string' && cell.includes(',') ? `"${cell}"` : cell
+    ).join(','))
+  ].join('\n');
+
+  // Create download link
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const link = document.createElement('a');
+  const url = URL.createObjectURL(blob);
+  link.setAttribute('href', url);
+  link.setAttribute('download', `volunteers_export_${new Date().toISOString().split('T')[0]}.csv`);
+  link.style.visibility = 'hidden';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+};
+
 
   return (
     <div className="w-full">
@@ -1303,6 +1356,13 @@ const Volunteers = () => {
                   importType="volunteers"
                   seasons={seasons}
                 />
+				<button
+        onClick={exportVolunteersToCSV}
+        className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+      >
+        <Download className="h-4 w-4 mr-2" />
+        Export CSV
+      </button>
 
                 <button
                   onClick={() => {

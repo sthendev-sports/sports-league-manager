@@ -1,5 +1,5 @@
 import React, {useState, useEffect, useRef, useMemo, useDeferredValue } from 'react';
-import { Plus, Search, Users, RefreshCw, Mail, Phone, Filter, ChevronDown, ChevronUp, Link, X, Check } from 'lucide-react';
+import { Plus, Search, Users, RefreshCw, Mail, Phone, Filter, ChevronDown, ChevronUp, Link, X, Check, Download } from 'lucide-react';
 import { playersAPI, seasonsAPI, importAPI, parseCSV, teamsAPI } from '../services/api';
 import CSVImport from '../components/CSVImport';
 import CSVTemplate from '../components/CSVTemplate';
@@ -1388,6 +1388,148 @@ const enhancePlayersWithVolunteerData = async (playersData) => {
       </button>
     </div>
   );
+  
+  // Helper function to export players to CSV
+const exportPlayersToCSV = () => {
+  // Define CSV headers
+  const headers = [
+    'First Name',
+    'Last Name',
+    'Status',
+    'Travel Player',
+    'Division',
+    'Team',
+    'Age',
+    'Birth Date',
+    'Gender',
+    'Shirt Size',
+    'Pants Size',
+    'Registration Paid',
+    'Workbond Status',
+    'Medical Conditions',
+    'Primary Guardian',
+    'Primary Guardian Email',
+    'Primary Guardian Phone',
+    'Primary Guardian Volunteer Role',
+    'Secondary Guardian',
+    'Secondary Guardian Email',
+    'Secondary Guardian Phone',
+    'Secondary Guardian Volunteer Role',
+    'Registration #',
+    'Family ID'
+  ];
+
+  // Convert filtered players to CSV rows
+  const csvRows = filteredPlayers.map(player => {
+    // Calculate age
+    const age = player.birth_date ? calculateAge(player.birth_date) : 'N/A';
+    
+    // Format birth date
+    const birthDate = player.birth_date ? formatBirthDate(player.birth_date) : 'N/A';
+    
+    // Check if board member family
+    const hasBoardMember = boardMembers.some(bm => bm.family_id === player.family_id);
+    
+    // Determine workbond status display
+    let workbondStatus = 'Not Received';
+    if (hasBoardMember) {
+      workbondStatus = 'Board Member - Exempt';
+    } else if (player.season_workbond?.notes) {
+      if (player.season_workbond.notes.includes('Exempt')) {
+        workbondStatus = 'Exempt';
+      } else if (player.season_workbond.received) {
+        workbondStatus = 'Received';
+      } else {
+        workbondStatus = player.season_workbond.notes;
+      }
+    }
+    
+    // Find primary guardian volunteer role
+    let primaryVolunteerRole = 'None';
+    if (player.volunteers) {
+      const primaryVolunteer = player.volunteers.find(v => {
+        const volunteerName = v.name || '';
+        const guardianName = player.family?.primary_contact_name || '';
+        const volunteerEmail = v.email || '';
+        const guardianEmail = player.family?.primary_contact_email || '';
+        
+        return (volunteerName.trim().toLowerCase() === guardianName.trim().toLowerCase()) ||
+               (volunteerEmail.trim().toLowerCase() === guardianEmail.trim().toLowerCase());
+      });
+      if (primaryVolunteer) {
+        primaryVolunteerRole = `${primaryVolunteer.role}${primaryVolunteer.is_approved ? ' (Selected)' : ''}`;
+      }
+    }
+    
+    // Find secondary guardian volunteer role
+    let secondaryVolunteerRole = 'None';
+    if (player.volunteers && player.family?.parent2_first_name) {
+      const secondaryVolunteer = player.volunteers.find(v => {
+        const volunteerName = v.name || '';
+        const guardianName = `${player.family.parent2_first_name} ${player.family.parent2_last_name || ''}`.trim();
+        const volunteerEmail = v.email || '';
+        const guardianEmail = player.family.parent2_email || '';
+        
+        return (volunteerName.trim().toLowerCase() === guardianName.trim().toLowerCase()) ||
+               (volunteerEmail.trim().toLowerCase() === guardianEmail.trim().toLowerCase());
+      });
+      if (secondaryVolunteer) {
+        secondaryVolunteerRole = `${secondaryVolunteer.role}${secondaryVolunteer.is_approved ? ' (Selected)' : ''}`;
+      }
+    }
+    
+    return [
+      player.first_name || '',
+      player.last_name || '',
+      player.status || 'active',
+      player.is_travel_player ? 'Yes' : 'No',
+      player.division?.name || player.program_title || 'N/A',
+      player.team?.name || 'No Team',
+      age,
+      birthDate,
+      player.gender || 'N/A',
+      player.shirt_size || player.uniform_shirt_size || 'N/A',
+      player.pants_size || player.uniform_pants_size || 'N/A',
+      player.payment_received ? 'Paid' : 'Pending',
+      workbondStatus,
+      (player.medical_conditions && player.medical_conditions !== 'None' && player.medical_conditions !== 'none') 
+        ? player.medical_conditions 
+        : 'None',
+      player.family?.primary_contact_name || '',
+      player.family?.primary_contact_email || '',
+      player.family?.primary_contact_phone || '',
+      primaryVolunteerRole,
+      player.family?.parent2_first_name ? `${player.family.parent2_first_name} ${player.family.parent2_last_name || ''}`.trim() : '',
+      player.family?.parent2_email || '',
+      player.family?.parent2_phone || '',
+      secondaryVolunteerRole,
+      player.registration_no || '',
+      player.family_id || ''
+    ];
+  });
+
+  // Combine headers and rows
+  const csvContent = [
+    headers.join(','),
+    ...csvRows.map(row => row.map(cell => 
+      // Wrap cells with commas or special characters in quotes
+      typeof cell === 'string' && (cell.includes(',') || cell.includes('"') || cell.includes('\n')) 
+        ? `"${cell.replace(/"/g, '""')}"` 
+        : cell
+    ).join(','))
+  ].join('\n');
+
+  // Create download link
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const link = document.createElement('a');
+  const url = URL.createObjectURL(blob);
+  link.setAttribute('href', url);
+  link.setAttribute('download', `players_export_${new Date().toISOString().split('T')[0]}.csv`);
+  link.style.visibility = 'hidden';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+};
 
   // Family Linker Form Content
   const FamilyLinkerFormContent = (
@@ -1519,12 +1661,23 @@ const enhancePlayersWithVolunteerData = async (playersData) => {
     importType="players"
     seasons={seasons}
   />
+  
+  {/* NEW EXPORT BUTTON - Add this right here */}
+  <button
+    onClick={exportPlayersToCSV}
+    className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+  >
+    <Download className="h-4 w-4 mr-2" />
+    Export CSV
+  </button>
+
   {/* Add Player button commented out for future implementation
   <button className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700">
     <Plus className="h-4 w-4 mr-2" />
     Add Player
   </button>
   */}
+  
   {/* Debug buttons */}
   <button 
     onClick={debugVolunteerData}
@@ -1533,16 +1686,16 @@ const enhancePlayersWithVolunteerData = async (playersData) => {
     Debug Volunteers
   </button>
   <button 
-  onClick={async () => {
-    setShowFamilyLinker(true);
-    // Load unlinked volunteers when opening the modal
-    await loadUnlinkedVolunteers();
-  }}
-  className="inline-flex items-center px-4 py-2 border border-yellow-300 rounded-md shadow-sm text-sm font-medium text-yellow-700 bg-yellow-50 hover:bg-yellow-100"
->
-  <Link className="h-4 w-4 mr-2" />
-  Fix Family Links
-</button>
+    onClick={async () => {
+      setShowFamilyLinker(true);
+      // Load unlinked volunteers when opening the modal
+      await loadUnlinkedVolunteers();
+    }}
+    className="inline-flex items-center px-4 py-2 border border-yellow-300 rounded-md shadow-sm text-sm font-medium text-yellow-700 bg-yellow-50 hover:bg-yellow-100"
+  >
+    <Link className="h-4 w-4 mr-2" />
+    Fix Family Links
+  </button>
 </div>
         </div>
       </div>

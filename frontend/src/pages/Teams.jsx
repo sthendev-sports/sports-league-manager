@@ -220,17 +220,23 @@ const Teams = () => {
   };
 
   const handleEditTeamClick = (team) => {
-    setEditingTeam(team);
-    setTeamForm({
-      name: team.name || '',
-      color: team.color || 'blue',
-      division_id: team.division_id || '',
-      season_id: team.season_id || selectedSeason || seasons[0]?.id || '',
-    });
-    setCustomColor(team.color || '');
-    setUsingCustomColor(!!team.color && !['blue', 'red', 'green', 'yellow'].includes(team.color));
-    setShowTeamForm(true);
-  };
+  setEditingTeam(team);
+  
+  // Get all unique colors from existing teams
+  const existingColors = [...new Set(teams.map(t => t.color).filter(Boolean))];
+  const standardColors = ['blue', 'red', 'green', 'yellow'];
+  const allColors = [...new Set([...standardColors, ...existingColors])];
+  
+  setTeamForm({
+    name: team.name || '',
+    color: team.color || 'blue',
+    division_id: team.division_id || '',
+    season_id: team.season_id || selectedSeason || seasons[0]?.id || '',
+  });
+  setCustomColor(team.color || '');
+  setUsingCustomColor(!!team.color && !standardColors.includes(team.color));
+  setShowTeamForm(true);
+};
 
   const handleTeamSubmit = async (e) => {
     if (e) e.preventDefault();
@@ -1014,7 +1020,7 @@ const Teams = () => {
             </select>
           </div>
 
-          {/* Color selection */}
+                    {/* Color selection */}
           <div>
             <label style={{
               display: 'block',
@@ -1048,11 +1054,27 @@ const Teams = () => {
                 }
               }}
             >
-              <option value="blue">Blue</option>
-              <option value="red">Red</option>
-              <option value="green">Green</option>
-              <option value="yellow">Yellow</option>
-              <option value="custom">Custom Color (enter below)</option>
+              {/* Standard colors group */}
+              <optgroup label="Standard Colors">
+                <option value="blue">Blue</option>
+                <option value="red">Red</option>
+                <option value="green">Green</option>
+                <option value="yellow">Yellow</option>
+              </optgroup>
+              
+              {/* Existing custom colors from database */}
+              {teams.length > 0 && (
+                <optgroup label="Previously Used Colors">
+                  {[...new Set(teams.map(t => t.color).filter(Boolean))]
+                    .filter(color => !['blue', 'red', 'green', 'yellow'].includes(color))
+                    .map(color => (
+                      <option key={color} value={color}>{color}</option>
+                    ))
+                  }
+                </optgroup>
+              )}
+              
+              <option value="custom">✨ Create New Custom Color</option>
             </select>
             
             {usingCustomColor && (
@@ -1064,7 +1086,7 @@ const Teams = () => {
                   color: '#374151',
                   marginBottom: '8px'
                 }}>
-                  Custom Color *
+                  Custom Color Name *
                 </label>
                 <input
                   type="text"
@@ -1083,7 +1105,7 @@ const Teams = () => {
                     setCustomColor(e.target.value);
                     setTeamForm({ ...teamForm, color: e.target.value });
                   }}
-                  placeholder="Enter custom color (e.g., 'Royal Blue', 'Forest Green')"
+                  placeholder="Enter custom color name (e.g., 'Royal Blue', 'Forest Green')"
                 />
                 <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px' }}>
                   Enter a descriptive name for your custom color

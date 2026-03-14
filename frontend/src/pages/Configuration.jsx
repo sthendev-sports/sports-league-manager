@@ -883,29 +883,33 @@ const handleTeamSubmit = async (e) => {
     }
   };
 
-  const handleEditTeam = (team) => {
-    setEditingTeam(team);
-    
-    const standardColors = ['red', 'blue', 'green', 'orange', 'purple', 'yellow', 'indigo', 'pink', 'teal', 'gray', 'black', 'white'];
-    const isCustomColor = team.color && !standardColors.includes(team.color);
-    
-    setTeamForm({
-      name: team.name,
-      color: isCustomColor ? 'custom' : (team.color || 'blue'),
-      division_id: team.division_id || '',
-      season_id: team.season_id || selectedSeason
-    });
-    
-    if (isCustomColor) {
-      setUsingCustomColor(true);
-      setCustomColor(team.color);
-    } else {
-      setUsingCustomColor(false);
-      setCustomColor('');
-    }
-    
-    setShowTeamForm(true);
-  };
+const handleEditTeam = (team) => {
+  setEditingTeam(team);
+  
+  // Get all unique colors from existing teams
+  const existingColors = [...new Set(teams.map(t => t.color).filter(Boolean))];
+  const standardColors = ['red', 'blue', 'green', 'orange', 'purple', 'yellow', 'indigo', 'pink', 'teal', 'gray', 'black', 'white'];
+  const allColors = [...new Set([...standardColors, ...existingColors])];
+  
+  const isCustomColor = team.color && !standardColors.includes(team.color);
+  
+  setTeamForm({
+    name: team.name,
+    color: team.color || 'blue',
+    division_id: team.division_id || '',
+    season_id: team.season_id || selectedSeason
+  });
+  
+  if (isCustomColor) {
+    setUsingCustomColor(true);
+    setCustomColor(team.color);
+  } else {
+    setUsingCustomColor(false);
+    setCustomColor('');
+  }
+  
+  setShowTeamForm(true);
+};
 
   const handleEditDivision = (division) => {
     setEditingDivision(division);
@@ -1301,40 +1305,56 @@ const handleTeamSubmit = async (e) => {
               Team Color
             </label>
             <select
-              style={{
-                width: '100%',
-                padding: '10px 12px',
-                border: '1px solid #d1d5db',
-                borderRadius: '8px',
-                fontSize: '14px',
-                color: '#374151',
-                backgroundColor: 'white',
-                marginBottom: '10px'
-              }}
-              value={teamForm.color}
-              onChange={(e) => {
-                const isCustom = e.target.value === 'custom';
-                setTeamForm({ ...teamForm, color: e.target.value });
-                setUsingCustomColor(isCustom);
-                if (!isCustom) {
-                  setCustomColor('');
-                }
-              }}
-            >
-              <option value="red">Red</option>
-              <option value="blue">Blue</option>
-              <option value="green">Green</option>
-              <option value="orange">Orange</option>
-              <option value="purple">Purple</option>
-              <option value="yellow">Yellow</option>
-              <option value="indigo">Indigo</option>
-              <option value="pink">Pink</option>
-              <option value="teal">Teal</option>
-              <option value="gray">Gray</option>
-              <option value="black">Black</option>
-              <option value="white">White</option>
-              <option value="custom">Custom Color (enter below)</option>
-            </select>
+  style={{
+    width: '100%',
+    padding: '10px 12px',
+    border: '1px solid #d1d5db',
+    borderRadius: '8px',
+    fontSize: '14px',
+    color: '#374151',
+    backgroundColor: 'white',
+    marginBottom: '10px'
+  }}
+  value={teamForm.color}
+  onChange={(e) => {
+    const isCustom = e.target.value === 'custom';
+    setTeamForm({ ...teamForm, color: e.target.value });
+    setUsingCustomColor(isCustom);
+    if (!isCustom) {
+      setCustomColor('');
+    }
+  }}
+>
+  {/* Standard colors group */}
+  <optgroup label="Standard Colors">
+    <option value="red">Red</option>
+    <option value="blue">Blue</option>
+    <option value="green">Green</option>
+    <option value="orange">Orange</option>
+    <option value="purple">Purple</option>
+    <option value="yellow">Yellow</option>
+    <option value="indigo">Indigo</option>
+    <option value="pink">Pink</option>
+    <option value="teal">Teal</option>
+    <option value="gray">Gray</option>
+    <option value="black">Black</option>
+    <option value="white">White</option>
+  </optgroup>
+  
+  {/* Existing custom colors from database */}
+  {teams.length > 0 && (
+    <optgroup label="Previously Used Colors">
+      {[...new Set(teams.map(t => t.color).filter(Boolean))]
+        .filter(color => !['red', 'blue', 'green', 'orange', 'purple', 'yellow', 'indigo', 'pink', 'teal', 'gray', 'black', 'white'].includes(color))
+        .map(color => (
+          <option key={color} value={color}>{color}</option>
+        ))
+      }
+    </optgroup>
+  )}
+  
+  <option value="custom">✨ Create New Custom Color</option>
+</select>
             
             {usingCustomColor && (
               <div>

@@ -362,27 +362,58 @@ const Teams = () => {
     setExpandedTeam(expandedTeam === teamId ? null : teamId);
   };
 
-  // Team Modal Footer
+    // Team Modal Footer
   const TeamModalFooter = (
-    <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '1rem' }}>
+    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
       <button
-        type="button"
         onClick={resetTeamForm}
-        className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+        style={{
+          padding: '10px 20px',
+          fontSize: '14px',
+          fontWeight: '500',
+          color: '#374151',
+          backgroundColor: 'white',
+          border: '1px solid #d1d5db',
+          borderRadius: '6px',
+          cursor: 'pointer'
+        }}
+        onMouseOver={(e) => e.target.style.backgroundColor = '#f9fafb'}
+        onMouseOut={(e) => e.target.style.backgroundColor = 'white'}
       >
         Cancel
       </button>
       <button
-        type="submit"
         onClick={handleTeamSubmit}
-        className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700"
+        disabled={!teamForm.name || !teamForm.division_id || !teamForm.season_id || (usingCustomColor && !customColor)}
+        style={{
+          padding: '10px 20px',
+          fontSize: '14px',
+          fontWeight: '500',
+          color: 'white',
+          backgroundColor: (!teamForm.name || !teamForm.division_id || !teamForm.season_id || (usingCustomColor && !customColor)) ? '#9ca3af' : '#2563eb',
+          border: 'none',
+          borderRadius: '6px',
+          cursor: (!teamForm.name || !teamForm.division_id || !teamForm.season_id || (usingCustomColor && !customColor)) ? 'not-allowed' : 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px'
+        }}
+        onMouseOver={(e) => {
+          if (teamForm.name && teamForm.division_id && teamForm.season_id && (!usingCustomColor || customColor)) {
+            e.target.style.backgroundColor = '#1d4ed8';
+          }
+        }}
+        onMouseOut={(e) => {
+          if (teamForm.name && teamForm.division_id && teamForm.season_id && (!usingCustomColor || customColor)) {
+            e.target.style.backgroundColor = '#2563eb';
+          }
+        }}
       >
-        <Save className="h-4 w-4 mr-2" />
+        <Save style={{ width: '16px', height: '16px' }} />
         {editingTeam ? 'Update Team' : 'Create Team'}
       </button>
     </div>
   );
-
 
   const renderTeamCard = (team) => (
               <div key={team.id} className="bg-white shadow rounded-lg overflow-hidden">
@@ -879,36 +910,66 @@ const Teams = () => {
         </div>
       </div>
 
-      {/* Team Modal */}
+            {/* Team Modal */}
       <Modal
         isOpen={showTeamForm}
-        title={editingTeam ? 'Edit Team' : 'Add New Team'}
         onClose={resetTeamForm}
-        footer={TeamModalFooter}
+        title={editingTeam ? 'Edit Team' : 'Add New Team'}
       >
-        <form onSubmit={handleTeamSubmit} className="space-y-4">
+        <form onSubmit={handleTeamSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
           {/* Team Name */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Team Name</label>
+            <label style={{
+              display: 'block',
+              fontSize: '14px',
+              fontWeight: '500',
+              color: '#374151',
+              marginBottom: '8px'
+            }}>
+              Team Name *
+            </label>
             <input
               type="text"
-              name="name"
-              value={teamForm.name}
-              onChange={handleTeamFormChange}
-              className="block w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-              placeholder="Enter team name"
               required
+              style={{
+                width: '100%',
+                padding: '10px 12px',
+                border: '1px solid #d1d5db',
+                borderRadius: '8px',
+                fontSize: '14px',
+                color: '#374151',
+                backgroundColor: 'white'
+              }}
+              value={teamForm.name}
+              onChange={(e) => setTeamForm({ ...teamForm, name: e.target.value })}
+              placeholder="Enter team name"
             />
           </div>
 
           {/* Season Selection */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Season</label>
+            <label style={{
+              display: 'block',
+              fontSize: '14px',
+              fontWeight: '500',
+              color: '#374151',
+              marginBottom: '8px'
+            }}>
+              Season *
+            </label>
             <select
-              name="season_id"
+              required
+              style={{
+                width: '100%',
+                padding: '10px 12px',
+                border: '1px solid #d1d5db',
+                borderRadius: '8px',
+                fontSize: '14px',
+                color: '#374151',
+                backgroundColor: 'white'
+              }}
               value={teamForm.season_id}
-              onChange={handleTeamFormChange}
-              className="block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md"
+              onChange={(e) => setTeamForm({ ...teamForm, season_id: e.target.value })}
             >
               <option value="">Select a season</option>
               {seasons.map(season => (
@@ -921,12 +982,28 @@ const Teams = () => {
 
           {/* Division Selection */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Division</label>
+            <label style={{
+              display: 'block',
+              fontSize: '14px',
+              fontWeight: '500',
+              color: '#374151',
+              marginBottom: '8px'
+            }}>
+              Division *
+            </label>
             <select
-              name="division_id"
+              required
+              style={{
+                width: '100%',
+                padding: '10px 12px',
+                border: '1px solid #d1d5db',
+                borderRadius: '8px',
+                fontSize: '14px',
+                color: '#374151',
+                backgroundColor: 'white'
+              }}
               value={teamForm.division_id}
-              onChange={handleTeamFormChange}
-              className="block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md"
+              onChange={(e) => setTeamForm({ ...teamForm, division_id: e.target.value })}
             >
               <option value="">Select a division</option>
               {getFilteredDivisions().map(division => (
@@ -939,57 +1016,84 @@ const Teams = () => {
 
           {/* Color selection */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Team Color</label>
-            <div className="flex items-center space-x-3">
-              <select
-                name="color"
-                value={usingCustomColor ? 'custom' : teamForm.color}
-                onChange={(e) => {
-                  const value = e.target.value;
-                  if (value === 'custom') {
-                    setUsingCustomColor(true);
-                    // Keep existing custom color or blank
-                  } else {
-                    setUsingCustomColor(false);
-                    setTeamForm((prev) => ({ ...prev, color: value }));
-                  }
-                }}
-                className="block w-48 pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md"
-              >
-                <option value="blue">Blue</option>
-                <option value="red">Red</option>
-                <option value="green">Green</option>
-                <option value="yellow">Yellow</option>
-                <option value="custom">Custom...</option>
-              </select>
-
-              {usingCustomColor && (
-                <div className="flex items-center space-x-2">
-                  <input
-                    type="color"
-                    value={customColor || '#0000ff'}
-                    onChange={(e) => {
-                      const value = e.target.value;
-                      setCustomColor(value);
-                      setTeamForm((prev) => ({ ...prev, color: value }));
-                    }}
-                    className="h-10 w-10 rounded-full border border-gray-300"
-                  />
-                  <input
-                    type="text"
-                    value={customColor}
-                    onChange={(e) => {
-                      const value = e.target.value;
-                      setCustomColor(value);
-                      setTeamForm((prev) => ({ ...prev, color: value }));
-                    }}
-                    placeholder="#0000ff"
-                    className="block w-32 border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-                  />
-                </div>
-              )}
-            </div>
+            <label style={{
+              display: 'block',
+              fontSize: '14px',
+              fontWeight: '500',
+              color: '#374151',
+              marginBottom: '8px'
+            }}>
+              Team Color
+            </label>
+            <select
+              style={{
+                width: '100%',
+                padding: '10px 12px',
+                border: '1px solid #d1d5db',
+                borderRadius: '8px',
+                fontSize: '14px',
+                color: '#374151',
+                backgroundColor: 'white',
+                marginBottom: '10px'
+              }}
+              value={usingCustomColor ? 'custom' : teamForm.color}
+              onChange={(e) => {
+                const isCustom = e.target.value === 'custom';
+                if (isCustom) {
+                  setUsingCustomColor(true);
+                } else {
+                  setUsingCustomColor(false);
+                  setTeamForm({ ...teamForm, color: e.target.value });
+                  setCustomColor('');
+                }
+              }}
+            >
+              <option value="blue">Blue</option>
+              <option value="red">Red</option>
+              <option value="green">Green</option>
+              <option value="yellow">Yellow</option>
+              <option value="custom">Custom Color (enter below)</option>
+            </select>
+            
+            {usingCustomColor && (
+              <div>
+                <label style={{
+                  display: 'block',
+                  fontSize: '14px',
+                  fontWeight: '500',
+                  color: '#374151',
+                  marginBottom: '8px'
+                }}>
+                  Custom Color *
+                </label>
+                <input
+                  type="text"
+                  required={usingCustomColor}
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    border: '1px solid #d1d5db',
+                    borderRadius: '8px',
+                    fontSize: '14px',
+                    color: '#374151',
+                    backgroundColor: 'white'
+                  }}
+                  value={customColor}
+                  onChange={(e) => {
+                    setCustomColor(e.target.value);
+                    setTeamForm({ ...teamForm, color: e.target.value });
+                  }}
+                  placeholder="Enter custom color (e.g., 'Royal Blue', 'Forest Green')"
+                />
+                <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px' }}>
+                  Enter a descriptive name for your custom color
+                </p>
+              </div>
+            )}
           </div>
+
+          {/* Modal Footer */}
+          {TeamModalFooter}
         </form>
       </Modal>
     </div>

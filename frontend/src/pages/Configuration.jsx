@@ -749,41 +749,39 @@ const TrainingModalFooter = (
 
 
 
-  const handleTeamSubmit = async (e) => {
-    if (e) e.preventDefault();
-    try {
-      const finalColor = usingCustomColor ? customColor : teamForm.color;
+const handleTeamSubmit = async (e) => {
+  if (e) e.preventDefault();
+  try {
+    const finalColor = usingCustomColor ? customColor : teamForm.color;
 
-      const teamData = {
-        name: teamForm.name,
-        color: finalColor,
-        division_id: teamForm.division_id || null,
-        season_id: selectedSeason || seasons[0]?.id
-      };
+    const teamData = {
+      name: teamForm.name,
+      color: finalColor,
+      division_id: teamForm.division_id || null,
+      season_id: selectedSeason || seasons[0]?.id
+    };
 
-      const url = editingTeam ? `/api/teams/${editingTeam.id}` : '/api/teams';
-      const method = editingTeam ? 'PUT' : 'POST';
+    const url = editingTeam ? `/api/teams/${editingTeam.id}` : '/api/teams';
+    const method = editingTeam ? 'PUT' : 'POST';
 
-      const response = await fetch(url, {
-        method,
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(teamData)
-      });
+    const response = await fetch(url, {
+      method,
+      headers: getAuthHeaders(), // This adds the authentication token
+      body: JSON.stringify(teamData)
+    });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`HTTP ${response.status}: ${errorText}`);
-      }
-      
-      await loadData();
-      resetTeamForm();
-    } catch (error) {
-      console.error('Error saving team:', error);
-      setError('Failed to save team: ' + error.message);
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`HTTP ${response.status}: ${errorText}`);
     }
-  };
+    
+    await loadData();
+    resetTeamForm();
+  } catch (error) {
+    console.error('Error saving team:', error);
+    setError('Failed to save team: ' + error.message);
+  }
+};
 
   const handleDivisionSubmit = async (e) => {
     if (e) e.preventDefault();

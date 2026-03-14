@@ -8,6 +8,7 @@ import {
 import Modal from '../components/Modal';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
+import { generateSponsorInvoice } from '../utils/pdfGenerator';
 
 // Define which roles can access this page
 const ALLOWED_ROLES = ['Administrator', 'President', 'Treasurer', 'Equipment Manager'];
@@ -80,6 +81,8 @@ const [sponsorTypeFilter, setSponsorTypeFilter] = useState('all'); // 'all', 'ne
     return saved ? JSON.parse(saved) : DEFAULT_LOCATION_OPTIONS;
   });
   
+  
+  
   // Location management states
 const [locationConfigs, setLocationConfigs] = useState([]);
 const [editingLocation, setEditingLocation] = useState(null);
@@ -102,6 +105,29 @@ const [editLocationForm, setEditLocationForm] = useState({
   const [selectedLocations, setSelectedLocations] = useState([]);
   const [currentField, setCurrentField] = useState('');
   const [currentLocation, setCurrentLocation] = useState('');
+  
+  // PDF Generator
+  const [selectedSponsorForInvoice, setSelectedSponsorForInvoice] = useState(null);
+const [showInvoiceModal, setShowInvoiceModal] = useState(false);
+const [generatingInvoice, setGeneratingInvoice] = useState(false);
+
+//Invoice Editor
+const [invoiceSettings, setInvoiceSettings] = useState(() => {
+  const saved = localStorage.getItem('invoice_settings');
+  return saved ? JSON.parse(saved) : null;
+});
+const [showInvoiceSettings, setShowInvoiceSettings] = useState(false);
+const [editingInvoiceSettings, setEditingInvoiceSettings] = useState(false);
+const [tempInvoiceSettings, setTempInvoiceSettings] = useState(null);
+
+
+
+// Add this function to preview invoice before generating
+const handlePreviewInvoice = (sponsor) => {
+  setSelectedSponsorForInvoice(sponsor);
+  setShowInvoiceModal(true);
+};
+
   
   // Form data for sponsor
   const [formData, setFormData] = useState({
@@ -231,7 +257,112 @@ const handleDeleteLocation = async (id, locationName) => {
   }
 };
 
+// Load invoice settings from localStorage
+const loadInvoiceSettings = () => {
+  try {
+    const saved = localStorage.getItem('invoice_settings');
+    if (saved) {
+      setInvoiceSettings(JSON.parse(saved));
+    } else {
+      // Create default settings if none exist
+      const defaultSettings = {
+        organization: {
+          name: 'Sayreville Little League',
+          abbreviation: 'SLL',
+          address: 'P.O. Box 123',
+          cityStateZip: 'Parlin, NJ 08859',
+          phone: '732-727-4496',
+          email: 'sayrevillelittleleagueinfo@gmail.com',
+          venmo: '@SayrevilleLittleLeague'
+        },
+        payment: {
+          checkPayableTo: 'Sayreville Little League',
+          alternatePayableTo: 'SLL',
+          notes: ''
+        },
+        invoice: {
+          footer: 'If you have any questions concerning this invoice, please contact:',
+          thankYouMessage: 'THANK YOU FOR YOUR BUSINESS!',
+          prefix: 'INV',
+          nextNumber: 1001
+        }
+      };
+      localStorage.setItem('invoice_settings', JSON.stringify(defaultSettings));
+      setInvoiceSettings(defaultSettings);
+    }
+  } catch (error) {
+    console.error('Error loading invoice settings:', error);
+  }
+};
 
+// Save invoice settings
+const handleSaveInvoiceSettings = () => {
+  try {
+    localStorage.setItem('invoice_settings', JSON.stringify(tempInvoiceSettings));
+    setInvoiceSettings(tempInvoiceSettings);
+    setEditingInvoiceSettings(false);
+    setShowInvoiceSettings(false);
+    setError(null);
+  } catch (error) {
+    setError('Failed to save invoice settings: ' + error.message);
+  }
+};
+
+// Reset invoice settings to default
+const handleResetInvoiceSettings = () => {
+  if (window.confirm('Reset all invoice settings to default values?')) {
+    const defaultSettings = {
+      organization: {
+        name: 'Sayreville Little League',
+        abbreviation: 'SLL',
+        address: 'P.O. Box 123',
+        cityStateZip: 'Parlin, NJ 08859',
+        phone: '732-727-4496',
+        email: 'sayrevillelittleleagueinfo@gmail.com',
+        venmo: '@SayrevilleLittleLeague'
+      },
+      payment: {
+        checkPayableTo: 'Sayreville Little League',
+        alternatePayableTo: 'SLL',
+        notes: ''
+      },
+      invoice: {
+        footer: 'If you have any questions concerning this invoice, please contact:',
+        thankYouMessage: 'THANK YOU FOR YOUR BUSINESS!',
+        prefix: 'INV',
+        nextNumber: 1001
+      }
+    };
+    localStorage.setItem('invoice_settings', JSON.stringify(defaultSettings));
+    setInvoiceSettings(defaultSettings);
+    setTempInvoiceSettings(defaultSettings);
+  }
+};
+
+
+
+
+// Handle invoice generation
+const handleGenerateInvoice = async (sponsor) => {
+  try {
+    setGeneratingInvoice(true);
+    generateSponsorInvoice(sponsor);
+  } catch (error) {
+    console.error('Error generating invoice:', error);
+    setError('Failed to generate invoice: ' + error.message);
+  } finally {
+    setGeneratingInvoice(false);
+    setShowInvoiceModal(false);
+    setSelectedSponsorForInvoice(null);
+  }
+};
+
+
+
+// Load settings on component mount
+useEffect(() => {
+  loadInvoiceSettings();
+}, []);
 
 const loadLocationConfig = async () => {
   try {
@@ -969,6 +1100,17 @@ const getFilteredSponsors = () => {
             <Mail className="h-4 w-4 inline mr-2" />
             Email
           </button>
+		  <button
+  onClick={() => setActiveTab('invoices')}
+  className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+    activeTab === 'invoices'
+      ? 'border-blue-500 text-blue-600'
+      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+  }`}
+>
+  <FileText className="h-4 w-4 inline mr-2" />
+  Invoices
+</button>
         </div>
       </div>
 
@@ -1532,6 +1674,406 @@ const getFilteredSponsors = () => {
           </div>
         </div>
       )}
+{/* Invoices Tab */}
+{/* Invoices Tab */}
+{activeTab === 'invoices' && (
+  <div className="space-y-6">
+    {/* Settings and Generate Toggle */}
+    <div className="flex gap-2 border-b border-gray-200">
+      <button
+        onClick={() => setShowInvoiceSettings(false)}
+        className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+          !showInvoiceSettings
+            ? 'border-blue-500 text-blue-600'
+            : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+        }`}
+      >
+        <FileText className="h-4 w-4 inline mr-2" />
+        Generate Invoice
+      </button>
+      {canEdit && (
+        <button
+          onClick={() => {
+            setShowInvoiceSettings(true);
+            setTempInvoiceSettings(invoiceSettings ? {...invoiceSettings} : null);
+          }}
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            showInvoiceSettings
+              ? 'border-blue-500 text-blue-600'
+              : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+          }`}
+        >
+          <Settings className="h-4 w-4 inline mr-2" />
+          Invoice Settings
+        </button>
+      )}
+    </div>
+
+    {/* Generate Invoice View */}
+    {!showInvoiceSettings && (
+      <div className="bg-white rounded-lg shadow p-6 border border-gray-200">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="text-lg font-medium text-gray-900">Generate Invoice</h3>
+            <p className="text-sm text-gray-600 mt-1">
+              Select a sponsor to generate a PDF invoice based on their current locations and costs
+            </p>
+          </div>
+        </div>
+
+        {/* Sponsor Selection */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Select Sponsor
+            </label>
+            <select
+              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-blue-500 focus:border-blue-500"
+              value={selectedSponsorForInvoice?.id || ''}
+              onChange={(e) => {
+                const sponsor = sponsors.find(s => s.id === parseInt(e.target.value));
+                setSelectedSponsorForInvoice(sponsor);
+              }}
+            >
+              <option value="">Choose a sponsor...</option>
+              {sponsors
+                .filter(s => s.is_active)
+                .sort((a, b) => a.company_name.localeCompare(b.company_name))
+                .map(sponsor => (
+                  <option key={sponsor.id} value={sponsor.id}>
+                    {sponsor.company_name} {sponsor.locations?.length ? `(${sponsor.locations.length} locations)` : '(No locations)'}
+                  </option>
+                ))}
+            </select>
+          </div>
+          <div className="flex items-end">
+            <button
+              onClick={() => handlePreviewInvoice(selectedSponsorForInvoice)}
+              disabled={!selectedSponsorForInvoice || generatingInvoice}
+              className="px-4 py-2 bg-blue-600 text-white rounded-md text-sm font-medium hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center"
+            >
+              <FileText className="h-4 w-4 mr-2" />
+              {generatingInvoice ? 'Generating...' : 'Generate Invoice'}
+            </button>
+          </div>
+        </div>
+
+        {/* Invoice Preview Info */}
+        {selectedSponsorForInvoice && (
+          <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+            <h4 className="font-medium text-gray-900 mb-3">Invoice Preview</h4>
+            
+            {/* Sponsor Info */}
+            <div className="grid grid-cols-2 gap-4 mb-4">
+              <div>
+                <p className="text-xs text-gray-500">Company</p>
+                <p className="text-sm font-medium">{selectedSponsorForInvoice.company_name}</p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500">Contact</p>
+                <p className="text-sm">{selectedSponsorForInvoice.contact_name || 'N/A'}</p>
+              </div>
+              {selectedSponsorForInvoice.email && (
+                <div>
+                  <p className="text-xs text-gray-500">Email</p>
+                  <p className="text-sm">{selectedSponsorForInvoice.email}</p>
+                </div>
+              )}
+              {selectedSponsorForInvoice.phone && (
+                <div>
+                  <p className="text-xs text-gray-500">Phone</p>
+                  <p className="text-sm">{selectedSponsorForInvoice.phone}</p>
+                </div>
+              )}
+            </div>
+
+            {/* Locations Preview */}
+            <div className="border-t pt-3">
+              <p className="text-xs text-gray-500 mb-2">Locations to be invoiced:</p>
+              {selectedSponsorForInvoice.locations && selectedSponsorForInvoice.locations.length > 0 ? (
+                <div className="space-y-2">
+                  {selectedSponsorForInvoice.locations.map((loc, idx) => (
+                    <div key={idx} className="flex justify-between items-center text-sm">
+                      <span>{loc.field} - {loc.location}</span>
+                      <span className="font-medium">${loc.price}</span>
+                    </div>
+                  ))}
+                  <div className="flex justify-between items-center pt-2 border-t font-bold">
+                    <span>Total</span>
+                    <span className="text-blue-600">${selectedSponsorForInvoice.total_amount || 0}</span>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-sm text-yellow-600">No locations assigned to this sponsor</p>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    )}
+
+    {/* Invoice Settings View */}
+    {showInvoiceSettings && canEdit && tempInvoiceSettings && (
+      <div className="bg-white rounded-lg shadow p-6 border border-gray-200">
+        <div className="flex items-center justify-between mb-6">
+          <h3 className="text-lg font-medium text-gray-900">Invoice Settings</h3>
+          <div className="flex space-x-3">
+            <button
+              onClick={handleResetInvoiceSettings}
+              className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+            >
+              Reset to Default
+            </button>
+            <button
+              onClick={() => {
+                setTempInvoiceSettings(invoiceSettings ? {...invoiceSettings} : null);
+                setShowInvoiceSettings(false);
+              }}
+              className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleSaveInvoiceSettings}
+              className="px-4 py-2 bg-blue-600 text-white rounded-md text-sm font-medium hover:bg-blue-700"
+            >
+              Save Settings
+            </button>
+          </div>
+        </div>
+
+        <div className="space-y-6">
+          {/* Organization Information */}
+          <div className="border-b pb-6">
+            <h4 className="text-md font-medium text-gray-900 mb-4">Organization Information</h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Organization Name
+                </label>
+                <input
+                  type="text"
+                  value={tempInvoiceSettings.organization.name}
+                  onChange={(e) => setTempInvoiceSettings({
+                    ...tempInvoiceSettings,
+                    organization: { ...tempInvoiceSettings.organization, name: e.target.value }
+                  })}
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Abbreviation
+                </label>
+                <input
+                  type="text"
+                  value={tempInvoiceSettings.organization.abbreviation}
+                  onChange={(e) => setTempInvoiceSettings({
+                    ...tempInvoiceSettings,
+                    organization: { ...tempInvoiceSettings.organization, abbreviation: e.target.value }
+                  })}
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Address Line
+                </label>
+                <input
+                  type="text"
+                  value={tempInvoiceSettings.organization.address}
+                  onChange={(e) => setTempInvoiceSettings({
+                    ...tempInvoiceSettings,
+                    organization: { ...tempInvoiceSettings.organization, address: e.target.value }
+                  })}
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  City, State, Zip
+                </label>
+                <input
+                  type="text"
+                  value={tempInvoiceSettings.organization.cityStateZip}
+                  onChange={(e) => setTempInvoiceSettings({
+                    ...tempInvoiceSettings,
+                    organization: { ...tempInvoiceSettings.organization, cityStateZip: e.target.value }
+                  })}
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Phone
+                </label>
+                <input
+                  type="text"
+                  value={tempInvoiceSettings.organization.phone}
+                  onChange={(e) => setTempInvoiceSettings({
+                    ...tempInvoiceSettings,
+                    organization: { ...tempInvoiceSettings.organization, phone: e.target.value }
+                  })}
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Email
+                </label>
+                <input
+                  type="email"
+                  value={tempInvoiceSettings.organization.email}
+                  onChange={(e) => setTempInvoiceSettings({
+                    ...tempInvoiceSettings,
+                    organization: { ...tempInvoiceSettings.organization, email: e.target.value }
+                  })}
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Venmo Handle
+                </label>
+                <input
+                  type="text"
+                  value={tempInvoiceSettings.organization.venmo}
+                  onChange={(e) => setTempInvoiceSettings({
+                    ...tempInvoiceSettings,
+                    organization: { ...tempInvoiceSettings.organization, venmo: e.target.value }
+                  })}
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Payment Information */}
+          <div className="border-b pb-6">
+            <h4 className="text-md font-medium text-gray-900 mb-4">Payment Information</h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Check Payable To
+                </label>
+                <input
+                  type="text"
+                  value={tempInvoiceSettings.payment.checkPayableTo}
+                  onChange={(e) => setTempInvoiceSettings({
+                    ...tempInvoiceSettings,
+                    payment: { ...tempInvoiceSettings.payment, checkPayableTo: e.target.value }
+                  })}
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Alternate Payable To
+                </label>
+                <input
+                  type="text"
+                  value={tempInvoiceSettings.payment.alternatePayableTo}
+                  onChange={(e) => setTempInvoiceSettings({
+                    ...tempInvoiceSettings,
+                    payment: { ...tempInvoiceSettings.payment, alternatePayableTo: e.target.value }
+                  })}
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                />
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Payment Notes
+                </label>
+                <textarea
+                  value={tempInvoiceSettings.payment.notes}
+                  onChange={(e) => setTempInvoiceSettings({
+                    ...tempInvoiceSettings,
+                    payment: { ...tempInvoiceSettings.payment, notes: e.target.value }
+                  })}
+                  rows="3"
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                  placeholder="Add any additional payment instructions or notes..."
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Invoice Settings */}
+          <div>
+            <h4 className="text-md font-medium text-gray-900 mb-4">Invoice Format</h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Invoice Prefix
+                </label>
+                <input
+                  type="text"
+                  value={tempInvoiceSettings.invoice.prefix}
+                  onChange={(e) => setTempInvoiceSettings({
+                    ...tempInvoiceSettings,
+                    invoice: { ...tempInvoiceSettings.invoice, prefix: e.target.value }
+                  })}
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                />
+                <p className="text-xs text-gray-500 mt-1">Format: {tempInvoiceSettings.invoice.prefix}-YYYY-####</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Next Invoice Number
+                </label>
+                <input
+                  type="number"
+                  value={tempInvoiceSettings.invoice.nextNumber}
+                  onChange={(e) => setTempInvoiceSettings({
+                    ...tempInvoiceSettings,
+                    invoice: { ...tempInvoiceSettings.invoice, nextNumber: parseInt(e.target.value) }
+                  })}
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Footer Message
+                </label>
+                <input
+                  type="text"
+                  value={tempInvoiceSettings.invoice.footer}
+                  onChange={(e) => setTempInvoiceSettings({
+                    ...tempInvoiceSettings,
+                    invoice: { ...tempInvoiceSettings.invoice, footer: e.target.value }
+                  })}
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Thank You Message
+                </label>
+                <input
+                  type="text"
+                  value={tempInvoiceSettings.invoice.thankYouMessage}
+                  onChange={(e) => setTempInvoiceSettings({
+                    ...tempInvoiceSettings,
+                    invoice: { ...tempInvoiceSettings.invoice, thankYouMessage: e.target.value }
+                  })}
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* If no settings loaded yet, show loading */}
+    {showInvoiceSettings && canEdit && !tempInvoiceSettings && (
+      <div className="bg-white rounded-lg shadow p-6 border border-gray-200 text-center">
+        <p className="text-gray-500">Loading settings...</p>
+      </div>
+    )}
+  </div>
+)}
+
 
       {/* Sponsor Form Modal */}
       {canEdit && (
@@ -2294,6 +2836,80 @@ const getFilteredSponsors = () => {
           </div>
         </Modal>
       )}
+	  {/* Invoice Confirmation Modal */}
+{canEdit && (
+  <Modal
+    isOpen={showInvoiceModal}
+    onClose={() => {
+      setShowInvoiceModal(false);
+      setSelectedSponsorForInvoice(null);
+    }}
+    title="Generate Invoice"
+    footer={
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+        <button
+          onClick={() => {
+            setShowInvoiceModal(false);
+            setSelectedSponsorForInvoice(null);
+          }}
+          style={{
+            padding: '10px 20px',
+            fontSize: '14px',
+            fontWeight: '500',
+            color: '#374151',
+            backgroundColor: 'white',
+            border: '1px solid #d1d5db',
+            borderRadius: '6px',
+            cursor: 'pointer'
+          }}
+          onMouseOver={(e) => e.target.style.backgroundColor = '#f9fafb'}
+          onMouseOut={(e) => e.target.style.backgroundColor = 'white'}
+        >
+          Cancel
+        </button>
+        <button
+          onClick={() => handleGenerateInvoice(selectedSponsorForInvoice)}
+          disabled={generatingInvoice}
+          style={{
+            padding: '10px 20px',
+            fontSize: '14px',
+            fontWeight: '500',
+            color: 'white',
+            backgroundColor: generatingInvoice ? '#9ca3af' : '#2563eb',
+            border: 'none',
+            borderRadius: '6px',
+            cursor: generatingInvoice ? 'not-allowed' : 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px'
+          }}
+        >
+          <FileText style={{ width: '16px', height: '16px' }} />
+          {generatingInvoice ? 'Generating...' : 'Generate & Download PDF'}
+        </button>
+      </div>
+    }
+  >
+    <div style={{ padding: '10px 0' }}>
+      <p className="text-gray-700 mb-4">
+        You are about to generate an invoice for:
+      </p>
+      <div className="bg-gray-50 p-4 rounded-lg">
+        <p className="font-medium text-gray-900">{selectedSponsorForInvoice?.company_name}</p>
+        {selectedSponsorForInvoice?.contact_name && (
+          <p className="text-sm text-gray-600 mt-1">Contact: {selectedSponsorForInvoice.contact_name}</p>
+        )}
+        <div className="mt-3 pt-3 border-t border-gray-200">
+          <p className="text-sm text-gray-600">Total Amount:</p>
+          <p className="text-xl font-bold text-blue-600">${selectedSponsorForInvoice?.total_amount || 0}</p>
+        </div>
+      </div>
+      <p className="text-sm text-gray-500 mt-4">
+        The invoice will open in a new window. You can then save it as a PDF using your browser's print function (Save as PDF).
+      </p>
+    </div>
+  </Modal>
+)}
     </div>
   );
 };

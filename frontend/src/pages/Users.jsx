@@ -191,35 +191,40 @@ const Users = () => {
   };
 
   const handleCreateUser = async (e) => {
-    e.preventDefault();
-    setError(null);
+  e.preventDefault();
+  setError(null);
 
-    const { name, email, role, password, confirmPassword } = form;
+  const { name, email, role, password, confirmPassword } = form;
 
-    if (!name || !email || !role || !password) {
-      setError('Please fill in all required fields.');
-      return;
-    }
+  if (!name || !email || !role || !password) {
+    setError('Please fill in all required fields.');
+    return;
+  }
 
-    if (password !== confirmPassword) {
-      setError('Passwords do not match.');
-      return;
-    }
+  if (password !== confirmPassword) {
+    setError('Passwords do not match.');
+    return;
+  }
 
-    try {
-      setCreating(true);
-      await usersAPI.create({ name, email, role, password });
-      await loadUsers();
-      resetForm();
-    } catch (err) {
-      console.error('Error creating user:', err);
-      const msg =
-        err.response?.data?.error || err.message || 'Failed to create user';
-      setError(msg);
-    } finally {
-      setCreating(false);
-    }
-  };
+  try {
+    setCreating(true);
+    // Convert email to lowercase before sending
+    await usersAPI.create({ 
+      name, 
+      email: email.toLowerCase(),
+      role, 
+      password 
+    });
+    await loadUsers();
+    resetForm();
+  } catch (err) {
+    console.error('Error creating user:', err);
+    const msg = err.response?.data?.error || err.message || 'Failed to create user';
+    setError(msg);
+  } finally {
+    setCreating(false);
+  }
+};
 
   const handleDeleteUser = async (id) => {
     if (!window.confirm('Are you sure you want to delete this user?')) return;
@@ -297,58 +302,110 @@ const Users = () => {
   };
 
   const handleRequestResetCode = async () => {
-    if (!resetTarget) return;
+  if (!resetEmail) {
+    setLocalError('Please enter your email address');
+    return;
+  }
 
-    if (!resetPassword || !resetConfirmPassword) {
-      setError('Please enter the new password and confirm it.');
-      return;
-    }
-    if (resetPassword !== resetConfirmPassword) {
-      setError('Passwords do not match.');
-      return;
-    }
-    if (resetPassword.length < 8) {
-      setError('Password must be at least 8 characters.');
-      return;
-    }
-
-    try {
-      setResetWorking(true);
-      setError(null);
-      await usersAPI.requestPasswordReset(resetTarget.id);
+  try {
+    setResetWorking(true);
+    const response = await fetch('/api/auth/forgot-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: resetEmail.toLowerCase() }),  // ← Convert to lowercase
+    });
+    
+    const data = await response.json();
+    
+    if (response.ok) {
       setResetStep(2);
-    } catch (err) {
-      console.error('Error requesting reset code:', err);
-      const msg = err.response?.data?.error || err.message || 'Failed to send verification code';
-      setError(msg);
-    } finally {
-      setResetWorking(false);
+      setLocalError(null);
+    } else {
+      setLocalError(data.error || 'Failed to send verification code');
     }
-  };
+  } catch (err) {
+    setLocalError('Failed to send verification code');
+  } finally {
+    setResetWorking(false);
+  }
+};
+
+const handleVerifyCode = async () => {
+  if (!resetCode) {
+    setLocalError('Please enter the verification code');
+    return;
+  }
+
+  try {
+    setResetWorking(true);
+    const response = await fetch('/api/auth/verify-reset-code', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        email: resetEmail.toLowerCase(),  // ← Convert to lowercase
+        code: resetCode 
+      }),
+    });
+    
+    const data = await response.json();
+    
+    if (response.ok) {
+      setResetStep(3);
+      setLocalError(null);
+    } else {
+      setLocalError(data.error || 'Invalid verification code');
+    }
+  } catch (err) {
+    setLocalError('Failed to verify code');
+  } finally {
+    setResetWorking(false);
+  }
+};
+
 
   const handleConfirmPasswordReset = async () => {
-    if (!resetTarget) return;
-    if (!resetCode) {
-      setError('Please enter the verification code from your email.');
-      return;
-    }
+  if (!resetPassword || !resetConfirmPassword) {
+    setLocalError('Please enter and confirm your new password');
+    return;
+  }
+  
+  if (resetPassword !== resetConfirmPassword) {
+    setLocalError('Passwords do not match');
+    return;
+  }
+  
+  if (resetPassword.length < 8) {
+    setLocalError('Password must be at least 8 characters');
+    return;
+  }
 
-    try {
-      setResetWorking(true);
-      setError(null);
-      await usersAPI.confirmPasswordReset(resetTarget.id, {
+  try {
+    setResetWorking(true);
+    const response = await fetch('/api/auth/reset-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        email: resetEmail.toLowerCase(),  // ← Convert to lowercase
         code: resetCode,
         new_password: resetPassword,
-      });
-      closeResetPassword();
-    } catch (err) {
-      console.error('Error confirming password reset:', err);
-      const msg = err.response?.data?.error || err.message || 'Failed to update password';
-      setError(msg);
-    } finally {
-      setResetWorking(false);
+      }),
+    });
+    
+    const data = await response.json();
+    
+    if (response.ok) {
+      setForgotPasswordOpen(false);
+      setLocalError(null);
+      alert('Password reset successful! You can now log in with your new password.');
+    } else {
+      setLocalError(data.error || 'Failed to reset password');
     }
-  };
+  } catch (err) {
+    setLocalError('Failed to reset password');
+  } finally {
+    setResetWorking(false);
+  }
+};
 
   // Role Permissions Functions
   const toggleCategory = (categoryKey) => {

@@ -397,12 +397,20 @@ const Teams = () => {
                       </div>
                       <div>
                         <h3 className="text-lg font-semibold text-gray-900">{team.name || 'Unnamed Team'}</h3>
-                        <div className="flex flex-wrap items-center text-xs text-gray-500 space-x-2">
-                          <span>Division: {team.division?.name || getDivisionName(team.division_id)}</span>
-                          <span>Season: {getSeasonName(team.season_id)}</span>
-                          <span>Players: {team.player_count || 0}</span>
-                          <span>Volunteers: {team.volunteers?.length || 0}</span>
-                        </div>
+<div className="text-xs text-gray-500 flex flex-wrap items-center">
+  <span>Division: {team.division?.name || getDivisionName(team.division_id)}</span>
+  <span>&nbsp;||&nbsp;Season: {getSeasonName(team.season_id)}</span>
+  <span className="inline-flex items-center">
+    <span>&nbsp;||&nbsp;Color:&nbsp;</span>
+    <span 
+      className="inline-block w-3 h-3 rounded-full mr-1" 
+      style={{ backgroundColor: team.color || '#e5e7eb' }}
+    ></span>
+    <span>{team.color || 'Not set'}</span>
+  </span>
+  <span>&nbsp;||&nbsp;Players: {team.player_count || 0}</span>
+  <span>&nbsp;||&nbsp;Volunteers: {team.volunteers?.length || 0}</span>
+</div>
                       </div>
                     </div>
                   </div>

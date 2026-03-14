@@ -133,34 +133,91 @@ router.post(
         });
       }
 
-      const csvContent = req.file.buffer.toString('utf-8');
-      const rows = parseCSV(csvContent);
+const csvContent = req.file.buffer.toString('utf-8');
+const rows = parseCSV(csvContent);
 
-      if (!rows.length) {
-        return res.status(400).json({
-          error: 'CSV file appears to be empty or has no data rows.',
-        });
-      }
+// === ADD THIS DEBUG CODE ===
+console.log('=== CSV DEBUG ===');
+console.log('Total rows found:', rows.length);
+if (rows.length > 0) {
+  console.log('First row headers:', Object.keys(rows[0]));
+  console.log('First row data:', JSON.stringify(rows[0], null, 2));
+}
+console.log('=== END CSV DEBUG ===\n');
+// === END DEBUG CODE ===
 
-      let updatedCount = 0;
-      let insertedCount = 0;
-      const errors = [];
+if (!rows.length) {
+  return res.status(400).json({
+    error: 'CSV file appears to be empty or has no data rows.',
+  });
+}
 
-      for (let i = 0; i < rows.length; i++) {
-        const row = rows[i];
-        const name = (row.name || '').trim();
-        const email = (row.email || '').trim();
-        const phone = (row.phone || '').trim();
-        const interestedRoles = (row.interested_roles || '').trim();
-		const volunteerId = (row.volunteer_id || '').trim(); // ADDED
-		const volunteerTypeId = (row.volunteer_type_id || '').trim(); // ADDED
+let updatedCount = 0;
+let insertedCount = 0;
+const errors = [];
 
-        if (!email && !phone) {
-          errors.push(
-            `Row ${i + 2}: Missing email and phone; cannot match or create volunteer.`
-          );
-          continue;
-        }
+for (let i = 0; i < rows.length; i++) {
+  const row = rows[i];
+  
+  // === ADD THIS DEBUG CODE FOR EACH ROW ===
+  console.log(`\n=== Processing Row ${i + 2} ===`);
+  console.log('Raw row data:', JSON.stringify(row, null, 2));
+  // === END DEBUG CODE ===
+  
+  // Try multiple possible header names to be safe
+  const name = (row.name || 
+                row['Volunteer First Name'] || 
+                row['volunteer first name'] || 
+                row['Volunteer First name'] || 
+                '').trim();
+                
+  const email = (row.email || 
+                 row['Volunteer Email Address'] || 
+                 row['volunteer email address'] || 
+                 row['Volunteer Email address'] || 
+                 '').trim();
+                 
+  const phone = (row.phone || 
+                 row['Volunteer Cellphone'] || 
+                 row['volunteer cellphone'] || 
+                 row['Volunteer Cell phone'] || 
+                 '').trim();
+                 
+  const interestedRoles = (row.interested_roles || 
+                           row['Volunteer Role'] || 
+                           row['volunteer role'] || 
+                           row['Volunteer role'] || 
+                           '').trim();
+                           
+  const volunteerId = (row.volunteer_id || 
+                       row['Volunteer Id'] || 
+                       row['volunteer id'] || 
+                       row['Volunteer ID'] || 
+                       '').trim();
+                       
+  const volunteerTypeId = (row.volunteer_type_id || 
+                           row['Volunteer Type Id'] || 
+                           row['volunteer type id'] || 
+                           row['Volunteer Type ID'] || 
+                           '').trim();
+
+  // === ADD THIS DEBUG CODE TO SEE EXTRACTED VALUES ===
+  console.log('Extracted values:');
+  console.log('  name:', name || '(empty)');
+  console.log('  email:', email || '(empty)');
+  console.log('  phone:', phone || '(empty)');
+  console.log('  interestedRoles:', interestedRoles || '(empty)');
+  console.log('  volunteerId:', volunteerId || '(empty)');
+  console.log('  volunteerTypeId:', volunteerTypeId || '(empty)');
+  // === END DEBUG CODE ===
+
+  if (!email && !phone) {
+    console.log(`⚠️ Row ${i + 2}: Missing email and phone - SKIPPING`);
+    errors.push(
+      `Row ${i + 2}: Missing email and phone; cannot match or create volunteer.`
+    );
+    continue;
+  }
 
         // Find existing volunteer by season + email/phone
         const filters = supabase

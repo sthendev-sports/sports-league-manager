@@ -223,6 +223,13 @@ router.post('/import', async (req, res) => {
     console.log('=== VOLUNTEER IMPORT START ===');
     console.log('Season ID:', season_id);
     console.log('Raw volunteers data length:', volunteersData?.length);
+	// === ADD THIS NEW DEBUG CODE HERE ===
+    console.log('=== FIRST 3 ROWS RAW DATA ===');
+    for (let i = 0; i < Math.min(3, volunteersData?.length || 0); i++) {
+      console.log(`Row ${i}:`, JSON.stringify(volunteersData[i], null, 2));
+    }
+    console.log('=== END RAW DATA ===');
+    // === END OF NEW DEBUG CODE ===
 
     if (!volunteersData || !Array.isArray(volunteersData)) {
       return res.status(400).json({ error: 'Invalid volunteers data' });
@@ -342,191 +349,218 @@ if (divisions && divisions.length > 0) {
       errors.push('Failed to load divisions/teams from database');
     }
 
-    console.log('Processing CSV rows...');
+      console.log('Processing CSV rows...');
 
-    for (let index = 0; index < volunteersData.length; index++) {
-      const volunteerData = volunteersData[index];
+    // Process in batches of 50 to avoid timeouts
+    const BATCH_SIZE = 100;
+    const totalRows = volunteersData.length;
+    let processedCount = 0;
 
-      try {
-        // Basic required fields
-        if (!volunteerData['volunteer first name'] && !volunteerData['volunteer last name']) {
-          errors.push(`Row ${index + 1}: Missing volunteer name`);
-          console.log(`Row ${index + 1} skipped: Missing volunteer name`);
-          continue;
-        }
+    for (let batchStart = 0; batchStart < totalRows; batchStart += BATCH_SIZE) {
+      const batchEnd = Math.min(batchStart + BATCH_SIZE, totalRows);
+      console.log(`\n=== Processing batch ${Math.floor(batchStart/BATCH_SIZE) + 1}: rows ${batchStart + 1} to ${batchEnd} ===`);
+      
+      // Process this batch
+      for (let index = batchStart; index < batchEnd; index++) {
+        const volunteerData = volunteersData[index];
+        const rowNumber = index + 1;
 
-        if (!volunteerData['division name']) {
-          errors.push(`Row ${index + 1}: Missing division name`);
-          console.log(`Row ${index + 1} skipped: Missing division name`);
-          continue;
-        }
-
-        // Find division ID
-        const divisionName = volunteerData['division name'];
-        let divisionId = null;
-
-        if (divisionMap.size > 0) {
-          divisionId = divisionMap.get(divisionName);
-          if (!divisionId) {
-            // Try case-insensitive match
-            for (let [name, id] of divisionMap) {
-              if (name.toLowerCase() === divisionName.toLowerCase()) {
-                divisionId = id;
-                console.log(`Found division "${name}" (case-insensitive match)`);
-                break;
-              }
-            }
-          }
-
-          if (!divisionId) {
-            errors.push(`Row ${index + 1}: Division "${divisionName}" not found`);
-            console.log(`Row ${index + 1} skipped: Division "${divisionName}" not found`);
+        try {
+          // Basic required fields
+          if (!volunteerData['volunteer first name'] && !volunteerData['volunteer last name']) {
+            errors.push(`Row ${rowNumber}: Missing volunteer name`);
+            console.log(`Row ${rowNumber} skipped: Missing volunteer name`);
             continue;
           }
-        } else {
-          errors.push(`Row ${index + 1}: No divisions available in database`);
-          console.log(`Row ${index + 1} skipped: No divisions available`);
-          continue;
-        }
 
-        // Find team ID if provided
-        let teamId = null;
-        const teamName = volunteerData['team name'];
-        if (
-          teamName &&
-          teamName.trim() &&
-          teamName !== 'Unallocated' &&
-          teamMap.size > 0
-        ) {
-          teamId = teamMap.get(teamName);
-          if (!teamId) {
-            // Try case-insensitive team match
-            for (let [name, id] of teamMap) {
-              if (name.toLowerCase() === teamName.toLowerCase()) {
-                teamId = id;
-                console.log(`Found team "${name}" (case-insensitive match)`);
-                break;
-              }
-            }
+          if (!volunteerData['division name']) {
+            errors.push(`Row ${rowNumber}: Missing division name`);
+            console.log(`Row ${rowNumber} skipped: Missing division name`);
+            continue;
           }
-          if (!teamId) {
-            console.log(`Team "${teamName}" not found, will set team_id to null`);
-          }
-        }
 
-        // === NEW R1 BEHAVIOR HERE ===
-// rawInterestedRoles = whatever the CSV says ("Manager, Assistant Coach, Team Parent")
-const rawInterestedRoles = volunteerData['volunteer role'] || null;
-
-// FIRST: Check if this volunteer already exists
-const matchedVolunteer = findExistingVolunteer(  // <-- Changed variable name
-  existingVolunteers || [],
-  {
-    name: `${volunteerData['volunteer first name']} ${volunteerData['volunteer last name']}`.trim(),
-    email: volunteerData['volunteer email address'],
-    phone: volunteerData['volunteer cellphone']
-  },
-  divisionId,
-  season_id
-);
-
-// DECIDE family_id: Keep existing if we have it, otherwise try to find match
-let finalFamilyId = null;
-if (matchedVolunteer && matchedVolunteer.family_id) {  // <-- Use matchedVolunteer
-  // Volunteer already exists with a family_id - KEEP IT
-  finalFamilyId = matchedVolunteer.family_id;
-  console.log(`🔗 Preserving existing family_id ${finalFamilyId} for ${matchedVolunteer.name}`);
-} else {
-  // No existing volunteer or no family_id - try to find match
-  finalFamilyId = await getCachedFamilyId(
-    { 
-      email: volunteerData['volunteer email address'], 
-      phone: volunteerData['volunteer cellphone'] 
-    },
-    season_id
-  );
-  if (finalFamilyId) {
-    console.log(`🔗 Found new family match: ${finalFamilyId}`);
-  }
-}
-
-// NOW create the volunteerRecord with the determined family_id
-const volunteerRecord = {
-  name: `${volunteerData['volunteer first name']} ${volunteerData['volunteer last name']}`.trim(),
-  email: volunteerData['volunteer email address'] || null,
-  phone: volunteerData['volunteer cellphone'] || null,
-  role: 'Parent',
-  interested_roles: rawInterestedRoles || null,
-  volunteer_id: volunteerData['volunteer id'] || null,
-  volunteer_type_id: volunteerData['volunteer type id'] || null,
-  division_id: divisionId,
-  season_id: season_id,
-  team_id: teamId,
-  notes: `Imported from volunteer signup. Original team: ${
-    volunteerData['team name'] || 'Unallocated'
-  }`,
-  training_completed: false,
-  background_check_completed: volunteerData['verification status'] || 'pending',
-  background_check_complete: false,
-  is_approved: false,
-  shifts_completed: 0,
-  shifts_required: 0,
-  can_pickup: false,
-  family_id: finalFamilyId,  // <-- This is now either preserved or newly found
-  player_id: null,
+// Helper function to clean string values (remove quotes, trim spaces)
+const cleanString = (value) => {
+  if (!value) return '';
+  // Convert to string, remove leading/trailing quotes, then trim
+  return String(value)
+    .replace(/^["']+|["']+$/g, '') // Remove quotes at start or end
+    .trim();
 };
 
-        // Try to find an existing volunteer to update
-        const existingVolunteer = findExistingVolunteer(
-          existingVolunteers || [],
-          volunteerRecord,
-          divisionId,
-          season_id
-        );
+// Find division ID - CLEAN the division name first!
+const rawDivisionName = volunteerData['division name'] || '';
+const divisionName = cleanString(rawDivisionName);
+console.log(`Raw division name: "${rawDivisionName}"`);
+console.log(`Cleaned division name: "${divisionName}"`);
+          let divisionId = null;
 
-        if (existingVolunteer) {
-          console.log(
-            `Found existing volunteer: ${volunteerRecord.name}, checking for updates`
-          );
-          const updatedVolunteer = await updateExistingVolunteer(
-            existingVolunteer,
-            volunteerRecord
-          );
-          if (updatedVolunteer) {
-            processedVolunteers.push(updatedVolunteer);
+          if (divisionMap.size > 0) {
+            // Try exact match first
+            divisionId = divisionMap.get(divisionName);
+            
+            if (!divisionId) {
+              // Try case-insensitive match
+              for (let [name, id] of divisionMap) {
+                if (name.toLowerCase() === divisionName.toLowerCase()) {
+                  divisionId = id;
+                  break;
+                }
+              }
+            }
+
+            if (!divisionId) {
+              errors.push(`Row ${rowNumber}: Division "${divisionName}" not found`);
+              console.log(`Row ${rowNumber} skipped: Division "${divisionName}" not found`);
+              continue;
+            }
           } else {
-            // Nothing changed, keep the existing one
-            processedVolunteers.push(existingVolunteer);
-          }
-        } else {
-          // New volunteer: insert into DB
-          const { data: inserted, error: insertError } = await supabase
-            .from('volunteers')
-            .insert(volunteerRecord)
-            .select(`
-              *,
-              division:divisions (id, name),
-              season:seasons (id, name),
-              team:teams!volunteers_team_id_fkey (id, name, color)
-            `)
-            .single();
-
-          if (insertError) {
-            console.error(
-              `Row ${index + 1}: Error inserting volunteer:`,
-              insertError
-            );
-            errors.push(
-              `Row ${index + 1}: Failed to insert volunteer: ${insertError.message}`
-            );
+            errors.push(`Row ${rowNumber}: No divisions available in database`);
+            console.log(`Row ${rowNumber} skipped: No divisions available`);
             continue;
           }
 
-          processedVolunteers.push(inserted);
+          // Find team ID if provided
+          let teamId = null;
+          const teamName = volunteerData['team name'];
+          if (
+            teamName &&
+            teamName.trim() &&
+            teamName !== 'Unallocated' &&
+            teamMap.size > 0
+          ) {
+            teamId = teamMap.get(teamName);
+            if (!teamId) {
+              // Try case-insensitive team match
+              for (let [name, id] of teamMap) {
+                if (name.toLowerCase() === teamName.toLowerCase()) {
+                  teamId = id;
+                  break;
+                }
+              }
+            }
+          }
+
+          // === NEW R1 BEHAVIOR HERE ===
+          const rawInterestedRoles = volunteerData['volunteer role'] || null;
+
+          // FIRST: Check if this volunteer already exists
+          const matchedVolunteer = findExistingVolunteer(
+            existingVolunteers || [],
+            {
+              name: `${volunteerData['volunteer first name']} ${volunteerData['volunteer last name']}`.trim(),
+              email: volunteerData['volunteer email address'],
+              phone: volunteerData['volunteer cellphone']
+            },
+            divisionId,
+            season_id
+          );
+
+          // DECIDE family_id: Keep existing if we have it, otherwise try to find match
+          let finalFamilyId = null;
+          if (matchedVolunteer && matchedVolunteer.family_id) {
+            // Volunteer already exists with a family_id - KEEP IT
+            finalFamilyId = matchedVolunteer.family_id;
+          } else {
+            // No existing volunteer or no family_id - try to find match
+            finalFamilyId = await getCachedFamilyId(
+              { 
+                email: volunteerData['volunteer email address'], 
+                phone: volunteerData['volunteer cellphone'] 
+              },
+              season_id
+            );
+          }
+
+          // NOW create the volunteerRecord with the determined family_id
+          const volunteerRecord = {
+            name: `${volunteerData['volunteer first name']} ${volunteerData['volunteer last name']}`.trim(),
+            email: volunteerData['volunteer email address'] || null,
+            phone: volunteerData['volunteer cellphone'] || null,
+            role: 'Parent',
+            interested_roles: rawInterestedRoles || null,
+            volunteer_id: volunteerData['volunteer id'] || null,
+            volunteer_type_id: volunteerData['volunteer type id'] || null,
+            division_id: divisionId,
+            season_id: season_id,
+            team_id: teamId,
+            notes: `Imported from volunteer signup. Original team: ${
+              volunteerData['team name'] || 'Unallocated'
+            }`,
+            training_completed: false,
+            background_check_completed: volunteerData['verification status'] || 'pending',
+            background_check_complete: false,
+            is_approved: false,
+            shifts_completed: 0,
+            shifts_required: 0,
+            can_pickup: false,
+            family_id: finalFamilyId,
+            player_id: null,
+          };
+
+          // Try to find an existing volunteer to update
+          const existingVolunteer = findExistingVolunteer(
+            existingVolunteers || [],
+            volunteerRecord,
+            divisionId,
+            season_id
+          );
+
+          if (existingVolunteer) {
+            const updatedVolunteer = await updateExistingVolunteer(
+              existingVolunteer,
+              volunteerRecord
+            );
+            if (updatedVolunteer) {
+              processedVolunteers.push(updatedVolunteer);
+            } else {
+              // Nothing changed, keep the existing one
+              processedVolunteers.push(existingVolunteer);
+            }
+          } else {
+            // New volunteer: insert into DB
+            const { data: inserted, error: insertError } = await supabase
+              .from('volunteers')
+              .insert(volunteerRecord)
+              .select(`
+                *,
+                division:divisions (id, name),
+                season:seasons (id, name),
+                team:teams!volunteers_team_id_fkey (id, name, color)
+              `)
+              .single();
+
+            if (insertError) {
+              console.error(
+                `Row ${rowNumber}: Error inserting volunteer:`,
+                insertError
+              );
+              errors.push(
+                `Row ${rowNumber}: Failed to insert volunteer: ${insertError.message}`
+              );
+              continue;
+            }
+
+            processedVolunteers.push(inserted);
+          }
+          
+          processedCount++;
+          
+          // Log progress every 50 rows
+          if (processedCount % 50 === 0) {
+            console.log(`Progress: ${processedCount}/${totalRows} rows processed`);
+          }
+          
+        } catch (rowError) {
+      console.error(`Error processing row ${index + 1}:`, rowError);
+      errors.push(`Row ${index + 1}: ${rowError.message}`);
         }
-      } catch (rowError) {
-        console.error(`Error processing row ${index + 1}:`, rowError);
-        errors.push(`Row ${index + 1}: ${rowError.message}`);
+      }
+      
+      // Add a small delay between batches to let the server breathe
+      if (batchEnd < totalRows) {
+        console.log(`Batch complete. Waiting a moment before next batch...`);
+        await new Promise(resolve => setTimeout(resolve, 10)); // 100ms delay
       }
     }
 
@@ -557,9 +591,21 @@ const volunteerRecord = {
 
     if (errors.length > 0) {
       response.message += ` (${errors.length} rows had errors)`;
+      
+      // Log all errors clearly
+      console.log('\n=== ERRORS FOUND DURING IMPORT ===');
+      errors.forEach((error, index) => {
+        console.log(`Error ${index + 1}: ${error}`);
+      });
+      console.log('=== END ERRORS ===\n');
+    } else {
+      console.log('No errors during import');
     }
 
     console.log('=== VOLUNTEER IMPORT COMPLETE ===');
+    console.log(`Successfully processed: ${processedVolunteers.length} volunteers`);
+    console.log(`Errors: ${errors.length}`);
+    
     res.status(201).json(response);
   } catch (error) {
     console.error('=== VOLUNTEER IMPORT ERROR ===');
@@ -582,17 +628,10 @@ function findExistingVolunteer(existingVolunteers, volunteerRecord, divisionId, 
   }
 
   const volunteerId = volunteerRecord.volunteer_id;
-  const email = (volunteerRecord.email || '').trim().toLowerCase();
-  const phone = normalizePhone(volunteerRecord.phone);
-  const name = (volunteerRecord.name || '').trim().toLowerCase();
-
+  
   console.log(`\n=== FIND EXISTING VOLUNTEER DEBUG ===`);
   console.log(`Looking for existing volunteer:`);
   console.log(`  Volunteer ID from CSV: "${volunteerId}"`);
-  console.log(`  Email: "${email}"`);
-  console.log(`  Phone: "${phone}"`);
-  console.log(`  Name: "${name}"`);
-  console.log(`  Division ID: ${divisionId}`);
   console.log(`  Season ID: ${seasonId}`);
   
   // Log all existing volunteers' volunteer_ids for comparison
@@ -601,68 +640,25 @@ function findExistingVolunteer(existingVolunteers, volunteerRecord, divisionId, 
     console.log(`  - ID: ${v.id}, Name: ${v.name}, Volunteer ID in DB: "${v.volunteer_id || 'NULL'}", Division: ${v.division_id}`);
   });
 
-  // STRATEGY 1: Match by volunteer_id (MOST RELIABLE)
+  // ONLY STRATEGY: Match by volunteer_id
   if (volunteerId) {
-    console.log(`\nTrying Strategy 1: Match by volunteer_id = "${volunteerId}"`);
+    console.log(`\nTrying to match by volunteer_id = "${volunteerId}"`);
     const matchById = existingVolunteers.find(
       (v) => String(v.volunteer_id) === String(volunteerId) && v.season_id === seasonId
     );
     if (matchById) {
       console.log(`✅ Found existing volunteer by volunteer_id: ${matchById.name}`);
       console.log(`   Current division in DB: ${matchById.division_id}`);
-      console.log(`   New division from CSV: ${divisionId}`);
       return matchById;
     } else {
-      console.log(`❌ No match found by volunteer_id`);
+      console.log(`❌ No match found by volunteer_id - will create new record`);
     }
   }
 
-  // STRATEGY 2: exact match by season, division, email
-  if (email) {
-    console.log(`\nTrying Strategy 2: Match by email+season+division`);
-    const match1 = existingVolunteers.find(
-      (v) =>
-        v.season_id === seasonId &&
-        v.division_id === divisionId &&
-        (v.email || '').trim().toLowerCase() === email
-    );
-    if (match1) {
-      console.log(`✅ Found existing volunteer by email+season+division: ${match1.name}`);
-      return match1;
-    }
-  }
-
-  // STRATEGY 3: same season + same email
-  if (email) {
-    console.log(`\nTrying Strategy 3: Match by email+season`);
-    const match2 = existingVolunteers.find(
-      (v) =>
-        v.season_id === seasonId &&
-        (v.email || '').trim().toLowerCase() === email
-    );
-    if (match2) {
-      console.log(`✅ Found existing volunteer by email+season: ${match2.name}`);
-      return match2;
-    }
-  }
-
-  // STRATEGY 4: same season + same normalized phone + same name
-  if (phone && name) {
-    console.log(`\nTrying Strategy 4: Match by phone+name+season`);
-    const match3 = existingVolunteers.find(
-      (v) =>
-        v.season_id === seasonId &&
-        normalizePhone(v.phone) === phone &&
-        (v.name || '').trim().toLowerCase() === name
-    );
-    if (match3) {
-      console.log(`✅ Found existing volunteer by phone+name+season: ${match3.name}`);
-      return match3;
-    }
-  }
-
-  console.log(`❌ No existing volunteer found`);
+  console.log(`❌ No existing volunteer found with volunteer_id: ${volunteerId}`);
   console.log(`=== END DEBUG ===\n`);
+  
+  // Return null to force creation of new record
   return null;
 }
 

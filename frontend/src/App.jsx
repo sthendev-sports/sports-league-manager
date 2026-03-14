@@ -59,15 +59,7 @@ function App() {
                   element={<ProtectedRoute element={<Teams />} />}
                 />
 
-                <Route
-                  path="/requests"
-                  element={
-                    <ProtectedRoute
-                      element={<Requests />}
-                      requiredRoles={['Administrator', 'President']}
-                    />
-                  }
-                />
+
 } />}
                 />
                 <Route path="/draft" element={
@@ -76,6 +68,10 @@ function App() {
     requiredPermission="read" // Minimum: read access
   />
 } />
+                <Route
+                  path="/requests"
+                  element={<ProtectedRoute element={<Requests />} />}
+                />
                 <Route
                   path="/seasons"
                   element={<ProtectedRoute element={<Seasons />} />}

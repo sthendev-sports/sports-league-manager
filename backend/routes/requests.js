@@ -1,60 +1,109 @@
 const express = require('express');
 const router = express.Router();
 const supabase = require('../config/database');
-const { authMiddleware, requireRole } = require('../middleware/auth');
+const { authMiddleware } = require('../middleware/auth'); // Remove requireRole
 
 /**
  * Requests API (Player Requests)
  * Base path: /api/requests
- *
- * Table: requests
- * - id (uuid)
- * - season_id (uuid)
- * - player_id (uuid)
- * - parent_request (text)
- * - status (text)          // Pending | Approved | Denied
- * - type (text)            // Move Up | Move Down | Teammate Request | Volunteer Request | Admin
- * - program (text)         // Baseball | Softball | Admin
- * - comments (text)
- * - current_division_id (uuid)
- * - new_division_id (uuid)
- * - created_at, updated_at
  */
 
+// Apply auth middleware to all routes
 router.use(authMiddleware);
-router.use(requireRole('Administrator', 'President'));
+// REMOVE the requireRole line completely
 
+// Helper function to check permissions
+const hasPermission = (user, resource, requiredLevel = 'read') => {
+  // Administrators always have full access
+  if (user.role === 'Administrator') return true;
+  
+  // Check user's permissions for this resource
+  const userPermission = user.permissions?.[resource];
+  
+  if (!userPermission) return false;
+  
+  // Permission hierarchy: none < read < write
+  const permissionOrder = { 'none': 0, 'read': 1, 'write': 2 };
+  const userLevel = permissionOrder[userPermission] || 0;
+  const requiredLevelValue = permissionOrder[requiredLevel] || 1;
+  
+  return userLevel >= requiredLevelValue;
+};
+
+// GET /api/requests?season_id=...
 // GET /api/requests?season_id=...
 router.get('/', async (req, res) => {
   try {
     const { season_id } = req.query;
+    const user = req.user;
+
+    console.log('===== REQUEST DEBUG =====');
+    console.log('User making request:', {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      permissions: user.permissions
+    });
+    console.log('Season ID filter:', season_id);
+
+    // Check if user has read permission for requests
+    if (!hasPermission(user, 'requests', 'read')) {
+      console.log('PERMISSION DENIED: User lacks read permission for requests');
+      return res.status(403).json({ error: 'Access denied. You do not have permission to view requests.' });
+    }
+    console.log('PERMISSION GRANTED: User has read access');
 
     let query = supabase
       .from('requests')
-.select(`
-  *,
-  requesting_player:players!requests_player_id_fkey (
-    id,
-    first_name,
-    last_name,
-    birth_date,
-    division_id
-  ),
-  requested_player:players!requests_requested_player_id_fkey (
-    id,
-    first_name,
-    last_name,
-    birth_date,
-    division_id
-  )
-`)
+      .select(`
+        *,
+        requesting_player:players!requests_player_id_fkey (
+          id,
+          first_name,
+          last_name,
+          birth_date,
+          division_id,
+          division:divisions (
+            id,
+            name
+          )
+        ),
+        current_division:divisions!requests_current_division_id_fkey (
+          id,
+          name
+        ),
+        new_division:divisions!requests_new_division_id_fkey (
+          id,
+          name
+        )
+      `)
       .order('created_at', { ascending: false });
 
-    if (season_id) query = query.eq('season_id', season_id);
+    if (season_id) {
+      console.log('Applying season filter:', season_id);
+      query = query.eq('season_id', season_id);
+    }
 
+    console.log('Executing Supabase query...');
     const { data, error } = await query;
 
-    if (error) throw error;
+    if (error) {
+      console.error('Supabase query error:', error);
+      throw error;
+    }
+
+    console.log(`Query returned ${data?.length || 0} requests`);
+    if (data && data.length > 0) {
+      console.log('First request sample:', {
+        id: data[0].id,
+        type: data[0].type,
+        program: data[0].program,
+        player_id: data[0].player_id
+      });
+    } else {
+      console.log('No requests found in database for this season');
+    }
+
     res.json(Array.isArray(data) ? data : []);
   } catch (error) {
     console.error('Error fetching requests:', error);
@@ -65,6 +114,13 @@ router.get('/', async (req, res) => {
 // POST /api/requests
 router.post('/', async (req, res) => {
   try {
+    const user = req.user;
+    
+    // Check if user has write permission for requests
+    if (!hasPermission(user, 'requests', 'write')) {
+      return res.status(403).json({ error: 'Access denied. You need write permission to create requests.' });
+    }
+
     const {
       season_id,
       player_id,
@@ -75,7 +131,7 @@ router.post('/', async (req, res) => {
       comments,
       current_division_id,
       new_division_id,
-	  requested_teammate_name
+      requested_teammate_name
     } = req.body || {};
 
     if (!season_id) return res.status(400).json({ error: 'season_id is required' });
@@ -91,7 +147,7 @@ router.post('/', async (req, res) => {
       comments: comments || null,
       current_division_id: current_division_id || null,
       new_division_id: new_division_id || null,
-	  requested_teammate_name: requested_teammate_name || null
+      requested_teammate_name: requested_teammate_name || null
     };
 
     const { data, error } = await supabase
@@ -112,6 +168,13 @@ router.post('/', async (req, res) => {
 router.put('/:id', async (req, res) => {
   try {
     const { id } = req.params;
+    const user = req.user;
+
+    // Check if user has write permission for requests
+    if (!hasPermission(user, 'requests', 'write')) {
+      return res.status(403).json({ error: 'Access denied. You need write permission to update requests.' });
+    }
+
     const {
       parent_request,
       status,
@@ -124,9 +187,6 @@ router.put('/:id', async (req, res) => {
       player_id,
       season_id
     } = req.body || {};
-
-    console.log('Updating request with ID:', id);
-    console.log('Update payload:', req.body);
 
     const updates = {
       parent_request: parent_request ?? null,
@@ -141,8 +201,6 @@ router.put('/:id', async (req, res) => {
       season_id: season_id ?? null,
       updated_at: new Date().toISOString()
     };
-
-    console.log('Final updates object:', updates);
 
     const { data, error } = await supabase
       .from('requests')
@@ -177,7 +235,6 @@ router.put('/:id', async (req, res) => {
       throw error;
     }
     
-    console.log('Updated request with relationships:', data);
     res.json(data);
   } catch (error) {
     console.error('Error updating request:', error);
@@ -189,6 +246,12 @@ router.put('/:id', async (req, res) => {
 router.delete('/:id', async (req, res) => {
   try {
     const { id } = req.params;
+    const user = req.user;
+
+    // Keep delete restricted to Administrators only for safety
+    if (user.role !== 'Administrator') {
+      return res.status(403).json({ error: 'Access denied. Only Administrators can delete requests.' });
+    }
 
     const { error } = await supabase
       .from('requests')

@@ -419,14 +419,19 @@ const loadLocationConfig = async () => {
   const [showEmailTemplateModal, setShowEmailTemplateModal] = useState(false);
   const [editingTemplate, setEditingTemplate] = useState(null);
 
-  // Check if user has access to this page
-  const hasAccess = user && ALLOWED_ROLES.includes(user.role);
-  
-  // Check if user can edit (Administrator or President only for write operations)
-  const canEdit = user && (user.role === 'Administrator' || user.role === 'President');
-  
-  // Check if user can delete (Administrator only)
-  const canDelete = user && user.role === 'Administrator';
+// Check if user has access to this page - using role-based for page access
+const hasAccess = user && ALLOWED_ROLES.includes(user.role);
+
+// Check if user can edit based on permissions
+const canEdit = user && (
+  // Admin always has full access
+  user.role === 'Administrator' || 
+  // Check if user has write permission for sponsors
+  user?.permissions?.sponsors === 'write'
+);
+
+// Check if user can delete (Administrator only - keep this restrictive)
+const canDelete = user && user.role === 'Administrator';
 
   useEffect(() => {
     if (hasAccess) {

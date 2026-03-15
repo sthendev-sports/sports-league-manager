@@ -55,6 +55,7 @@ const trainingsRouter = require('./routes/trainings');
 const { authMiddleware } = require('./middleware/auth');
 const { permissionEnforcer } = require('./middleware/permissionEnforcer');
 const sponsorRoutes = require('./routes/sponsors');
+const rolePermissionsRoutes = require('./routes/rolePermissions');
 // const workbondImportRoutes = require('./routes/import-shifts');
 //app.use('/api/draft-new', require('./routes/draft-new'));
 
@@ -65,6 +66,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/users', usersRoutes);
 app.use('/api/email-settings', emailSettingsRoutes);
 app.use('/api/notifications', notificationsRoutes);
+app.use('/api/role-permissions', rolePermissionsRoutes);
 app.use('/api/seasons', seasonRoutes);
 //app.use('/api/players', playerRoutes);
 app.use('/api/players', authMiddleware, permissionEnforcer, playerRoutes);

@@ -66,6 +66,8 @@ const RESOURCE_CATEGORIES = {
   }
 };
 
+
+
 // Access level options
 const ACCESS_LEVELS = [
   { value: 'none', label: 'No Access', icon: EyeOff, color: 'text-gray-400', bgColor: 'bg-gray-100' },
@@ -112,6 +114,16 @@ const Users = () => {
   const [expandedCategories, setExpandedCategories] = useState({});
   const [selectedPermissionRole, setSelectedPermissionRole] = useState('');
   const [permissionsMessage, setPermissionsMessage] = useState({ type: '', text: '' });
+  
+  // New role management states
+  const [showCreateRoleModal, setShowCreateRoleModal] = useState(false);
+  const [newRole, setNewRole] = useState({
+    role: '',
+    description: '',
+    display_order: 0
+  });
+  const [createRoleWorking, setCreateRoleWorking] = useState(false);
+  const [deleteRoleWorking, setDeleteRoleWorking] = useState(false);
 
   const loadUsers = async () => {
     try {
@@ -468,7 +480,7 @@ const handleVerifyCode = async () => {
     }
   };
 
-  const handleResetPermissions = async () => {
+    const handleResetPermissions = async () => {
     if (!selectedPermissionRole || !window.confirm(`Reset ${selectedPermissionRole} to default permissions?`)) {
       return;
     }
@@ -503,6 +515,129 @@ const handleVerifyCode = async () => {
       });
     } finally {
       setSavingPermissions(false);
+    }
+  };
+
+  // New function to create a role
+  const handleCreateRole = async () => {
+    if (!newRole.role || !newRole.role.trim()) {
+      setPermissionsMessage({ 
+        type: 'error', 
+        text: 'Role name is required' 
+      });
+      return;
+    }
+
+    const roleName = newRole.role.trim();
+    
+    // Check if role already exists
+    if (roles.some(r => r.role.toLowerCase() === roleName.toLowerCase())) {
+      setPermissionsMessage({ 
+        type: 'error', 
+        text: 'A role with this name already exists' 
+      });
+      return;
+    }
+
+    try {
+      setCreateRoleWorking(true);
+      setPermissionsMessage({ type: '', text: '' });
+      
+      const response = await fetch('/api/role-permissions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('slm_token')}`
+        },
+        body: JSON.stringify({
+          role: roleName,
+          description: newRole.description || null,
+          display_order: newRole.display_order || 0
+        })
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to create role');
+      }
+      
+      setPermissionsMessage({ 
+        type: 'success', 
+        text: `Role "${roleName}" created successfully` 
+      });
+      
+      // Reload roles and select the new role
+      await loadRolePermissions();
+      setSelectedPermissionRole(roleName);
+      
+      // Close modal and reset form
+      setShowCreateRoleModal(false);
+      setNewRole({ role: '', description: '', display_order: 0 });
+      
+    } catch (err) {
+      console.error('Error creating role:', err);
+      setPermissionsMessage({ 
+        type: 'error', 
+        text: err.message || 'Failed to create role' 
+      });
+    } finally {
+      setCreateRoleWorking(false);
+    }
+  };
+
+  // New function to delete a role
+  const handleDeleteRole = async (roleToDelete) => {
+    // Don't allow deleting system roles
+    const role = roles.find(r => r.role === roleToDelete);
+    if (role?.is_system) {
+      setPermissionsMessage({ 
+        type: 'error', 
+        text: 'System roles cannot be deleted' 
+      });
+      return;
+    }
+
+    if (!window.confirm(`Are you sure you want to delete the "${roleToDelete}" role? This action cannot be undone.`)) {
+      return;
+    }
+
+    try {
+      setDeleteRoleWorking(true);
+      setPermissionsMessage({ type: '', text: '' });
+      
+      const response = await fetch(`/api/role-permissions/${encodeURIComponent(roleToDelete)}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('slm_token')}`
+        }
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to delete role');
+      }
+      
+      setPermissionsMessage({ 
+        type: 'success', 
+        text: `Role "${roleToDelete}" deleted successfully` 
+      });
+      
+      // Clear selected role if it was deleted
+      if (selectedPermissionRole === roleToDelete) {
+        setSelectedPermissionRole('');
+      }
+      
+      // Reload roles
+      await loadRolePermissions();
+      
+    } catch (err) {
+      console.error('Error deleting role:', err);
+      setPermissionsMessage({ 
+        type: 'error', 
+        text: err.message || 'Failed to delete role' 
+      });
+    } finally {
+      setDeleteRoleWorking(false);
     }
   };
 
@@ -928,35 +1063,69 @@ const handleVerifyCode = async () => {
                 <div className="p-6">
                   <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
                     {/* Role Selection Sidebar */}
-                    <div className="lg:col-span-1">
+                                        <div className="lg:col-span-1">
                       <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
-                        <h3 className="text-sm font-semibold text-gray-900 mb-3">
-                          Select Role
-                        </h3>
-                        <div className="space-y-2">
+                        <div className="flex items-center justify-between mb-3">
+                          <h3 className="text-sm font-semibold text-gray-900">
+                            Roles
+                          </h3>
+                          <button
+                            onClick={() => setShowCreateRoleModal(true)}
+                            className="inline-flex items-center px-2 py-1 text-xs font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-md hover:bg-blue-100"
+                          >
+                            <UserPlus className="h-3 w-3 mr-1" />
+                            New Role
+                          </button>
+                        </div>
+                        
+                        <div className="space-y-2 max-h-[500px] overflow-y-auto pr-1">
                           {roles.map(role => (
-                            <button
+                            <div
                               key={role.role}
-                              onClick={() => setSelectedPermissionRole(role.role)}
-                              className={`w-full text-left px-3 py-2 rounded-md text-sm font-medium ${
+                              className={`relative rounded-md ${
                                 selectedPermissionRole === role.role
-                                  ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                                  : 'text-gray-700 hover:bg-gray-100 border border-gray-200'
+                                  ? 'bg-blue-50 border border-blue-200'
+                                  : 'border border-gray-200'
                               }`}
                             >
-                              <div className="flex items-center justify-between">
-                                <span>{role.role}</span>
-                                {role.is_system && (
-                                  <span className="text-xs text-gray-500">System</span>
+                              <button
+                                onClick={() => setSelectedPermissionRole(role.role)}
+                                className="w-full text-left px-3 py-2 pr-8 rounded-md text-sm font-medium"
+                              >
+                                <div className="flex items-center justify-between">
+                                  <span className={role.is_system ? 'text-gray-900' : 'text-blue-900'}>
+                                    {role.role}
+                                  </span>
+                                  {role.is_system && (
+                                    <span className="text-xs text-gray-500">System</span>
+                                  )}
+                                </div>
+                                {role.description && (
+                                  <p className="text-xs text-gray-500 mt-1">
+                                    {role.description}
+                                  </p>
                                 )}
-                              </div>
-                              {role.description && (
-                                <p className="text-xs text-gray-500 mt-1 truncate">
-                                  {role.description}
-                                </p>
+                              </button>
+                              
+                              {/* Delete button - only for non-system roles */}
+                              {!role.is_system && (
+                                <button
+                                  onClick={() => handleDeleteRole(role.role)}
+                                  disabled={deleteRoleWorking}
+                                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-red-600 disabled:opacity-40"
+                                  title="Delete role"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </button>
                               )}
-                            </button>
+                            </div>
                           ))}
+                          
+                          {roles.length === 0 && (
+                            <div className="text-sm text-gray-500 text-center py-4">
+                              No roles found
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -1070,6 +1239,87 @@ const handleVerifyCode = async () => {
             )}
           </div>
         )}
+		
+		 {/* Create Role Modal */}
+        <Modal
+          isOpen={showCreateRoleModal}
+          onClose={() => {
+            setShowCreateRoleModal(false);
+            setNewRole({ role: '', description: '', display_order: 0 });
+          }}
+          title="Create New Role"
+        >
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Role Name <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                value={newRole.role}
+                onChange={(e) => setNewRole({ ...newRole, role: e.target.value })}
+                className="block w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-blue-500 focus:border-blue-500"
+                placeholder="e.g., Coach, Secretary"
+                disabled={createRoleWorking}
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                This will be the display name of the role
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Description
+              </label>
+              <textarea
+                value={newRole.description}
+                onChange={(e) => setNewRole({ ...newRole, description: e.target.value })}
+                className="block w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-blue-500 focus:border-blue-500"
+                placeholder="Brief description of this role's responsibilities"
+                rows="3"
+                disabled={createRoleWorking}
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Display Order
+              </label>
+              <input
+                type="number"
+                value={newRole.display_order}
+                onChange={(e) => setNewRole({ ...newRole, display_order: parseInt(e.target.value) || 0 })}
+                className="block w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-blue-500 focus:border-blue-500"
+                placeholder="0"
+                min="0"
+                disabled={createRoleWorking}
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                Lower numbers appear first in lists (optional)
+              </p>
+            </div>
+          </div>
+
+          <div className="flex justify-end space-x-2 pt-4">
+            <button
+              onClick={() => {
+                setShowCreateRoleModal(false);
+                setNewRole({ role: '', description: '', display_order: 0 });
+              }}
+              className="px-3 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-50"
+              disabled={createRoleWorking}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleCreateRole}
+              className="px-3 py-2 text-sm rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60"
+              disabled={createRoleWorking || !newRole.role.trim()}
+            >
+              {createRoleWorking ? 'Creating...' : 'Create Role'}
+            </button>
+          </div>
+        </Modal>
 
         {/* Reset Password Modal */}
         <Modal

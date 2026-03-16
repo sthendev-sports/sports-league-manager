@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar, Clock, MapPin, Save, Download, Plus, Trash2, Edit, TestTube, Database } from 'lucide-react';
+import { Calendar, Clock, MapPin, Save, Download, Plus, Trash2, Edit, TestTube, Database, Users, CalendarClock } from 'lucide-react';
 import Modal from '../components/Modal'; // Adjust path as needed
-import api, { divisionsAPI, teamsAPI, seasonsAPI } from '../services/api';
+import api, { divisionsAPI, teamsAPI, seasonsAPI, dashboardAPI } from '../services/api';
 
 const GameScheduler = () => {
   // Configuration state
@@ -11,6 +11,12 @@ const GameScheduler = () => {
   const [teams, setTeams] = useState([]);
   const [seasons, setSeasons] = useState([]);
   const [selectedSeason, setSelectedSeason] = useState('');
+
+  // Dashboard stats for registration counts
+  const [dashboardStats, setDashboardStats] = useState({
+    divisions: [] // This will contain division registration data
+  });
+  const [loadingStats, setLoadingStats] = useState(false);
 
   // Test Mode State
   const [isTestMode, setIsTestMode] = useState(false);
@@ -123,6 +129,26 @@ const GameScheduler = () => {
     return `${year}-${month}-${day}`;
   };
 
+  // Load dashboard stats for registration counts
+  const loadDashboardStats = async (seasonId) => {
+    if (!seasonId) return;
+    
+    try {
+      setLoadingStats(true);
+      console.log('Loading dashboard stats for season:', seasonId);
+      
+      // Call the same dashboard API that the dashboard page uses
+      const dashboardData = await dashboardAPI.getStatistics(seasonId, '');
+      
+      console.log('Dashboard stats loaded:', dashboardData);
+      setDashboardStats(dashboardData);
+    } catch (error) {
+      console.error('Error loading dashboard stats:', error);
+    } finally {
+      setLoadingStats(false);
+    }
+  };
+
   // Load/Save Test Configuration
   useEffect(() => {
     const savedTestMode = localStorage.getItem('gameSchedulerTestMode');
@@ -210,6 +236,9 @@ const GameScheduler = () => {
         ]);
         setDivisions(Array.isArray(divisionsRes.data) ? divisionsRes.data : []);
         setTeams(Array.isArray(teamsRes.data) ? teamsRes.data : []);
+        
+        // Also load dashboard stats
+        await loadDashboardStats(selectedSeason);
       } catch (e) {
         console.error('Error loading season-specific divisions/teams:', e);
         setDivisions([]);
@@ -303,7 +332,7 @@ const GameScheduler = () => {
     }
   };
 
-  // Edit a time slot
+  // Edit a time slot - updates ALL fields for that day/time
   const startEditingSlot = (slot) => {
     setEditingSlot(slot);
     setEditForm({ 
@@ -319,13 +348,16 @@ const GameScheduler = () => {
       return;
     }
 
+    // Update ALL slots that have the old day and time
     setScheduleConfig(prev => prev.map(slot => {
-      if (slot.id === editingSlot.id) {
+      if (slot.day === editingSlot.day && slot.time === editingSlot.time) {
         return {
           ...slot,
           id: `${editForm.day}-${editForm.time}-${slot.field}`,
           day: editForm.day,
           time: editForm.time,
+          // Preserve the division assignment
+          division: slot.division
         };
       }
       return slot;
@@ -349,6 +381,36 @@ const GameScheduler = () => {
     updated[index].division = division;
     setScheduleConfig(updated);
   };
+
+  // Get registration count from dashboard stats
+  const getRegistrationCount = (divisionName) => {
+    if (!dashboardStats?.divisions) return 0;
+    
+    const division = dashboardStats.divisions.find(d => d.name === divisionName);
+    return division?.current || 0;
+  };
+
+  // ========== NEW: Calculate game counts per team ==========
+  const getGameCountsPerTeam = () => {
+    const gameCounts = {};
+    
+    generatedGames.forEach(game => {
+      // Count home games
+      if (!gameCounts[game.HomeTeam]) {
+        gameCounts[game.HomeTeam] = 0;
+      }
+      gameCounts[game.HomeTeam]++;
+      
+      // Count away games
+      if (!gameCounts[game.AwayTeam]) {
+        gameCounts[game.AwayTeam] = 0;
+      }
+      gameCounts[game.AwayTeam]++;
+    });
+    
+    return gameCounts;
+  };
+  // ========== END NEW ==========
 
   // Test Mode Functions
   const initializeTestConfig = () => {
@@ -778,11 +840,21 @@ const GameScheduler = () => {
     </div>
   );
 
+  // Get player counts for display
+  const playerCounts = getRegistrationCount;
+  
+  // ========== NEW: Get game counts for display ==========
+  const gameCounts = getGameCountsPerTeam();
+  // ========== END NEW ==========
+
   return (
     <div className="w-full max-w-7xl mx-auto p-6">
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-gray-900">Game Scheduler</h1>
         <p className="text-gray-600 mt-2">Configure and generate your league game schedule</p>
+        {loadingStats && (
+          <p className="text-sm text-blue-600 mt-1">Loading registration data...</p>
+        )}
       </div>
 
       {/* Mode Toggle Section */}
@@ -1039,70 +1111,141 @@ const GameScheduler = () => {
         </div>
       </Modal>
 
-      {/* Test Config Modal */}
+      {/* Test Config Modal with Registration Counts */}
       <Modal isOpen={showTestConfigModal} onClose={() => setShowTestConfigModal(false)} title="Configure Test Teams" footer={TestConfigModalFooter}>
         <div className="space-y-4">
           <p className="text-sm text-gray-600">
             Set how many teams you want in each division for testing. The system will use real team names if available, or create placeholder names.
           </p>
-          <div className="max-h-96 overflow-y-auto">
-            {testDivisionConfig.map((config) => {
-              const division = divisions.find(d => d.id === config.divisionId);
-              const realTeamCount = teams.filter(t => t.division_id === config.divisionId && t.players?.length > 0).length;
-              
-              return (
-                <div key={config.divisionId} className="mb-4 p-4 border border-gray-200 rounded-lg">
-                  <div className="flex justify-between items-center mb-2">
-                    <label className="font-medium text-gray-700">{config.divisionName}</label>
-                    <span className="text-sm text-gray-500">
-                      {realTeamCount > 0 ? `${realTeamCount} real teams available` : 'No real teams yet'}
-                    </span>
+          {loadingStats && (
+            <div className="text-center py-4">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-500 mx-auto"></div>
+              <p className="text-sm text-gray-500 mt-2">Loading registration data...</p>
+            </div>
+          )}
+          {!loadingStats && (
+            <div className="max-h-96 overflow-y-auto">
+              {testDivisionConfig.map((config) => {
+                const division = divisions.find(d => d.id === config.divisionId);
+                const realTeamCount = teams.filter(t => t.division_id === config.divisionId && t.players?.length > 0).length;
+                const registeredCount = getRegistrationCount(config.divisionName);
+                const estimatedTeams = registeredCount > 0 ? Math.ceil(registeredCount / 12) : 0; // Assuming ~12 players per team
+                
+                return (
+                  <div key={config.divisionId} className="mb-4 p-4 border border-gray-200 rounded-lg">
+                    <div className="flex justify-between items-center mb-2">
+                      <label className="font-medium text-gray-700">{config.divisionName}</label>
+                      <div className="flex items-center space-x-3">
+                        <span className="text-sm text-gray-500 flex items-center">
+                          <Users className="h-3 w-3 mr-1" />
+                          {registeredCount} registered
+                        </span>
+                        {registeredCount > 0 && (
+                          <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">
+                            Est. {estimatedTeams} teams
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <input
+                        type="number"
+                        min="0"
+                        max="20"
+                        value={config.teamCount}
+                        onChange={(e) => updateTestDivisionCount(config.divisionId, e.target.value)}
+                        className="flex-1 border border-gray-300 rounded-md px-3 py-2 focus:ring-purple-500 focus:border-purple-500"
+                        placeholder="Number of teams for testing"
+                      />
+                      {realTeamCount > 0 && (
+                        <span className="text-xs text-gray-500 whitespace-nowrap">
+                          {realTeamCount} real teams
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-gray-500 mt-1">
+                      {config.teamCount > realTeamCount 
+                        ? `Will create ${config.teamCount - realTeamCount} placeholder team(s)`
+                        : config.teamCount > 0 ? 'Using real teams only' : 'No teams selected'}
+                    </p>
+                    {registeredCount > 0 && config.teamCount > 0 && (
+                      <p className="text-xs text-green-600 mt-1">
+                        ~{Math.round(registeredCount / config.teamCount)} players per team
+                      </p>
+                    )}
                   </div>
-                  <input
-                    type="number"
-                    min="0"
-                    max="20"
-                    value={config.teamCount}
-                    onChange={(e) => updateTestDivisionCount(config.divisionId, e.target.value)}
-                    className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-purple-500 focus:border-purple-500"
-                    placeholder="Number of teams"
-                  />
-                  <p className="text-xs text-gray-500 mt-1">
-                    {config.teamCount > realTeamCount 
-                      ? `Will create ${config.teamCount - realTeamCount} placeholder team(s)`
-                      : 'Using real teams only'}
-                  </p>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </Modal>
 
-      {/* Team Summary */}
+      {/* ========== UPDATED: Team Summary with Game Counts ========== */}
       <div className="bg-white shadow rounded-lg p-6 mb-6">
         <h2 className="text-xl font-semibold mb-4">
           Team Summary {isTestMode && '(Test Mode)'}
+          {generatedGames.length > 0 && (
+            <span className="ml-2 text-sm font-normal text-gray-500">
+              ({Object.keys(gameCounts).length} teams, {generatedGames.length} total games)
+            </span>
+          )}
         </h2>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {Object.entries(getTeamsByDivision()).map(([divisionName, divisionTeams]) => (
-            <div key={divisionName} className="border border-gray-200 rounded-lg p-4">
-              <h3 className="font-semibold text-lg mb-2">{divisionName}</h3>
-              <p className="text-sm text-gray-600 mb-3">{divisionTeams.length} team{divisionTeams.length !== 1 ? 's' : ''}</p>
-              <div className="space-y-2">
-                {divisionTeams.map((team, index) => (
-                  <div key={team.id} className="flex justify-between items-center text-sm">
-                    <span><strong>{index + 1}.</strong> {team.name}</span>
-                    <span className="text-gray-500">
-                      {team.id.toString().startsWith('test-') ? '🔄 Placeholder' : `${team.players?.length || 0} players`}
-                    </span>
+          {Object.entries(getTeamsByDivision()).map(([divisionName, divisionTeams]) => {
+            const registeredCount = getRegistrationCount(divisionName);
+            return (
+              <div key={divisionName} className="border border-gray-200 rounded-lg p-4">
+                <div className="flex justify-between items-start mb-2">
+                  <h3 className="font-semibold text-lg">{divisionName}</h3>
+                  <span className="text-sm text-gray-500 flex items-center">
+                    <Users className="h-3 w-3 mr-1" />
+                    {registeredCount} registered
+                  </span>
+                </div>
+                <p className="text-sm text-gray-600 mb-3">{divisionTeams.length} team{divisionTeams.length !== 1 ? 's' : ''}</p>
+                <div className="space-y-2">
+                  {divisionTeams.map((team, index) => {
+                    const gameCount = gameCounts[team.name] || 0;
+                    return (
+                      <div key={team.id} className="flex justify-between items-center text-sm">
+                        <span className="flex items-center">
+                          <span className="font-medium mr-2">{index + 1}.</span>
+                          {team.name}
+                          {generatedGames.length > 0 && (
+                            <span className={`ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                              gameCount > 0 ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'
+                            }`}>
+                              <CalendarClock className="h-3 w-3 mr-1" />
+                              {gameCount} {gameCount === 1 ? 'game' : 'games'}
+                            </span>
+                          )}
+                        </span>
+                        <span className="text-gray-500">
+                          {team.id.toString().startsWith('test-') ? '🔄 Placeholder' : `${team.players?.length || 0} players`}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+                {/* ========== NEW: Division game count summary ========== */}
+                {generatedGames.length > 0 && (
+                  <div className="mt-3 pt-2 border-t border-gray-100">
+                    <div className="flex justify-between items-center text-xs text-gray-500">
+                      <span>Division games:</span>
+                      <span className="font-medium">
+                        {divisionTeams.reduce((sum, team) => sum + (gameCounts[team.name] || 0), 0) / 2} games
+                      </span>
+                    </div>
                   </div>
-                ))}
+                )}
+                {/* ========== END NEW ========== */}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
+      {/* ========== END UPDATED ========== */}
 
       {/* Action Buttons */}
       <div className="flex justify-center space-x-4 mb-6">

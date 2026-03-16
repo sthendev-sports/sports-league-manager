@@ -33,6 +33,7 @@ const [deleteError, setDeleteError] = useState('');
   const [savingWorkbond, setSavingWorkbond] = useState(false);
   
   const [loading, setLoading] = useState(true);
+  const [playersLoading, setPlayersLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
   const deferredSearchTerm = useDeferredValue(searchTerm);
@@ -307,10 +308,10 @@ const loadBoardMembers = async () => {
   }
 };
 
-  const loadPlayers = async () => {
+    const loadPlayers = async () => {
   const seqId = ++playersLoadSeq.current;
   try {
-    setLoading(true);
+    setPlayersLoading(true); // Set playersLoading to true when starting
     setError(null);
     
     const filters = {};
@@ -387,6 +388,7 @@ const loadBoardMembers = async () => {
     setPlayers([]);
   } finally {
     if (seqId === playersLoadSeq.current) {
+      setPlayersLoading(false); // Set playersLoading to false when done
       setLoading(false);
     }
   }
@@ -1619,10 +1621,11 @@ const exportPlayersToCSV = () => {
     </div>
   );
 
-  if (loading) {
+    if (loading) {
     return (
       <div className="flex justify-center items-center h-64">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
+        <span className="ml-4 text-gray-600">Loading players...</span>
       </div>
     );
   }
@@ -1950,7 +1953,7 @@ const exportPlayersToCSV = () => {
         )}
       </div>
 
-      {/* Players Table */}
+            {/* Players Table */}
       <div className="bg-white shadow overflow-hidden rounded-lg">
         
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3">
@@ -1962,7 +1965,7 @@ const exportPlayersToCSV = () => {
             <button
               type="button"
               onClick={() => setPage(1)}
-              disabled={page <= 1}
+              disabled={page <= 1 || playersLoading}
               className="px-3 py-1 border rounded-md text-sm disabled:opacity-50"
             >
               First
@@ -1970,7 +1973,7 @@ const exportPlayersToCSV = () => {
             <button
               type="button"
               onClick={() => setPage((p) => Math.max(1, p - 1))}
-              disabled={page <= 1}
+              disabled={page <= 1 || playersLoading}
               className="px-3 py-1 border rounded-md text-sm disabled:opacity-50"
             >
               Prev
@@ -1982,7 +1985,7 @@ const exportPlayersToCSV = () => {
             <button
               type="button"
               onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              disabled={page >= totalPages}
+              disabled={page >= totalPages || playersLoading}
               className="px-3 py-1 border rounded-md text-sm disabled:opacity-50"
             >
               Next
@@ -1990,7 +1993,7 @@ const exportPlayersToCSV = () => {
             <button
               type="button"
               onClick={() => setPage(totalPages)}
-              disabled={page >= totalPages}
+              disabled={page >= totalPages || playersLoading}
               className="px-3 py-1 border rounded-md text-sm disabled:opacity-50"
             >
               Last
@@ -1999,357 +2002,364 @@ const exportPlayersToCSV = () => {
         </div>
 
         <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Player Info
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Division
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Team
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Status
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Age/DOB/Gender
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Uniform Sizes
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Registration
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Workbond Check
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Medical
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Primary Guardian
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Secondary Guardian
-                </th>
-				<th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-      Actions
-    </th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {displayedPlayers.map((player) => (
-                <tr key={player.id} className="hover:bg-gray-50">
-                  {/* Player Info Column */}
-                  <td className="px-4 py-4">
-                    <div className="text-sm font-medium text-gray-900 flex items-center gap-2">
-                      <span>{player.first_name} {player.last_name}</span>
-                      {getSiblingInfo(player).hasSiblings ? (
-                        <Users className="h-4 w-4 text-blue-500" title={getSiblingInfo(player).title} />
-                      ) : null}
-                    </div>
-                    <div className="text-sm text-gray-500">
-                      {player.is_new_player ? 'New' : 'Returning'}
-                      {player.is_travel_player && ' • Travel'}
-                    </div>
-                  </td>
-
-                  {/* Division Column */}
-                  <td className="px-4 py-4">
-                    <div className="text-sm text-gray-900">
-                      {player.division?.name || player.program_title || 'N/A'}
-                    </div>
-                  </td>
-
-                  {/* Team Column */}
-                  <td className="px-4 py-4">
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        {player.team ? (
-                          <div className="flex items-center">
-                            <div 
-                              className={`w-3 h-3 rounded-full mr-2 ${getColorClass(player.team.color)}`}
-                            ></div>
-                            <span className="text-sm text-gray-700">{player.team.name}</span>
-                          </div>
-                        ) : (
-                          <span className="text-sm text-gray-400">No Team</span>
-                        )}
+          {playersLoading ? (
+            // Show loading indicator when data is being fetched
+            <div className="flex justify-center items-center h-64">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+              <span className="ml-3 text-gray-600">Loading player data...</span>
+            </div>
+          ) : (
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Player Info
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Division
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Team
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Status
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Age/DOB/Gender
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Uniform Sizes
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Registration
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Workbond Check
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Medical
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Primary Guardian
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Secondary Guardian
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Actions
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {displayedPlayers.map((player) => (
+                  <tr key={player.id} className="hover:bg-gray-50">
+                    {/* Player Info Column */}
+                    <td className="px-4 py-4">
+                      <div className="text-sm font-medium text-gray-900 flex items-center gap-2">
+                        <span>{player.first_name} {player.last_name}</span>
+                        {getSiblingInfo(player).hasSiblings ? (
+                          <Users className="h-4 w-4 text-blue-500" title={getSiblingInfo(player).title} />
+                        ) : null}
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => openTeamEdit(player)}
-                        className="text-xs text-blue-600 hover:text-blue-800 underline whitespace-nowrap"
-                      >
-                        Change
-                      </button>
-                    </div>
-                  </td>
+                      <div className="text-sm text-gray-500">
+                        {player.is_new_player ? 'New' : 'Returning'}
+                        {player.is_travel_player && ' • Travel'}
+                      </div>
+                    </td>
 
-                  {/* ADD: Status Column */}
-                  <td className="px-4 py-4">
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <span className={`inline-flex items-center px-2 py-1 text-xs rounded-full font-medium ${getStatusBadge(player.status).className}`}>
-                          {getStatusBadge(player.status).label}
+                    {/* Division Column */}
+                    <td className="px-4 py-4">
+                      <div className="text-sm text-gray-900">
+                        {player.division?.name || player.program_title || 'N/A'}
+                      </div>
+                    </td>
+
+                    {/* Team Column */}
+                    <td className="px-4 py-4">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          {player.team ? (
+                            <div className="flex items-center">
+                              <div 
+                                className={`w-3 h-3 rounded-full mr-2 ${getColorClass(player.team.color)}`}
+                              ></div>
+                              <span className="text-sm text-gray-700">{player.team.name}</span>
+                            </div>
+                          ) : (
+                            <span className="text-sm text-gray-400">No Team</span>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => openTeamEdit(player)}
+                          className="text-xs text-blue-600 hover:text-blue-800 underline whitespace-nowrap"
+                        >
+                          Change
+                        </button>
+                      </div>
+                    </td>
+
+                    {/* ADD: Status Column */}
+                    <td className="px-4 py-4">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <span className={`inline-flex items-center px-2 py-1 text-xs rounded-full font-medium ${getStatusBadge(player.status).className}`}>
+                            {getStatusBadge(player.status).label}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => openStatusEdit(player)}
+                          className="text-xs text-blue-600 hover:text-blue-800 underline whitespace-nowrap"
+                        >
+                          Change
+                        </button>
+                      </div>
+                    </td>
+
+                    {/* Age/DOB/Gender Column */}
+                    <td className="px-4 py-4">
+                      <div className="text-sm">
+                        <div>Age: {calculateAge(player.birth_date)}</div>
+                        <div className="text-gray-500">
+                          {player.birth_date ? formatBirthDate(player.birth_date) : 'N/A'}
+                        </div>
+                        <div className="text-gray-500">{player.gender || 'N/A'}</div>
+                      </div>
+                    </td>
+
+                    {/* Uniform Sizes Column - Now using data from players table */}
+                    <td className="px-4 py-4">
+                      <div className="text-sm">
+                        <div>Shirt: {player.shirt_size || player.uniform_shirt_size || 'N/A'}</div>
+                        <div>Pants: {player.pants_size || player.uniform_pants_size || 'N/A'}</div>
+                      </div>
+                    </td>
+
+                    {/* Registration Status Column */}
+                    <td className="px-4 py-4">
+                      {player.payment_received ? (
+                        <span className="inline-flex items-center px-2 py-1 text-xs bg-green-100 text-green-800 rounded-full">
+                          Paid
                         </span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => openStatusEdit(player)}
-                        className="text-xs text-blue-600 hover:text-blue-800 underline whitespace-nowrap"
-                      >
-                        Change
-                      </button>
-                    </div>
-                  </td>
+                      ) : (
+                        <span className="inline-flex items-center px-2 py-1 text-xs bg-red-100 text-red-800 rounded-full">
+                          Pending
+                        </span>
+                      )}
+                    </td>
 
-                  {/* Age/DOB/Gender Column */}
-                  <td className="px-4 py-4">
-                    <div className="text-sm">
-                      <div>Age: {calculateAge(player.birth_date)}</div>
-                      <div className="text-gray-500">
-                        {player.birth_date ? formatBirthDate(player.birth_date) : 'N/A'}
-                      </div>
-                      <div className="text-gray-500">{player.gender || 'N/A'}</div>
-                    </div>
-                  </td>
-
-                  {/* Uniform Sizes Column - Now using data from players table */}
-                  <td className="px-4 py-4">
-                    <div className="text-sm">
-                      <div>Shirt: {player.shirt_size || player.uniform_shirt_size || 'N/A'}</div>
-                      <div>Pants: {player.pants_size || player.uniform_pants_size || 'N/A'}</div>
-                    </div>
-                  </td>
-
-                  {/* Registration Status Column */}
-                  <td className="px-4 py-4">
-                    {player.payment_received ? (
-                      <span className="inline-flex items-center px-2 py-1 text-xs bg-green-100 text-green-800 rounded-full">
-                        Paid
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center px-2 py-1 text-xs bg-red-100 text-red-800 rounded-full">
-                        Pending
-                      </span>
-                    )}
-                  </td>
-
-                  {/* UPDATED: Workbond Check Status Column - Now with board member exemption */}
-                  <td className="px-4 py-4">
-                    <div className="flex items-center justify-between gap-2">
-                      <div>
-                        {(() => {
-                          // Check if this family has any board members
-                          const hasBoardMember = boardMembers.some(bm => bm.family_id === player.family_id);
-                          
-                          // If this is a board member family, show EXEMPT regardless of workbond status
-                          if (hasBoardMember) {
+                    {/* UPDATED: Workbond Check Status Column - Now with board member exemption */}
+                    <td className="px-4 py-4">
+                      <div className="flex items-center justify-between gap-2">
+                        <div>
+                          {(() => {
+                            // Check if this family has any board members
+                            const hasBoardMember = boardMembers.some(bm => bm.family_id === player.family_id);
+                            
+                            // If this is a board member family, show EXEMPT regardless of workbond status
+                            if (hasBoardMember) {
+                              return (
+                                <div>
+                                  <span className="inline-flex items-center px-2 py-1 text-xs bg-purple-100 text-purple-800 rounded-full mb-1">
+                                    Board Member - Exempt
+                                  </span>
+                                  {player.season_workbond?.notes && player.season_workbond.notes.trim() !== '' && (
+                                    <div className="text-xs text-gray-500 whitespace-pre-line mt-1">
+                                      {player.season_workbond.notes}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            }
+                            
+                            // Regular workbond display for non-board families
                             return (
                               <div>
-                                <span className="inline-flex items-center px-2 py-1 text-xs bg-purple-100 text-purple-800 rounded-full mb-1">
-                                  Board Member - Exempt
-                                </span>
-                                {player.season_workbond?.notes && player.season_workbond.notes.trim() !== '' && (
-                                  <div className="text-xs text-gray-500 whitespace-pre-line mt-1">
-                                    {player.season_workbond.notes}
+                                {player.season_workbond?.notes && player.season_workbond.notes.trim() !== '' ? (
+                                  <div>
+                                    {player.season_workbond.notes.includes('Exempt') ? (
+                                      <span className="inline-flex items-center px-2 py-1 text-xs bg-purple-100 text-purple-800 rounded-full mb-1">
+                                        Exempt
+                                      </span>
+                                    ) : player.season_workbond.received ? (
+                                      <span className="inline-flex items-center px-2 py-1 text-xs bg-green-100 text-green-800 rounded-full mb-1">
+                                        Received
+                                      </span>
+                                    ) : (
+                                      <span className="inline-flex items-center px-2 py-1 text-xs bg-yellow-100 text-yellow-800 rounded-full mb-1">
+                                        Not Received
+                                      </span>
+                                    )}
+                                    <div className="text-xs text-gray-500 whitespace-pre-line">
+                                      {player.season_workbond.notes}
+                                    </div>
                                   </div>
+                                ) : (
+                                  <span className="inline-flex items-center px-2 py-1 text-xs bg-yellow-100 text-yellow-800 rounded-full">
+                                    Not Received
+                                  </span>
                                 )}
                               </div>
                             );
-                          }
-                          
-                          // Regular workbond display for non-board families
-                          return (
-                            <div>
-                              {player.season_workbond?.notes && player.season_workbond.notes.trim() !== '' ? (
-                                <div>
-                                  {player.season_workbond.notes.includes('Exempt') ? (
-                                    <span className="inline-flex items-center px-2 py-1 text-xs bg-purple-100 text-purple-800 rounded-full mb-1">
-                                      Exempt
-                                    </span>
-                                  ) : player.season_workbond.received ? (
-                                    <span className="inline-flex items-center px-2 py-1 text-xs bg-green-100 text-green-800 rounded-full mb-1">
-                                      Received
-                                    </span>
-                                  ) : (
-                                    <span className="inline-flex items-center px-2 py-1 text-xs bg-yellow-100 text-yellow-800 rounded-full mb-1">
-                                      Not Received
-                                    </span>
-                                  )}
-                                  <div className="text-xs text-gray-500 whitespace-pre-line">
-                                    {player.season_workbond.notes}
-                                  </div>
-                                </div>
-                              ) : (
-                                <span className="inline-flex items-center px-2 py-1 text-xs bg-yellow-100 text-yellow-800 rounded-full">
-                                  Not Received
-                                </span>
-                              )}
+                          })()}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => openWorkbondEdit(player)}
+                          className="text-xs text-blue-600 hover:text-blue-800 underline whitespace-nowrap"
+                        >
+                          Change
+                        </button>
+                      </div>
+                    </td>
+
+                    {/* Medical Conditions Column */}
+                    <td className="px-4 py-4">
+                      {player.medical_conditions && player.medical_conditions !== 'None' && player.medical_conditions !== 'none' ? (
+                        <div className="text-sm">
+                          <span className="inline-flex items-center px-2 py-1 text-xs bg-yellow-100 text-yellow-800 rounded-full mr-1">
+                            ⚕️
+                          </span>
+                          <span className="text-gray-700 text-xs">{player.medical_conditions}</span>
+                        </div>
+                      ) : (
+                        <span className="text-sm text-gray-400">None</span>
+                      )}
+                    </td>
+
+                    {/* Primary Guardian Column */}
+                    <td className="px-4 py-4">
+                      {player.family?.primary_contact_name ? (
+                        <div className="text-sm">
+                          <div className="font-medium text-gray-900">
+                            {player.family.primary_contact_name}
+                          </div>
+                          {player.family.primary_contact_email && (
+                            <div className="flex items-center text-gray-500 mt-1">
+                              <Mail className="h-3 w-3 mr-1" />
+                              <span className="text-xs">{player.family.primary_contact_email}</span>
                             </div>
-                          );
-                        })()}
-                      </div>
+                          )}
+                          {player.family.primary_contact_phone && (
+                            <div className="flex items-center text-gray-500 mt-1">
+                              <Phone className="h-3 w-3 mr-1" />
+                              <span className="text-xs">{player.family.primary_contact_phone}</span>
+                            </div>
+                          )}
+                          {/* Only show volunteer role if this person is actually a volunteer */}
+                          {player.volunteers?.some(v => {
+                            const volunteerName = v.name || '';
+                            const guardianName = player.family.primary_contact_name || '';
+                            const volunteerEmail = v.email || '';
+                            const guardianEmail = player.family.primary_contact_email || '';
+                            
+                            // Match by exact name or email
+                            return (volunteerName.trim().toLowerCase() === guardianName.trim().toLowerCase()) ||
+                                   (volunteerEmail.trim().toLowerCase() === guardianEmail.trim().toLowerCase());
+                          }) && (
+                            <div className="mt-1">
+                              <span className="text-xs font-medium text-gray-500">Volunteer: </span>
+                              {player.volunteers
+                                .filter(v => {
+                                  const volunteerName = v.name || '';
+                                  const guardianName = player.family.primary_contact_name || '';
+                                  const volunteerEmail = v.email || '';
+                                  const guardianEmail = player.family.primary_contact_email || '';
+                                  
+                                  return (volunteerName.trim().toLowerCase() === guardianName.trim().toLowerCase()) ||
+                                         (volunteerEmail.trim().toLowerCase() === guardianEmail.trim().toLowerCase());
+                                })
+                                .map((volunteer, idx) => (
+                                  <span key={idx} className={`text-xs ${volunteer.is_approved ? 'text-green-600 font-medium' : 'text-blue-600'}`}>
+                                    {volunteer.role}
+                                    {volunteer.is_approved && ' (Selected)'}
+                                  </span>
+                                ))}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-sm text-gray-400">Not provided</span>
+                      )}
+                    </td>
+
+                    {/* Secondary Guardian Column */}
+                    <td className="px-4 py-4">
+                      {player.family?.parent2_first_name ? (
+                        <div className="text-sm">
+                          <div className="font-medium text-gray-900">
+                            {player.family.parent2_first_name} {player.family.parent2_last_name}
+                          </div>
+                          {player.family.parent2_email && (
+                            <div className="flex items-center text-gray-500 mt-1">
+                              <Mail className="h-3 w-3 mr-1" />
+                              <span className="text-xs">{player.family.parent2_email}</span>
+                            </div>
+                          )}
+                          {player.family.parent2_phone && (
+                            <div className="flex items-center text-gray-500 mt-1">
+                              <Phone className="h-3 w-3 mr-1" />
+                              <span className="text-xs">{player.family.parent2_phone}</span>
+                            </div>
+                          )}
+                          {/* Only show volunteer role if this person is actually a volunteer */}
+                          {player.volunteers?.some(v => {
+                            const volunteerName = v.name || '';
+                            const guardianName = `${player.family.parent2_first_name} ${player.family.parent2_last_name}`.trim();
+                            const volunteerEmail = v.email || '';
+                            const guardianEmail = player.family.parent2_email || '';
+                            
+                            // Match by exact name or email
+                            return (volunteerName.trim().toLowerCase() === guardianName.trim().toLowerCase()) ||
+                                   (volunteerEmail.trim().toLowerCase() === guardianEmail.trim().toLowerCase());
+                          }) && (
+                            <div className="mt-1">
+                              <span className="text-xs font-medium text-gray-500">Volunteer: </span>
+                              {player.volunteers
+                                .filter(v => {
+                                  const volunteerName = v.name || '';
+                                  const guardianName = `${player.family.parent2_first_name} ${player.family.parent2_last_name}`.trim();
+                                  const volunteerEmail = v.email || '';
+                                  const guardianEmail = player.family.parent2_email || '';
+                                  
+                                  return (volunteerName.trim().toLowerCase() === guardianName.trim().toLowerCase()) ||
+                                         (volunteerEmail.trim().toLowerCase() === guardianEmail.trim().toLowerCase());
+                                })
+                                .map((volunteer, idx) => (
+                                  <span key={idx} className={`text-xs ${volunteer.is_approved ? 'text-green-600 font-medium' : 'text-blue-600'}`}>
+                                    {volunteer.role}
+                                    {volunteer.is_approved && ' (Selected)'}
+                                  </span>
+                                ))}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-sm text-gray-400">Not provided</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-4 whitespace-nowrap">
                       <button
-                        type="button"
-                        onClick={() => openWorkbondEdit(player)}
-                        className="text-xs text-blue-600 hover:text-blue-800 underline whitespace-nowrap"
+                        onClick={() => {
+                          setDeletingPlayer(player);
+                          setShowDeleteModal(true);
+                          setDeleteError('');
+                        }}
+                        className="text-red-600 hover:text-red-900 text-sm font-medium"
+                        title="Delete player"
                       >
-                        Change
+                        Delete
                       </button>
-                    </div>
-                  </td>
-
-                  {/* Medical Conditions Column */}
-                  <td className="px-4 py-4">
-                    {player.medical_conditions && player.medical_conditions !== 'None' && player.medical_conditions !== 'none' ? (
-                      <div className="text-sm">
-                        <span className="inline-flex items-center px-2 py-1 text-xs bg-yellow-100 text-yellow-800 rounded-full mr-1">
-                          ⚕️
-                        </span>
-                        <span className="text-gray-700 text-xs">{player.medical_conditions}</span>
-                      </div>
-                    ) : (
-                      <span className="text-sm text-gray-400">None</span>
-                    )}
-                  </td>
-
-                  {/* Primary Guardian Column */}
-                  <td className="px-4 py-4">
-                    {player.family?.primary_contact_name ? (
-                      <div className="text-sm">
-                        <div className="font-medium text-gray-900">
-                          {player.family.primary_contact_name}
-                        </div>
-                        {player.family.primary_contact_email && (
-                          <div className="flex items-center text-gray-500 mt-1">
-                            <Mail className="h-3 w-3 mr-1" />
-                            <span className="text-xs">{player.family.primary_contact_email}</span>
-                          </div>
-                        )}
-                        {player.family.primary_contact_phone && (
-                          <div className="flex items-center text-gray-500 mt-1">
-                            <Phone className="h-3 w-3 mr-1" />
-                            <span className="text-xs">{player.family.primary_contact_phone}</span>
-                          </div>
-                        )}
-                        {/* Only show volunteer role if this person is actually a volunteer */}
-                        {player.volunteers?.some(v => {
-                          const volunteerName = v.name || '';
-                          const guardianName = player.family.primary_contact_name || '';
-                          const volunteerEmail = v.email || '';
-                          const guardianEmail = player.family.primary_contact_email || '';
-                          
-                          // Match by exact name or email
-                          return (volunteerName.trim().toLowerCase() === guardianName.trim().toLowerCase()) ||
-                                 (volunteerEmail.trim().toLowerCase() === guardianEmail.trim().toLowerCase());
-                        }) && (
-                          <div className="mt-1">
-                            <span className="text-xs font-medium text-gray-500">Volunteer: </span>
-                            {player.volunteers
-                              .filter(v => {
-                                const volunteerName = v.name || '';
-                                const guardianName = player.family.primary_contact_name || '';
-                                const volunteerEmail = v.email || '';
-                                const guardianEmail = player.family.primary_contact_email || '';
-                                
-                                return (volunteerName.trim().toLowerCase() === guardianName.trim().toLowerCase()) ||
-                                       (volunteerEmail.trim().toLowerCase() === guardianEmail.trim().toLowerCase());
-                              })
-                              .map((volunteer, idx) => (
-                                <span key={idx} className={`text-xs ${volunteer.is_approved ? 'text-green-600 font-medium' : 'text-blue-600'}`}>
-                                  {volunteer.role}
-                                  {volunteer.is_approved && ' (Selected)'}
-                                </span>
-                              ))}
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <span className="text-sm text-gray-400">Not provided</span>
-                    )}
-                  </td>
-
-                  {/* Secondary Guardian Column */}
-                  <td className="px-4 py-4">
-                    {player.family?.parent2_first_name ? (
-                      <div className="text-sm">
-                        <div className="font-medium text-gray-900">
-                          {player.family.parent2_first_name} {player.family.parent2_last_name}
-                        </div>
-                        {player.family.parent2_email && (
-                          <div className="flex items-center text-gray-500 mt-1">
-                            <Mail className="h-3 w-3 mr-1" />
-                            <span className="text-xs">{player.family.parent2_email}</span>
-                          </div>
-                        )}
-                        {player.family.parent2_phone && (
-                          <div className="flex items-center text-gray-500 mt-1">
-                            <Phone className="h-3 w-3 mr-1" />
-                            <span className="text-xs">{player.family.parent2_phone}</span>
-                          </div>
-                        )}
-                        {/* Only show volunteer role if this person is actually a volunteer */}
-                        {player.volunteers?.some(v => {
-                          const volunteerName = v.name || '';
-                          const guardianName = `${player.family.parent2_first_name} ${player.family.parent2_last_name}`.trim();
-                          const volunteerEmail = v.email || '';
-                          const guardianEmail = player.family.parent2_email || '';
-                          
-                          // Match by exact name or email
-                          return (volunteerName.trim().toLowerCase() === guardianName.trim().toLowerCase()) ||
-                                 (volunteerEmail.trim().toLowerCase() === guardianEmail.trim().toLowerCase());
-                        }) && (
-                          <div className="mt-1">
-                            <span className="text-xs font-medium text-gray-500">Volunteer: </span>
-                            {player.volunteers
-                              .filter(v => {
-                                const volunteerName = v.name || '';
-                                const guardianName = `${player.family.parent2_first_name} ${player.family.parent2_last_name}`.trim();
-                                const volunteerEmail = v.email || '';
-                                const guardianEmail = player.family.parent2_email || '';
-                                
-                                return (volunteerName.trim().toLowerCase() === guardianName.trim().toLowerCase()) ||
-                                       (volunteerEmail.trim().toLowerCase() === guardianEmail.trim().toLowerCase());
-                              })
-                              .map((volunteer, idx) => (
-                                <span key={idx} className={`text-xs ${volunteer.is_approved ? 'text-green-600 font-medium' : 'text-blue-600'}`}>
-                                  {volunteer.role}
-                                  {volunteer.is_approved && ' (Selected)'}
-                                </span>
-                              ))}
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <span className="text-sm text-gray-400">Not provided</span>
-                    )}
-                  </td>
-				  <td className="px-4 py-4 whitespace-nowrap">
-      <button
-        onClick={() => {
-          setDeletingPlayer(player);
-          setShowDeleteModal(true);
-          setDeleteError('');
-        }}
-        className="text-red-600 hover:text-red-900 text-sm font-medium"
-        title="Delete player"
-      >
-        Delete
-      </button>
-    </td>
-                </tr>
-				
-              ))}
-            </tbody>
-          </table>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
         
-        {filteredPlayers.length === 0 && (
+        {!playersLoading && filteredPlayers.length === 0 && (
           <div className="text-center py-12">
             <Users className="mx-auto h-12 w-12 text-gray-400" />
             <h3 className="mt-2 text-sm font-medium text-gray-900">No players found</h3>

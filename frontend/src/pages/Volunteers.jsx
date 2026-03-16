@@ -27,6 +27,10 @@ const Volunteers = () => {
   const [activeTab, setActiveTab] = useState('manage');
   const [volunteerTrainings, setVolunteerTrainings] = useState([]);
   const [availableVolunteerTrainings, setAvailableVolunteerTrainings] = useState([]);
+  const [selectedRole, setSelectedRole] = useState('');
+const [selectedInterestedRole, setSelectedInterestedRole] = useState('');
+   // Add a new state for tracking volunteer data loading
+  const [volunteersLoading, setVolunteersLoading] = useState(false);
   const [newVolunteer, setNewVolunteer] = useState({
     name: '',
     email: '',
@@ -141,9 +145,10 @@ const Volunteers = () => {
     }
   };
 
-  const loadVolunteers = async () => {
+   const loadVolunteers = async () => {
     try {
       setError(null);
+      setVolunteersLoading(true); // Set loading to true when starting
 
       let url = '/api/volunteers';
       const params = new URLSearchParams();
@@ -177,6 +182,8 @@ const Volunteers = () => {
       console.error('Error loading volunteers:', error);
       setError(error.message || ('Failed to load volunteers.'));
       setVolunteers([]);
+    } finally {
+      setVolunteersLoading(false); // Set loading to false when done (whether success or error)
     }
   };
 
@@ -606,22 +613,28 @@ const Volunteers = () => {
     }
   };
 
-  // ✅ UPDATED: search includes interested_roles and training filter
-  const filteredVolunteers = volunteers.filter(volunteer => {
-    const term = searchTerm.toLowerCase();
+  // Filter volunteers based on all criteria
+const filteredVolunteers = volunteers.filter(volunteer => {
+  const term = searchTerm.toLowerCase();
 
-    const matchesSearch = !searchTerm ||
-      volunteer.name?.toLowerCase().includes(term) ||
-      volunteer.email?.toLowerCase().includes(term) ||
-      volunteer.role?.toLowerCase().includes(term) ||
-      volunteer.interested_roles?.toLowerCase().includes(term);
+  const matchesSearch = !searchTerm ||
+    volunteer.name?.toLowerCase().includes(term) ||
+    volunteer.email?.toLowerCase().includes(term) ||
+    volunteer.role?.toLowerCase().includes(term) ||
+    volunteer.interested_roles?.toLowerCase().includes(term);
 
-    const matchesTraining = !trainingFilter ||
-      (trainingFilter === 'completed' && volunteer.training_completed) ||
-      (trainingFilter === 'pending' && !volunteer.training_completed);
+  const matchesTraining = !trainingFilter ||
+    (trainingFilter === 'completed' && volunteer.training_completed) ||
+    (trainingFilter === 'pending' && !volunteer.training_completed);
 
-    return matchesSearch && matchesTraining;
-  });
+  const matchesRole = !selectedRole || volunteer.role === selectedRole;
+
+  const matchesInterestedRole = !selectedInterestedRole || 
+    (volunteer.interested_roles && 
+     volunteer.interested_roles.toLowerCase().includes(selectedInterestedRole.toLowerCase()));
+
+  return matchesSearch && matchesTraining && matchesRole && matchesInterestedRole;
+});
 
   const roleColors = {
     'Manager': 'bg-blue-100 text-blue-800',
@@ -829,15 +842,10 @@ const Volunteers = () => {
             : setNewVolunteer(prev => ({ ...prev, role: e.target.value }))
           }
         >
-          <option value="Parent">Parent</option>
           <option value="Manager">Manager</option>
           <option value="Coach">Coach</option>
           <option value="Assistant Coach">Assistant Coach</option>
           <option value="Team Parent">Team Parent</option>
-          <option value="Umpire">Umpire</option>
-          <option value="Field Maintenance">Field Maintenance</option>
-          <option value="Concession">Concession</option>
-          <option value="Board Member">Board Member</option>
         </select>
       </div>
 
@@ -1463,201 +1471,239 @@ const exportVolunteersToCSV = () => {
       {activeTab === 'manage' ? (
         <>
           {/* Filters */}
-          <div className="bg-white shadow rounded-lg p-4 mb-6">
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Search</label>
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <Search className="h-4 w-4 text-gray-400" />
-                  </div>
-                  <input
-                    type="text"
-                    className="w-full border border-gray-300 rounded-md pl-10 pr-3 py-2 focus:ring-blue-500 focus:border-blue-500"
-                    placeholder="Search name, email, role, interested..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                  />
-                </div>
-              </div>
+<div className="bg-white shadow rounded-lg p-4 mb-6">
+  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+    <div>
+      <label className="block text-sm font-medium text-gray-700 mb-1">Search</label>
+      <div className="relative">
+        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+          <Search className="h-4 w-4 text-gray-400" />
+        </div>
+        <input
+          type="text"
+          className="w-full border border-gray-300 rounded-md pl-10 pr-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+          placeholder="Search name, email, role, interested..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+        />
+      </div>
+    </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Division</label>
-                <select
-                  className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
-                  value={selectedDivision}
-                  onChange={(e) => setSelectedDivision(e.target.value)}
-                >
-                  <option value="">All Divisions</option>
-                  {divisions.map(division => (
-                    <option key={division.id} value={division.id}>{division.name}</option>
-                  ))}
-                </select>
-              </div>
+    <div>
+      <label className="block text-sm font-medium text-gray-700 mb-1">Division</label>
+      <select
+        className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+        value={selectedDivision}
+        onChange={(e) => setSelectedDivision(e.target.value)}
+      >
+        <option value="">All Divisions</option>
+        {divisions.map(division => (
+          <option key={division.id} value={division.id}>{division.name}</option>
+        ))}
+      </select>
+    </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Season</label>
-                <select
-                  className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
-                  value={selectedSeason}
-                  onChange={(e) => setSelectedSeason(e.target.value)}
-                >
-                  <option value="">All Seasons</option>
-                  {seasons.map(season => (
-                    <option key={season.id} value={season.id}>{season.name}</option>
-                  ))}
-                </select>
-              </div>
+    <div>
+      <label className="block text-sm font-medium text-gray-700 mb-1">Season</label>
+      <select
+        className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+        value={selectedSeason}
+        onChange={(e) => setSelectedSeason(e.target.value)}
+      >
+        <option value="">All Seasons</option>
+        {seasons.map(season => (
+          <option key={season.id} value={season.id}>{season.name}</option>
+        ))}
+      </select>
+    </div>
+  </div>
+  
+  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+    <div>
+      <label className="block text-sm font-medium text-gray-700 mb-1">Training Status</label>
+      <select
+        className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+        value={trainingFilter}
+        onChange={(e) => setTrainingFilter(e.target.value)}
+      >
+        <option value="">All Training Statuses</option>
+        <option value="completed">Completed</option>
+        <option value="pending">Pending</option>
+      </select>
+    </div>
+    
+    <div>
+      <label className="block text-sm font-medium text-gray-700 mb-1">Assigned Role</label>
+      <select
+        className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+        value={selectedRole}
+        onChange={(e) => setSelectedRole(e.target.value)}
+      >
+        <option value="">All Assigned Roles</option>
+        <option value="Manager">Manager</option>
+        <option value="Assistant Coach">Assistant Coach</option>
+        <option value="Team Parent">Team Parent</option>
+      </select>
+    </div>
+    
+    <div>
+      <label className="block text-sm font-medium text-gray-700 mb-1">Interested Role</label>
+      <select
+        className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+        value={selectedInterestedRole}
+        onChange={(e) => setSelectedInterestedRole(e.target.value)}
+      >
+        <option value="">All Interested Roles</option>
+        <option value="Manager">Manager</option>
+        <option value="Assistant Coach">Assistant Coach</option>
+        <option value="Team Parent">Team Parent</option>
+      </select>
+    </div>
+  </div>
+</div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Training Status</label>
-                <select
-                  className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
-                  value={trainingFilter}
-                  onChange={(e) => setTrainingFilter(e.target.value)}
-                >
-                  <option value="">All</option>
-                  <option value="completed">Completed</option>
-                  <option value="pending">Pending</option>
-                </select>
-              </div>
-            </div>
-          </div>
-
-          {/* Volunteers Table */}
+                    {/* Volunteers Table */}
           <div className="bg-white shadow overflow-hidden rounded-lg">
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Volunteer
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Assigned Role
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Interested Roles
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Division
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Team
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Season
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Training Status
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Background Check
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Actions
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {filteredVolunteers.map((volunteer) => (
-                    <tr key={volunteer.id} className="hover:bg-gray-50">
-                      <td className="px-6 py-4">
-                        <div className="flex items-center">
-                          <div>
-                            <div className="text-sm font-medium text-gray-900">
-                              {volunteer.name}
+            {volunteersLoading ? (
+              // Show loading indicator inside the table area when data is being fetched
+              <div className="flex justify-center items-center h-64">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+                <span className="ml-3 text-gray-600">Loading volunteer data...</span>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Volunteer
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Assigned Role
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Interested Roles
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Division
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Team
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Season
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Training Status
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Background Check
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Actions
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {filteredVolunteers.map((volunteer) => (
+                      <tr key={volunteer.id} className="hover:bg-gray-50">
+                        <td className="px-6 py-4">
+                          <div className="flex items-center">
+                            <div>
+                              <div className="text-sm font-medium text-gray-900">
+                                {volunteer.name}
+                              </div>
+                              {volunteer.email && (
+                                <div className="flex items-center text-sm text-gray-500 mt-1">
+                                  <Mail className="h-3 w-3 mr-1" />
+                                  {volunteer.email}
+                                </div>
+                              )}
+                              {volunteer.phone && (
+                                <div className="flex items-center text-sm text-gray-500 mt-1">
+                                  <Phone className="h-3 w-3 mr-1" />
+                                  {volunteer.phone}
+                                </div>
+                              )}
                             </div>
-                            {volunteer.email && (
-                              <div className="flex items-center text-sm text-gray-500 mt-1">
-                                <Mail className="h-3 w-3 mr-1" />
-                                {volunteer.email}
-                              </div>
-                            )}
-                            {volunteer.phone && (
-                              <div className="flex items-center text-sm text-gray-500 mt-1">
-                                <Phone className="h-3 w-3 mr-1" />
-                                {volunteer.phone}
-                              </div>
+                          </div>
+                        </td>
+
+                        <td className="px-6 py-4">
+                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${roleColors[volunteer.role] || 'bg-gray-100 text-gray-800'}`}>
+                            {volunteer.role}
+                          </span>
+                        </td>
+
+                        <td className="px-6 py-4 text-sm text-gray-900">
+                          {renderInterestedRoles(volunteer.interested_roles)}
+                        </td>
+
+                        <td className="px-6 py-4 text-sm text-gray-900">
+                          {volunteer.division?.name || 'Any Division'}
+                        </td>
+                        <td className="px-6 py-4 text-sm text-gray-900">
+                          {volunteer.team?.name || 'Unallocated'}
+                        </td>
+                        <td className="px-6 py-4 text-sm text-gray-900">
+                          {volunteer.season?.name || 'N/A'}
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="space-y-1">
+                            {volunteer.trainings_summary && volunteer.trainings_summary.total > 0 ? (
+                              <>
+                                <div className="flex items-center">
+                                  <div className={`inline-flex items-center px-2 py-1 text-xs rounded-full ${
+                                    volunteer.trainings_summary.all_required_completed
+                                      ? 'bg-green-100 text-green-800'
+                                      : 'bg-yellow-100 text-yellow-800'
+                                  }`}>
+                                    {volunteer.trainings_summary.completed}/{volunteer.trainings_summary.total} trainings
+                                  </div>
+                                </div>
+                                {volunteer.trainings_summary.required > 0 && (
+                                  <div className="text-xs text-gray-600">
+                                    Required: {volunteer.trainings_summary.completed_required}/{volunteer.trainings_summary.required}
+                                  </div>
+                                )}
+                                {volunteer.trainings_summary.expired > 0 && (
+                                  <div className="text-xs text-red-600">
+                                    {volunteer.trainings_summary.expired} expired
+                                  </div>
+                                )}
+                              </>
+                            ) : (
+                              <div className="text-xs text-gray-500">No trainings</div>
                             )}
                           </div>
-                        </div>
-                      </td>
+                        </td>
+                        <td className="px-6 py-4 text-sm text-gray-900">
+                          {volunteer.background_check_completed || 'pending'}
+                        </td>
+                        <td className="px-6 py-4 text-sm font-medium">
+                          <button
+                            onClick={() => handleEditVolunteer(volunteer)}
+                            className="text-blue-600 hover:text-blue-900 mr-3"
+                          >
+                            <Edit className="h-4 w-4 inline mr-1" />
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => handleDeleteVolunteer(volunteer.id)}
+                            className="text-red-600 hover:text-red-900"
+                          >
+                            <Trash2 className="h-4 w-4 inline mr-1" />
+                            Remove
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
 
-                      <td className="px-6 py-4">
-                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${roleColors[volunteer.role] || 'bg-gray-100 text-gray-800'}`}>
-                          {volunteer.role}
-                        </span>
-                      </td>
-
-                      <td className="px-6 py-4 text-sm text-gray-900">
-                        {renderInterestedRoles(volunteer.interested_roles)}
-                      </td>
-
-                      <td className="px-6 py-4 text-sm text-gray-900">
-                        {volunteer.division?.name || 'Any Division'}
-                      </td>
-                      <td className="px-6 py-4 text-sm text-gray-900">
-                        {volunteer.team?.name || 'Unallocated'}
-                      </td>
-                      <td className="px-6 py-4 text-sm text-gray-900">
-                        {volunteer.season?.name || 'N/A'}
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="space-y-1">
-                          {volunteer.trainings_summary && volunteer.trainings_summary.total > 0 ? (
-                            <>
-                              <div className="flex items-center">
-                                <div className={`inline-flex items-center px-2 py-1 text-xs rounded-full ${
-                                  volunteer.trainings_summary.all_required_completed
-                                    ? 'bg-green-100 text-green-800'
-                                    : 'bg-yellow-100 text-yellow-800'
-                                }`}>
-                                  {volunteer.trainings_summary.completed}/{volunteer.trainings_summary.total} trainings
-                                </div>
-                              </div>
-                              {volunteer.trainings_summary.required > 0 && (
-                                <div className="text-xs text-gray-600">
-                                  Required: {volunteer.trainings_summary.completed_required}/{volunteer.trainings_summary.required}
-                                </div>
-                              )}
-                              {volunteer.trainings_summary.expired > 0 && (
-                                <div className="text-xs text-red-600">
-                                  {volunteer.trainings_summary.expired} expired
-                                </div>
-                              )}
-                            </>
-                          ) : (
-                            <div className="text-xs text-gray-500">No trainings</div>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 text-sm text-gray-900">
-                        {volunteer.background_check_completed || 'pending'}
-                      </td>
-                      <td className="px-6 py-4 text-sm font-medium">
-                        <button
-                          onClick={() => handleEditVolunteer(volunteer)}
-                          className="text-blue-600 hover:text-blue-900 mr-3"
-                        >
-                          <Edit className="h-4 w-4 inline mr-1" />
-                          Edit
-                        </button>
-                        <button
-                          onClick={() => handleDeleteVolunteer(volunteer.id)}
-                          className="text-red-600 hover:text-red-900"
-                        >
-                          <Trash2 className="h-4 w-4 inline mr-1" />
-                          Remove
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            {filteredVolunteers.length === 0 && (
+            {!volunteersLoading && filteredVolunteers.length === 0 && (
               <div className="text-center py-12">
                 <Users className="mx-auto h-12 w-12 text-gray-400" />
                 <h3 className="mt-2 text-sm font-medium text-gray-900">No volunteers found</h3>

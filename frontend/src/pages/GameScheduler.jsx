@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar, Clock, MapPin, Save, Download, Plus, Trash2, Edit } from 'lucide-react';
+import { Calendar, Clock, MapPin, Save, Download, Plus, Trash2, Edit, TestTube, Database } from 'lucide-react';
 import Modal from '../components/Modal'; // Adjust path as needed
 import api, { divisionsAPI, teamsAPI, seasonsAPI } from '../services/api';
-
 
 const GameScheduler = () => {
   // Configuration state
@@ -12,6 +11,12 @@ const GameScheduler = () => {
   const [teams, setTeams] = useState([]);
   const [seasons, setSeasons] = useState([]);
   const [selectedSeason, setSelectedSeason] = useState('');
+
+  // Test Mode State
+  const [isTestMode, setIsTestMode] = useState(false);
+  const [testDivisionConfig, setTestDivisionConfig] = useState([]);
+  const [showTestConfigModal, setShowTestConfigModal] = useState(false);
+  const [isTestConfigSaved, setIsTestConfigSaved] = useState(false);
 
   // Schedule configuration state
   const [scheduleConfig, setScheduleConfig] = useState([]);
@@ -118,6 +123,31 @@ const GameScheduler = () => {
     return `${year}-${month}-${day}`;
   };
 
+  // Load/Save Test Configuration
+  useEffect(() => {
+    const savedTestMode = localStorage.getItem('gameSchedulerTestMode');
+    const savedTestConfig = localStorage.getItem('gameSchedulerTestConfig');
+    
+    if (savedTestMode) {
+      setIsTestMode(savedTestMode === 'true');
+    }
+    if (savedTestConfig) {
+      try {
+        setTestDivisionConfig(JSON.parse(savedTestConfig));
+        setIsTestConfigSaved(true);
+      } catch (e) {
+        console.error('Error loading test config:', e);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem('gameSchedulerTestMode', isTestMode.toString());
+    if (testDivisionConfig.length > 0) {
+      localStorage.setItem('gameSchedulerTestConfig', JSON.stringify(testDivisionConfig));
+    }
+  }, [isTestMode, testDivisionConfig]);
+
   // Load ALL data including saved configuration
   useEffect(() => {
     const loadAllData = async () => {
@@ -131,7 +161,6 @@ const GameScheduler = () => {
         // Set the saved values if they exist
         if (savedSeasonStart) setSeasonStartDate(savedSeasonStart);
         if (savedSeasonWeeks) setSeasonWeeks(parseInt(savedSeasonWeeks));
-        // We'll pick the ACTIVE season as the default; user can still change via the dropdown
 
         // Load seasons first so we can default to ACTIVE season
         const [activeRes, seasonsRes] = await Promise.all([
@@ -145,7 +174,6 @@ const GameScheduler = () => {
 
         const nextSeasonId = active?.id || allSeasons?.[0]?.id || '';
         setSelectedSeason(nextSeasonId);
-
 
         // Set schedule config - use saved if available, otherwise initialize
         if (savedConfig) {
@@ -275,19 +303,18 @@ const GameScheduler = () => {
     }
   };
 
-  // Edit a time slot - UPDATED to not include field
+  // Edit a time slot
   const startEditingSlot = (slot) => {
     setEditingSlot(slot);
     setEditForm({ 
       day: slot.day, 
       time: slot.time,
-      // REMOVED field: slot.field - we don't want to edit the field
     });
     setShowEditModal(true);
   };
 
   const saveEditedSlot = () => {
-    if (!editForm.day || !editForm.time) { // REMOVED field check
+    if (!editForm.day || !editForm.time) {
       alert('Please fill in all fields');
       return;
     }
@@ -296,10 +323,9 @@ const GameScheduler = () => {
       if (slot.id === editingSlot.id) {
         return {
           ...slot,
-          id: `${editForm.day}-${editForm.time}-${slot.field}`, // Keep original field
+          id: `${editForm.day}-${editForm.time}-${slot.field}`,
           day: editForm.day,
           time: editForm.time,
-          // REMOVED field: editForm.field - keep original field
         };
       }
       return slot;
@@ -307,7 +333,7 @@ const GameScheduler = () => {
 
     setShowEditModal(false);
     setEditingSlot(null);
-    setEditForm({ day: '', time: '' }); // REMOVED field from reset
+    setEditForm({ day: '', time: '' });
   };
 
   // Delete a field (all slots for that field)
@@ -324,8 +350,112 @@ const GameScheduler = () => {
     setScheduleConfig(updated);
   };
 
+  // Test Mode Functions
+  const initializeTestConfig = () => {
+    // Define the custom order
+    const divisionOrder = [
+      'T-Ball Division',
+      'Baseball - Coach Pitch Division',
+      'Baseball - Rookies Division',
+      'Baseball - Minors Division',
+      'Baseball - Majors Division',
+      'Softball - Rookies Division (Coach Pitch)',
+      'Softball - Minors Division',
+      'Softball - Majors Division',
+      'Challenger Division'
+    ];
+
+    // Sort divisions according to the custom order
+    const sortedDivisions = [...divisions].sort((a, b) => {
+      const indexA = divisionOrder.indexOf(a.name);
+      const indexB = divisionOrder.indexOf(b.name);
+      
+      // If division not found in order, put it at the end
+      if (indexA === -1) return 1;
+      if (indexB === -1) return -1;
+      return indexA - indexB;
+    });
+
+    const initialConfig = sortedDivisions.map(division => ({
+      divisionId: division.id,
+      divisionName: division.name,
+      teamCount: 0
+    }));
+    
+    setTestDivisionConfig(initialConfig);
+    setShowTestConfigModal(true);
+  };
+
+  const updateTestDivisionCount = (divisionId, teamCount) => {
+    setTestDivisionConfig(prev => 
+      prev.map(item => 
+        item.divisionId === divisionId 
+          ? { ...item, teamCount: parseInt(teamCount) || 0 }
+          : item
+      )
+    );
+  };
+
+  const saveTestConfig = () => {
+    // Validate that at least one division has teams
+    const hasTeams = testDivisionConfig.some(d => d.teamCount > 0);
+    if (!hasTeams) {
+      alert('Please set at least one division with teams');
+      return;
+    }
+    
+    setIsTestConfigSaved(true);
+    setShowTestConfigModal(false);
+    alert('Test configuration saved! You can now generate a test schedule.');
+  };
+
+  // Get teams for test mode - uses real team names but filters by test config
+  const getTestModeTeams = () => {
+    if (!isTestConfigSaved) return {};
+
+    const result = {};
+    
+    testDivisionConfig.forEach(config => {
+      if (config.teamCount > 0) {
+        // Find the division
+        const division = divisions.find(d => d.id === config.divisionId);
+        if (!division) return;
+
+        // Get real teams from this division that have players
+        const realTeams = teams.filter(team => 
+          team.division_id === config.divisionId && 
+          team.players && 
+          team.players.length > 0
+        );
+
+        if (realTeams.length === 0) {
+          // If no real teams, create placeholder teams
+          const placeholderTeams = [];
+          for (let i = 1; i <= config.teamCount; i++) {
+            placeholderTeams.push({
+              id: `test-${config.divisionId}-${i}`,
+              name: `${division.name} Team ${i}`,
+              division_id: config.divisionId,
+              players: [{ id: 'placeholder', name: 'Placeholder' }] // Dummy player to pass filter
+            });
+          }
+          result[division.name] = placeholderTeams;
+        } else {
+          // Use real teams, but only up to the configured count
+          result[division.name] = realTeams.slice(0, config.teamCount);
+        }
+      }
+    });
+
+    return result;
+  };
+
   // Get teams by division (only teams with players)
   const getTeamsByDivision = () => {
+    if (isTestMode) {
+      return getTestModeTeams();
+    }
+
     const teamsWithPlayers = teams.filter(team => 
       team.players && team.players.length > 0
     );
@@ -363,7 +493,7 @@ const GameScheduler = () => {
     );
   };
 
-  // Generate games - FIXED to support full season weeks
+  // Generate games - FIXED to use all available fields at each time slot
   const generateGames = () => {
     if (!seasonStartDate) {
       alert('Please set the season start date');
@@ -372,6 +502,11 @@ const GameScheduler = () => {
 
     if (!selectedSeason) {
       alert('Please select a season');
+      return;
+    }
+
+    if (isTestMode && !isTestConfigSaved) {
+      alert('Please configure test teams first using the "Configure Test Teams" button');
       return;
     }
 
@@ -410,15 +545,16 @@ const GameScheduler = () => {
 
         // Get unique days for this division
         const divisionDays = [...new Set(divisionSlots.map(slot => slot.day))];
-        console.log(`Division ${divisionName} plays on:`, divisionDays);
-
+        
         // Find first occurrence of each day after start date
         const firstOccurrences = {};
         divisionDays.forEach(day => {
           const dayOffset = daysOfWeek.indexOf(day);
-          const startDay = startDate.getDay();
+          // Convert Sunday (0) to 7 for easier calculation
+          const startDay = startDate.getDay() === 0 ? 7 : startDate.getDay();
+          const targetDay = dayOffset + 1; // Convert to 1-7 (Mon-Sun)
           
-          let daysToAdd = dayOffset - (startDay === 0 ? 7 : startDay) + 1;
+          let daysToAdd = targetDay - startDay;
           if (daysToAdd < 0) daysToAdd += 7;
           
           const firstDate = new Date(startDate);
@@ -439,35 +575,39 @@ const GameScheduler = () => {
             const gameDate = new Date(firstDate);
             gameDate.setDate(firstDate.getDate() + ((week - 1) * 7));
             
-            console.log(`  ${day}: ${gameDate.toDateString()}`);
+            const dateStr = formatDateForDisplay(gameDate);
 
             const daySlots = divisionSlots.filter(slot => slot.day === day);
             const uniqueTimes = [...new Set(daySlots.map(slot => slot.time))].sort();
             
             for (const time of uniqueTimes) {
-              // If we've used all matchups from the template, cycle back to the beginning
-              const currentMatchupIndex = matchupIndex % template.length;
-              const match = template[currentMatchupIndex];
-              const [homeTeamNum, awayTeamNum] = match;
-              
-              const homeTeam = divisionTeams[homeTeamNum - 1];
-              const awayTeam = divisionTeams[awayTeamNum - 1];
-
-              if (!homeTeam || !awayTeam) {
-                matchupIndex++;
-                continue;
-              }
-
-              const availableFieldSlot = daySlots.find(slot => 
+              // Get all available slots for this day/time that haven't been used on this date
+              const availableSlots = daySlots.filter(slot => 
                 slot.time === time && 
                 !games.find(g => 
-                  g.MatchDate === formatDateForDisplay(gameDate) &&
+                  g.MatchDate === dateStr &&
                   g.StartTime === time &&
                   g.Field === slot.field
                 )
               );
 
-              if (availableFieldSlot) {
+              if (availableSlots.length === 0) continue;
+
+              // Schedule a game on each available field at this time
+              for (const fieldSlot of availableSlots) {
+                // If we've used all matchups from the template, cycle back to the beginning
+                const currentMatchupIndex = matchupIndex % template.length;
+                const match = template[currentMatchupIndex];
+                const [homeTeamNum, awayTeamNum] = match;
+                
+                const homeTeam = divisionTeams[homeTeamNum - 1];
+                const awayTeam = divisionTeams[awayTeamNum - 1];
+
+                if (!homeTeam || !awayTeam) {
+                  matchupIndex++;
+                  continue;
+                }
+
                 const endTime = calculateEndTime(time);
 
                 games.push({
@@ -475,15 +615,15 @@ const GameScheduler = () => {
                   RoundNo: week,
                   HomeTeam: `${homeTeam.name}`,
                   AwayTeam: `${awayTeam.name}`,
-                  MatchDate: formatDateForDisplay(gameDate),
+                  MatchDate: dateStr,
                   StartTime: time,
                   EndTime: endTime,
                   Location: 'Sayreville Little League',
-                  Field: availableFieldSlot.field,
+                  Field: fieldSlot.field,
                   Division: divisionName
                 });
 
-                console.log(`    Scheduled: ${homeTeam.name} vs ${awayTeam.name} at ${time} (matchup ${currentMatchupIndex + 1}/${template.length})`);
+                console.log(`    Scheduled: ${homeTeam.name} vs ${awayTeam.name} at ${time} on ${fieldSlot.field} (matchup ${currentMatchupIndex + 1}/${template.length})`);
                 matchupIndex++;
                 gamesScheduledThisWeek++;
               }
@@ -497,7 +637,7 @@ const GameScheduler = () => {
       });
 
       setGeneratedGames(games);
-      alert(`Schedule generated successfully! Created ${games.length} games for ${seasonWeeks} weeks.`);
+      alert(`Schedule generated successfully! Created ${games.length} games for ${seasonWeeks} weeks. (${isTestMode ? 'TEST MODE' : 'Live Mode'})`);
       
     } catch (error) {
       console.error('Error generating games:', error);
@@ -529,10 +669,15 @@ const GameScheduler = () => {
       localStorage.removeItem('gameSchedulerSeasonStart');
       localStorage.removeItem('gameSchedulerSeasonWeeks');
       localStorage.removeItem('gameSchedulerSelectedSeason');
+      localStorage.removeItem('gameSchedulerTestMode');
+      localStorage.removeItem('gameSchedulerTestConfig');
       
       setSeasonStartDate('');
       setSeasonWeeks(10);
       setSelectedSeason('');
+      setIsTestMode(false);
+      setTestDivisionConfig([]);
+      setIsTestConfigSaved(false);
       initializeScheduleConfig();
       
       alert('All configuration reset successfully');
@@ -546,6 +691,9 @@ const GameScheduler = () => {
       seasonStartDate,
       seasonWeeks,
       selectedSeason: seasons.find(s => s.id === selectedSeason)?.name || selectedSeason,
+      isTestMode,
+      testDivisionConfig,
+      isTestConfigSaved,
       exportDate: new Date().toISOString()
     };
     
@@ -570,6 +718,9 @@ const GameScheduler = () => {
         setScheduleConfig(configData.scheduleConfig || []);
         if (configData.seasonStartDate) setSeasonStartDate(configData.seasonStartDate);
         if (configData.seasonWeeks) setSeasonWeeks(configData.seasonWeeks);
+        if (configData.isTestMode !== undefined) setIsTestMode(configData.isTestMode);
+        if (configData.testDivisionConfig) setTestDivisionConfig(configData.testDivisionConfig);
+        if (configData.isTestConfigSaved) setIsTestConfigSaved(configData.isTestConfigSaved);
         alert('Schedule configuration imported successfully!');
       } catch (error) {
         alert('Error importing configuration: ' + error.message);
@@ -620,11 +771,74 @@ const GameScheduler = () => {
     </div>
   );
 
+  const TestConfigModalFooter = (
+    <div className="flex justify-end space-x-3">
+      <button onClick={() => setShowTestConfigModal(false)} className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50">Cancel</button>
+      <button onClick={saveTestConfig} className="px-4 py-2 bg-purple-600 text-white rounded-md text-sm font-medium hover:bg-purple-700">Save Test Configuration</button>
+    </div>
+  );
+
   return (
     <div className="w-full max-w-7xl mx-auto p-6">
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-gray-900">Game Scheduler</h1>
         <p className="text-gray-600 mt-2">Configure and generate your league game schedule</p>
+      </div>
+
+      {/* Mode Toggle Section */}
+      <div className="bg-white shadow rounded-lg p-6 mb-6">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-4">
+            <h2 className="text-xl font-semibold">Mode:</h2>
+            <div className="flex items-center space-x-3">
+              <button
+                onClick={() => setIsTestMode(false)}
+                className={`px-4 py-2 rounded-md flex items-center space-x-2 ${
+                  !isTestMode 
+                    ? 'bg-blue-600 text-white' 
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                <Database className="h-4 w-4" />
+                <span>Live Mode</span>
+              </button>
+              <button
+                onClick={() => setIsTestMode(true)}
+                className={`px-4 py-2 rounded-md flex items-center space-x-2 ${
+                  isTestMode 
+                    ? 'bg-purple-600 text-white' 
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                <TestTube className="h-4 w-4" />
+                <span>Test Mode</span>
+              </button>
+            </div>
+          </div>
+          {isTestMode && (
+            <div className="flex items-center space-x-2">
+              <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+                isTestConfigSaved 
+                  ? 'bg-green-100 text-green-800' 
+                  : 'bg-yellow-100 text-yellow-800'
+              }`}>
+                {isTestConfigSaved ? 'Test Config Saved' : 'Not Configured'}
+              </span>
+              <button
+                onClick={initializeTestConfig}
+                className="px-4 py-2 bg-purple-600 text-white rounded-md text-sm font-medium hover:bg-purple-700"
+              >
+                Configure Test Teams
+              </button>
+            </div>
+          )}
+        </div>
+        {isTestMode && (
+          <p className="text-sm text-gray-600 mt-2">
+            Test Mode: Configure how many teams per division to test different schedule scenarios.
+            {!isTestConfigSaved && ' Click "Configure Test Teams" to get started.'}
+          </p>
+        )}
       </div>
 
       {/* Configuration Section */}
@@ -797,7 +1011,7 @@ const GameScheduler = () => {
         </div>
       </Modal>
 
-      {/* Edit Modal - UPDATED to remove field editing */}
+      {/* Edit Modal */}
       <Modal isOpen={showEditModal} onClose={() => setShowEditModal(false)} title="Edit Time Slot" footer={EditModalFooter}>
         <div className="space-y-4">
           <div>
@@ -822,13 +1036,54 @@ const GameScheduler = () => {
               className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
             />
           </div>
-          {/* REMOVED FIELD INPUT SECTION */}
+        </div>
+      </Modal>
+
+      {/* Test Config Modal */}
+      <Modal isOpen={showTestConfigModal} onClose={() => setShowTestConfigModal(false)} title="Configure Test Teams" footer={TestConfigModalFooter}>
+        <div className="space-y-4">
+          <p className="text-sm text-gray-600">
+            Set how many teams you want in each division for testing. The system will use real team names if available, or create placeholder names.
+          </p>
+          <div className="max-h-96 overflow-y-auto">
+            {testDivisionConfig.map((config) => {
+              const division = divisions.find(d => d.id === config.divisionId);
+              const realTeamCount = teams.filter(t => t.division_id === config.divisionId && t.players?.length > 0).length;
+              
+              return (
+                <div key={config.divisionId} className="mb-4 p-4 border border-gray-200 rounded-lg">
+                  <div className="flex justify-between items-center mb-2">
+                    <label className="font-medium text-gray-700">{config.divisionName}</label>
+                    <span className="text-sm text-gray-500">
+                      {realTeamCount > 0 ? `${realTeamCount} real teams available` : 'No real teams yet'}
+                    </span>
+                  </div>
+                  <input
+                    type="number"
+                    min="0"
+                    max="20"
+                    value={config.teamCount}
+                    onChange={(e) => updateTestDivisionCount(config.divisionId, e.target.value)}
+                    className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-purple-500 focus:border-purple-500"
+                    placeholder="Number of teams"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    {config.teamCount > realTeamCount 
+                      ? `Will create ${config.teamCount - realTeamCount} placeholder team(s)`
+                      : 'Using real teams only'}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
         </div>
       </Modal>
 
       {/* Team Summary */}
       <div className="bg-white shadow rounded-lg p-6 mb-6">
-        <h2 className="text-xl font-semibold mb-4">Team Summary (Teams with Players)</h2>
+        <h2 className="text-xl font-semibold mb-4">
+          Team Summary {isTestMode && '(Test Mode)'}
+        </h2>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {Object.entries(getTeamsByDivision()).map(([divisionName, divisionTeams]) => (
             <div key={divisionName} className="border border-gray-200 rounded-lg p-4">
@@ -838,7 +1093,9 @@ const GameScheduler = () => {
                 {divisionTeams.map((team, index) => (
                   <div key={team.id} className="flex justify-between items-center text-sm">
                     <span><strong>{index + 1}.</strong> {team.name}</span>
-                    <span className="text-gray-500">{team.players?.length || 0} players</span>
+                    <span className="text-gray-500">
+                      {team.id.toString().startsWith('test-') ? '🔄 Placeholder' : `${team.players?.length || 0} players`}
+                    </span>
                   </div>
                 ))}
               </div>
@@ -849,8 +1106,16 @@ const GameScheduler = () => {
 
       {/* Action Buttons */}
       <div className="flex justify-center space-x-4 mb-6">
-        <button onClick={generateGames} className="inline-flex items-center px-6 py-3 border border-transparent rounded-md shadow-sm text-base font-medium text-white bg-blue-600 hover:bg-blue-700">
-          <Save className="h-5 w-5 mr-2" /> Generate Schedule
+        <button 
+          onClick={generateGames} 
+          className={`inline-flex items-center px-6 py-3 border border-transparent rounded-md shadow-sm text-base font-medium text-white ${
+            isTestMode 
+              ? 'bg-purple-600 hover:bg-purple-700' 
+              : 'bg-blue-600 hover:bg-blue-700'
+          }`}
+        >
+          <Save className="h-5 w-5 mr-2" /> 
+          {isTestMode ? 'Generate Test Schedule' : 'Generate Schedule'}
         </button>
         {generatedGames.length > 0 && (
           <button onClick={exportToCSV} className="inline-flex items-center px-6 py-3 border border-transparent rounded-md shadow-sm text-base font-medium text-white bg-green-600 hover:bg-green-700">
@@ -876,14 +1141,16 @@ const GameScheduler = () => {
       {/* Generated Schedule */}
       {generatedGames.length > 0 && (
         <div className="bg-white shadow rounded-lg p-6">
-          <h2 className="text-xl font-semibold mb-4">Generated Schedule</h2>
+          <h2 className="text-xl font-semibold mb-4">
+            Generated Schedule {isTestMode && '(Test Mode)'}
+          </h2>
           <div className="overflow-x-auto">
             <table className="min-w-full border-collapse border border-gray-300">
               <thead>
                 <tr className="bg-gray-50">
                   <th className="border border-gray-300 px-4 py-2">SortOrder</th>
                   <th className="border border-gray-300 px-4 py-2">RoundNo</th>
-                  <th className="border border-gray-300 px-4 py-2 bg-gray-50">Division</th>
+                  <th className="border border-gray-300 px-4 py-2">Division</th>
                   <th className="border border-gray-300 px-4 py-2">HomeTeam</th>
                   <th className="border border-gray-300 px-4 py-2">AwayTeam</th>
                   <th className="border border-gray-300 px-4 py-2">MatchDate</th>

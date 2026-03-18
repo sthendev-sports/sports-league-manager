@@ -46,196 +46,236 @@ const GameScheduler = () => {
 
   // Slot templates from Excel - UPDATED 12-team template for complete round-robin
   const slotTemplates = {
-    2: [
-      [1, 2], [2, 1], [1, 2], [2, 1], [1, 2], [2, 1],
-      [1, 2], [2, 1], [1, 2], [2, 1], [1, 2], [2, 1],
-      [1, 2], [2, 1], [1, 2], [2, 1], [1, 2], [2, 1]
-    ],
+  2: [
+    [1, 2]
+  ],
+
   3: [
-      [1, 2], [2, 3], [3, 1], [3, 2], [1, 3], [1, 2],
-      [3, 1], [1, 2], [2, 3], [2, 1], [3, 2], [1, 3],
-      [2, 3], [3, 1], [2, 1], [1, 3], [2, 1], [3, 2]
-    ],
-    4: [
-      [1, 2], [3, 4], [2, 3], [4, 1], [3, 1], [2, 4],
-      [1, 4], [3, 2], [4, 2], [1, 3], [2, 1], [4, 3],
-      [4, 3], [2, 1], [1, 4], [3, 2], [4, 2], [1, 3],
-      [2, 3], [4, 1], [3, 4], [1, 2], [3, 1], [2, 4]
-    ],
-    5: [
-      [1, 2], [3, 4], [5, 1], [2, 3], [4, 5], [1, 3],
-      [4, 1], [3, 5], [5, 2], [2, 4], [2, 1], [4, 3],
-      [1, 5], [3, 2], [5, 4], [3, 1], [1, 4], [5, 3],
-      [5, 2], [4, 2]
-    ],
-    6: [
-      [3, 2], [1, 5], [6, 4], [3, 1], [6, 2], [5, 4],
-      [1, 4], [3, 2], [6, 5], [3, 6], [5, 1], [4, 2],
-      [5, 3], [6, 4], [1, 2], [2, 5], [4, 3], [1, 6],
-      [6, 2], [5, 4], [1, 3], [1, 4], [2, 5], [3, 6]
-    ],
-    7: [
-      [1, 2], [3, 4], [5, 6], [7, 1], [2, 3], [4, 5], [6, 7],
-      [5, 3], [4, 1], [7, 2], [3, 6], [4, 7], [1, 6], [2, 5],
-      [6, 4], [3, 7], [1, 5], [6, 2], [7, 5], [2, 4], [3, 1]
-    ],
-    8: [
-      // Week 1
-      [1, 2], [3, 4], [5, 6], [7, 8], [6, 8], [5, 7], [2, 4], [1, 3],
-      // Week 2
-      [5, 4], [1, 8], [7, 3], [2, 6], [3, 6], [7, 2], [1, 5], [8, 4],
-      // Week 3
-      [7, 1], [4, 6], [3, 8], [5, 2], [2, 3], [8, 5], [4, 1], [6, 7],
-      // Week 4
-      [4, 7], [6, 1], [8, 2], [3, 5], [5, 6], [7, 8], [3, 4], [1, 2],
-      // Week 5
-      [2, 4], [1, 3], [5, 7], [6, 8], [7, 3], [2, 6], [1, 8], [5, 4],
-      // Week 6
-      [1, 5], [8, 4], [7, 2], [3, 6], [3, 8], [5, 2], [4, 6], [7, 1],
-      // Week 7
-      [4, 1], [6, 7], [8, 5], [2, 3], [8, 2], [3, 5], [6, 1], [4, 7]
-    ],
-	9: [
-  // Week 1
-  [9, 2], [8, 3], [7, 4], [6, 5],
-  // Week 2
-  [1, 9], [7, 2], [3, 6], [5, 4],
-  // Week 3
-  [8, 1], [9, 7], [2, 5], [4, 3],
-  // Week 4
-  [7, 1], [6, 8], [5, 9], [3, 2],
-  // Week 5
-  [1, 6], [5, 7], [4, 8], [3, 9],
-  // Week 6
-  [1, 5], [6, 4], [7, 3], [8, 2],
-  // Week 7
-  [4, 1], [3, 5], [2, 6], [9, 8],
-  // Week 8
-  [3, 1], [2, 4], [9, 6], [8, 7],
-  // Week 9
-  [1, 2], [4, 9], [8, 5], [6, 7]
-],
-	10: [
-  [1, 2], [3, 4], [5, 6], [7, 8], [9, 10],
-  [2, 3], [4, 5], [6, 7], [8, 9], [10, 1],
-  [1, 3], [4, 6], [7, 9], [2, 10], [5, 8],
-  [3, 5], [6, 8], [9, 1], [10, 4], [2, 7],
-  [4, 1], [5, 7], [8, 10], [3, 9], [6, 2],
-  [7, 2], [8, 1], [9, 5], [10, 3], [4, 8],
-  [5, 9], [1, 6], [2, 4], [3, 7], [8, 3],
-  [9, 4], [10, 5], [6, 1], [7, 3], [4, 9],
-  [5, 10], [1, 7], [2, 8], [3, 6], [9, 2],
-  [10, 6], [1, 8], [2, 5], [3, 10], [4, 7],
-  [6, 3], [7, 4], [8, 5], [9, 6], [10, 7],
-  [1, 9], [2, 6], [3, 8], [4, 2], [5, 1],
-  [6, 4], [7, 5], [8, 2], [9, 3], [10, 8],
-  [1, 4], [2, 9], [3, 1], [4, 10], [5, 3],
-  [6, 9], [7, 10], [8, 6], [9, 7], [10, 9]
-	],
-	11: [
-  // Week 1
-  [11, 2], [10, 3], [9, 4], [8, 5], [7, 6],
-  // Week 2
-  [1, 11], [9, 2], [8, 3], [4, 7], [6, 5],
-  // Week 3
-  [10, 1], [11, 9], [2, 7], [3, 6], [5, 4],
-  // Week 4
-  [9, 1], [8, 10], [7, 11], [5, 2], [4, 3],
-  // Week 5
-  [1, 8], [7, 9], [6, 10], [11, 5], [3, 2],
-  // Week 6
-  [1, 7], [8, 6], [5, 9], [10, 4], [3, 11],
-  // Week 7
-  [6, 1], [5, 7], [4, 8], [9, 3], [2, 10],
-  // Week 8
-  [1, 5], [4, 6], [7, 3], [2, 8], [11, 10],
-  // Week 9
-  [1, 4], [3, 5], [6, 2], [8, 11], [10, 9],
-  // Week 10
-  [3, 1], [2, 4], [11, 6], [10, 7], [9, 8],
-  // Week 11
-  [2, 1], [4, 11], [5, 10], [9, 6], [8, 7]
-],
-    12: [
+    // Week 1
+    [2, 3],
+    // Week 2
+    [1, 3],
+    // Week 3
+    [1, 2]
+  ],
+
+  4: [
+    // Week 1
+    [1, 4], [2, 3],
+    // Week 2
+    [3, 1], [4, 2],
+    // Week 3
+    [1, 2], [3, 4]
+  ],
+
+  5: [
+    // Week 1
+    [2, 5], [3, 4],
+    // Week 2
+    [1, 5], [2, 3],
+    // Week 3
+    [4, 1], [5, 3],
+    // Week 4
+    [3, 1], [4, 2],
+    // Week 5
+    [1, 2], [5, 4]
+  ],
+
+  6: [
+    // Week 1
+    [1, 6], [2, 5], [3, 4],
+    // Week 2
+    [5, 1], [4, 6], [2, 3],
+    // Week 3
+    [1, 4], [3, 5], [6, 2],
+    // Week 4
+    [1, 3], [4, 2], [5, 6],
+    // Week 5
+    [2, 1], [6, 3], [4, 5]
+  ],
+
+  7: [
+    // Week 1
+    [2, 7], [3, 6], [4, 5],
+    // Week 2
+    [1, 7], [5, 2], [3, 4],
+    // Week 3
+    [6, 1], [7, 5], [2, 3],
+    // Week 4
+    [5, 1], [4, 6], [7, 3],
+    // Week 5
+    [1, 4], [3, 5], [6, 2],
+    // Week 6
+    [1, 3], [2, 4], [6, 7],
+    // Week 7
+    [2, 1], [4, 7], [5, 6]
+  ],
+
+  8: [
+    // Week 1
+    [1, 8], [2, 7], [3, 6], [4, 5],
+    // Week 2
+    [7, 1], [6, 8], [5, 2], [3, 4],
+    // Week 3
+    [1, 6], [5, 7], [8, 4], [2, 3],
+    // Week 4
+    [1, 5], [4, 6], [7, 3], [8, 2],
+    // Week 5
+    [4, 1], [3, 5], [6, 2], [7, 8],
+    // Week 6
+    [1, 3], [2, 4], [5, 8], [6, 7],
+    // Week 7
+    [2, 1], [8, 3], [4, 7], [5, 6]
+  ],
+
+  9: [
+    // Week 1
+    [2, 9], [3, 8], [4, 7], [5, 6],
+    // Week 2
+    [1, 9], [7, 2], [6, 3], [4, 5],
+    // Week 3
+    [8, 1], [9, 7], [2, 5], [3, 4],
+    // Week 4
+    [1, 7], [6, 8], [5, 9], [2, 3],
+    // Week 5
+    [1, 6], [7, 5], [8, 4], [9, 3],
+    // Week 6
+    [5, 1], [4, 6], [3, 7], [8, 2],
+    // Week 7
+    [1, 4], [3, 5], [6, 2], [9, 8],
+    // Week 8
+    [1, 3], [2, 4], [6, 9], [7, 8],
+    // Week 9
+    [2, 1], [4, 9], [8, 5], [7, 6]
+  ],
+
+  10: [
+    // Week 1
+    [1, 10], [2, 9], [3, 8], [4, 7], [5, 6],
+    // Week 2
+    [9, 1], [8, 10], [7, 2], [6, 3], [4, 5],
+    // Week 3
+    [1, 8], [7, 9], [10, 6], [2, 5], [3, 4],
+    // Week 4
+    [1, 7], [8, 6], [5, 9], [10, 4], [3, 2],
+    // Week 5
+    [6, 1], [5, 7], [4, 8], [9, 3], [2, 10],
+    // Week 6
+    [1, 5], [6, 4], [7, 3], [8, 2], [9, 10],
+    // Week 7
+    [4, 1], [3, 5], [2, 6], [10, 7], [8, 9],
+    // Week 8
+    [1, 3], [2, 4], [5, 10], [6, 9], [7, 8],
+    // Week 9
+    [1, 2], [10, 3], [9, 4], [5, 8], [6, 7]
+  ],
+
+  11: [
+    // Week 1
+    [2, 11], [3, 10], [4, 9], [5, 8], [6, 7],
+    // Week 2
+    [1, 11], [9, 2], [8, 3], [7, 4], [5, 6],
+    // Week 3
+    [10, 1], [11, 9], [2, 7], [3, 6], [4, 5],
+    // Week 4
+    [1, 9], [8, 10], [7, 11], [2, 5], [4, 3],
+    // Week 5
+    [1, 8], [9, 7], [6, 10], [5, 11], [3, 2],
+    // Week 6
+    [7, 1], [6, 8], [9, 5], [10, 4], [11, 3],
+    // Week 7
+    [1, 6], [5, 7], [8, 4], [3, 9], [10, 2],
+    // Week 8
+    [1, 5], [4, 6], [7, 3], [2, 8], [11, 10],
+    // Week 9
+    [4, 1], [3, 5], [6, 2], [8, 11], [9, 10],
+    // Week 10
+    [1, 3], [2, 4], [11, 6], [10, 7], [8, 9],
+    // Week 11
+    [2, 1], [11, 4], [5, 10], [6, 9], [7, 8]
+  ],
+
+  12: [
     // Week 1
     [1, 12], [2, 11], [3, 10], [4, 9], [5, 8], [6, 7],
     // Week 2
-    [11, 1], [10, 12], [9, 2], [8, 3], [7, 4], [6, 5],
+    [11, 1], [10, 12], [9, 2], [8, 3], [7, 4], [5, 6],
     // Week 3
-    [1, 10], [11, 9], [12, 8], [2, 7], [3, 6], [4, 5],
+    [1, 10], [9, 11], [12, 8], [2, 7], [3, 6], [4, 5],
     // Week 4
-    [9, 1], [8, 10], [7, 11], [6, 12], [5, 2], [4, 3],
+    [1, 9], [8, 10], [7, 11], [6, 12], [5, 2], [3, 4],
     // Week 5
-    [1, 8], [9, 7], [10, 6], [11, 5], [12, 4], [2, 3],
+    [8, 1], [7, 9], [10, 6], [11, 5], [12, 4], [2, 3],
     // Week 6
-    [7, 1], [6, 8], [5, 9], [4, 10], [3, 11], [2, 12],
+    [1, 7], [6, 8], [9, 5], [4, 10], [3, 11], [12, 2],
     // Week 7
-    [1, 6], [7, 5], [8, 4], [9, 3], [10, 2], [11, 12],
+    [6, 1], [5, 7], [8, 4], [9, 3], [10, 2], [11, 12],
     // Week 8
-    [5, 1], [4, 6], [3, 7], [2, 8], [12, 9], [11, 10],
+    [1, 5], [4, 6], [7, 3], [2, 8], [12, 9], [10, 11],
     // Week 9
-    [1, 4], [5, 3], [6, 2], [7, 12], [8, 11], [9, 10],
+    [4, 1], [3, 5], [6, 2], [7, 12], [11, 8], [9, 10],
     // Week 10
-    [3, 1], [2, 4], [12, 5], [11, 6], [10, 7], [9, 8],
+    [1, 3], [2, 4], [5, 12], [11, 6], [10, 7], [8, 9],
     // Week 11
-    [1, 2], [3, 12], [4, 11], [5, 10], [6, 9], [7, 8]
+    [2, 1], [12, 3], [4, 11], [5, 10], [6, 9], [7, 8]
   ],
+
   13: [
-  // Week 1
-  [13, 2], [12, 3], [11, 4], [10, 5], [9, 6], [8, 7],
-  // Week 2
-  [1, 13], [11, 2], [10, 3], [9, 4], [5, 8], [7, 6],
-  // Week 3
-  [12, 1], [13, 11], [2, 9], [3, 8], [4, 7], [6, 5],
-  // Week 4
-  [11, 1], [10, 12], [9, 13], [7, 2], [6, 3], [5, 4],
-  // Week 5
-  [1, 10], [9, 11], [8, 12], [7, 13], [2, 5], [4, 3],
-  // Week 6
-  [1, 9], [10, 8], [11, 7], [12, 6], [13, 5], [3, 2],
-  // Week 7
-  [8, 1], [7, 9], [6, 10], [5, 11], [4, 12], [3, 13],
-  // Week 8
-  [7, 1], [6, 8], [9, 5], [4, 10], [11, 3], [2, 12],
-  // Week 9
-  [1, 6], [5, 7], [8, 4], [3, 9], [10, 2], [12, 13],
-  // Week 10
-  [1, 5], [4, 6], [3, 7], [2, 8], [13, 10], [12, 11],
-  // Week 11
-  [4, 1], [5, 3], [6, 2], [13, 8], [9, 12], [11, 10],
-  // Week 12
-  [3, 1], [2, 4], [6, 13], [12, 7], [8, 11], [10, 9],
-  // Week 13
-  [1, 2], [13, 4], [12, 5], [11, 6], [10, 7], [9, 8]
-],
+    // Week 1
+    [2, 13], [3, 12], [4, 11], [5, 10], [6, 9], [7, 8],
+    // Week 2
+    [1, 13], [11, 2], [10, 3], [9, 4], [8, 5], [6, 7],
+    // Week 3
+    [12, 1], [13, 11], [2, 9], [3, 8], [4, 7], [5, 6],
+    // Week 4
+    [1, 11], [10, 12], [9, 13], [7, 2], [3, 6], [5, 4],
+    // Week 5
+    [1, 10], [11, 9], [8, 12], [13, 7], [2, 5], [4, 3],
+    // Week 6
+    [9, 1], [8, 10], [7, 11], [12, 6], [13, 5], [2, 3],
+    // Week 7
+    [1, 8], [7, 9], [10, 6], [5, 11], [12, 4], [3, 13],
+    // Week 8
+    [1, 7], [6, 8], [9, 5], [4, 10], [11, 3], [2, 12],
+    // Week 9
+    [6, 1], [5, 7], [8, 4], [3, 9], [10, 2], [12, 13],
+    // Week 10
+    [1, 5], [4, 6], [7, 3], [8, 2], [13, 10], [11, 12],
+    // Week 11
+    [4, 1], [3, 5], [2, 6], [13, 8], [9, 12], [10, 11],
+    // Week 12
+    [1, 3], [2, 4], [6, 13], [12, 7], [11, 8], [9, 10],
+    // Week 13
+    [1, 2], [13, 4], [5, 12], [6, 11], [7, 10], [8, 9]
+  ],
 
   14: [
     // Week 1
     [1, 14], [2, 13], [3, 12], [4, 11], [5, 10], [6, 9], [7, 8],
     // Week 2
-    [13, 1], [12, 14], [11, 2], [10, 3], [9, 4], [8, 5], [7, 6],
+    [13, 1], [12, 14], [11, 2], [10, 3], [9, 4], [8, 5], [6, 7],
     // Week 3
-    [1, 12], [13, 11], [14, 10], [2, 9], [3, 8], [4, 7], [5, 6],
+    [1, 12], [11, 13], [14, 10], [2, 9], [3, 8], [4, 7], [5, 6],
     // Week 4
-    [11, 1], [10, 12], [9, 13], [8, 14], [7, 2], [6, 3], [5, 4],
+    [1, 11], [10, 12], [9, 13], [8, 14], [7, 2], [3, 6], [5, 4],
     // Week 5
-    [1, 10], [11, 9], [12, 8], [13, 7], [14, 6], [2, 5], [3, 4],
+    [10, 1], [9, 11], [12, 8], [13, 7], [6, 14], [2, 5], [4, 3],
     // Week 6
-    [9, 1], [8, 10], [7, 11], [6, 12], [5, 13], [4, 14], [3, 2],
+    [1, 9], [8, 10], [11, 7], [12, 6], [13, 5], [14, 4], [2, 3],
     // Week 7
-    [1, 8], [9, 7], [10, 6], [11, 5], [12, 4], [13, 3], [14, 2],
+    [8, 1], [7, 9], [6, 10], [5, 11], [4, 12], [3, 13], [14, 2],
     // Week 8
-    [7, 1], [6, 8], [5, 9], [4, 10], [3, 11], [2, 12], [14, 13],
+    [7, 1], [6, 8], [9, 5], [10, 4], [11, 3], [12, 2], [13, 14],
     // Week 9
-    [1, 6], [7, 5], [8, 4], [9, 3], [10, 2], [11, 14], [12, 13],
+    [1, 6], [5, 7], [4, 8], [3, 9], [2, 10], [14, 11], [12, 13],
     // Week 10
-    [5, 1], [4, 6], [3, 7], [2, 8], [14, 9], [13, 10], [12, 11],
+    [1, 5], [6, 4], [7, 3], [8, 2], [9, 14], [10, 13], [11, 12],
     // Week 11
-    [1, 4], [5, 3], [6, 2], [7, 14], [8, 13], [9, 12], [10, 11],
+    [4, 1], [3, 5], [2, 6], [14, 7], [13, 8], [9, 12], [11, 10],
     // Week 12
-    [3, 1], [2, 4], [14, 5], [13, 6], [12, 7], [11, 8], [10, 9],
+    [1, 3], [2, 4], [5, 14], [13, 6], [12, 7], [8, 11], [10, 9],
     // Week 13
-    [1, 2], [3, 14], [4, 13], [5, 12], [6, 11], [7, 10], [8, 9]
+    [1, 2], [14, 3], [4, 13], [5, 12], [6, 11], [7, 10], [8, 9]
   ]
 };
 
@@ -719,172 +759,187 @@ const GameScheduler = () => {
 
   // ========== FIXED: Generate games with proper date calculation ==========
   const generateGames = () => {
-    if (!seasonStartDate) {
-      alert('Please set the season start date');
-      return;
-    }
-
-    if (!selectedSeason) {
-      alert('Please select a season');
-      return;
-    }
-
-    if (isTestMode && !isTestConfigSaved) {
-      alert('Please configure test teams first using the "Configure Test Teams" button');
-      return;
-    }
-
-    try {
-      const teamsByDivision = getTeamsByDivision();
-      const games = [];
-      let sortOrder = 1;
-
-      const startDate = new Date(seasonStartDate);
-      
-      // Process each division
-      Object.entries(teamsByDivision).forEach(([divisionName, divisionTeams]) => {
-        const teamCount = divisionTeams.length;
-        
-        if (teamCount < 2) {
-          console.log(`Skipping division ${divisionName} - not enough teams`);
-          return;
-        }
-
-        //const template = slotTemplates[teamCount] || slotTemplates[Math.min(teamCount, 8)];
-        const template = slotTemplates[teamCount];
-		if (!template) {
-          console.log(`No template found for ${teamCount} teams`);
-          return;
-        }
-
-        const divisionSlots = scheduleConfig.filter(slot => 
-          slot.division === divisionName
-        );
-
-        if (divisionSlots.length === 0) {
-          console.log(`No schedule slots configured for division ${divisionName}`);
-          return;
-        }
-
-        console.log(`Processing ${divisionName}: ${teamCount} teams, ${divisionSlots.length} slots, template length: ${template.length}`);
-
-        // Get unique days for this division
-        const divisionDays = [...new Set(divisionSlots.map(slot => slot.day))];
-        
-        // Find first occurrence of each day on or after start date
-// Find first occurrence of each day on or after start date
-const firstOccurrences = {};
-divisionDays.forEach(day => {
-  const dayOffset = daysOfWeek.indexOf(day); // 0-6 (Monday=0, Sunday=6)
-  
-  // Get the day of week for the start date (0-6, where Sunday=0, Monday=1, ..., Saturday=6)
-  const startDayOfWeek = startDate.getDay(); // 0=Sunday, 1=Monday, ..., 6=Saturday
-  
-  // Convert startDayOfWeek to our system where Monday=0, Tuesday=1, ..., Sunday=6
-  // Sunday (0) becomes 6, Monday (1) becomes 0, Tuesday (2) becomes 1, etc.
-  const startDayMapped = startDayOfWeek === 0 ? 6 : startDayOfWeek - 1;
-  
-  // Calculate days to add to reach the target day
-  let daysToAdd = dayOffset - startDayMapped;
-  
-  // IMPORTANT FIX: If the target day is BEFORE the start day OR it's the same day,
-  // we need to add 7 days to go to the NEXT occurrence
-  // This ensures we never schedule games BEFORE the start date
-  if (daysToAdd <= 0) {
-    daysToAdd += 7;
+  if (!seasonStartDate) {
+    alert('Please set the season start date');
+    return;
   }
-  
-  // Calculate the first date for this day of week on or after the start date
-  const firstDate = new Date(startDate);
-  firstDate.setDate(startDate.getDate() + daysToAdd);
-  
-  firstOccurrences[day] = firstDate;
-  console.log(`${day}: First date on or after ${startDate.toDateString()} is ${firstDate.toDateString()}`);
-});
-        // ========== END FIXED ==========
 
-        // Schedule games for ALL weeks of the season
-        let matchupIndex = 0;
-        
-        for (let week = 1; week <= seasonWeeks; week++) {
-          console.log(`\nWeek ${week} for ${divisionName}`);
-          let gamesScheduledThisWeek = 0;
-          
-          for (const day of divisionDays) {
-            // Calculate game date for this week
-            const firstDate = firstOccurrences[day];
-            const gameDate = new Date(firstDate);
-            gameDate.setDate(firstDate.getDate() + ((week - 1) * 7));
-            
-            const dateStr = formatDateForDisplay(gameDate);
+  if (!selectedSeason) {
+    alert('Please select a season');
+    return;
+  }
 
-            const daySlots = divisionSlots.filter(slot => slot.day === day);
-            const uniqueTimes = [...new Set(daySlots.map(slot => slot.time))].sort();
-            
-            for (const time of uniqueTimes) {
-              // Get all available slots for this day/time that haven't been used on this date
-              const availableSlots = daySlots.filter(slot => 
-                slot.time === time && 
-                !games.find(g => 
-                  g.MatchDate === dateStr &&
-                  g.StartTime === time &&
-                  g.Field === slot.field
-                )
-              );
+  if (isTestMode && !isTestConfigSaved) {
+    alert('Please configure test teams first using the "Configure Test Teams" button');
+    return;
+  }
 
-              if (availableSlots.length === 0) continue;
+  try {
+    const teamsByDivision = getTeamsByDivision();
+    const games = [];
+    let sortOrder = 1;
 
-              // Schedule a game on each available field at this time
-              for (const fieldSlot of availableSlots) {
-                // If we've used all matchups from the template, cycle back to the beginning
-                const currentMatchupIndex = matchupIndex % template.length;
-                const match = template[currentMatchupIndex];
-                const [homeTeamNum, awayTeamNum] = match;
-                
-                const homeTeam = divisionTeams[homeTeamNum - 1];
-                const awayTeam = divisionTeams[awayTeamNum - 1];
+    const startDate = new Date(seasonStartDate);
 
-                if (!homeTeam || !awayTeam) {
-                  matchupIndex++;
-                  continue;
-                }
+    // Process each division
+    Object.entries(teamsByDivision).forEach(([divisionName, divisionTeams]) => {
+      const teamCount = divisionTeams.length;
 
-                const endTime = calculateEndTime(time);
+      if (teamCount < 2) {
+        console.log(`Skipping division ${divisionName} - not enough teams`);
+        return;
+      }
 
-                games.push({
-                  SortOrder: sortOrder++,
-                  RoundNo: week,
-                  HomeTeam: `${homeTeam.name}`,
-                  AwayTeam: `${awayTeam.name}`,
-                  MatchDate: dateStr,
-                  StartTime: time,
-                  EndTime: endTime,
-                  Location: 'Sayreville Little League',
-                  Field: fieldSlot.field,
-                  Division: divisionName
-                });
+      // IMPORTANT:
+      // Use only the exact template for the team count.
+      const template = slotTemplates[teamCount];
+      if (!template) {
+        console.log(`No template found for ${teamCount} teams`);
+        return;
+      }
 
-                console.log(`    Scheduled: ${homeTeam.name} vs ${awayTeam.name} at ${time} on ${fieldSlot.field} (matchup ${currentMatchupIndex + 1}/${template.length})`);
-                matchupIndex++;
-                gamesScheduledThisWeek++;
-              }
-            }
-          }
-          
-          console.log(`  Week ${week} completed: ${gamesScheduledThisWeek} games scheduled`);
+      const divisionSlots = scheduleConfig.filter(
+        slot => slot.division === divisionName
+      );
+
+      if (divisionSlots.length === 0) {
+        console.log(`No schedule slots configured for division ${divisionName}`);
+        return;
+      }
+
+      console.log(
+        `Processing ${divisionName}: ${teamCount} teams, ${divisionSlots.length} slots, template length: ${template.length}`
+      );
+
+      // Get unique days for this division
+      const divisionDays = [...new Set(divisionSlots.map(slot => slot.day))];
+
+      // Find first occurrence of each day after the season start date
+      const firstOccurrences = {};
+      divisionDays.forEach(day => {
+        const dayOffset = daysOfWeek.indexOf(day); // Monday=0 ... Sunday=6
+
+        const startDayOfWeek = startDate.getDay(); // Sunday=0 ... Saturday=6
+        const startDayMapped = startDayOfWeek === 0 ? 6 : startDayOfWeek - 1;
+
+        let daysToAdd = dayOffset - startDayMapped;
+
+        // If same day or earlier in the week, move to the next week
+        if (daysToAdd <= 0) {
+          daysToAdd += 7;
         }
 
-        console.log(`Completed ${divisionName}: ${matchupIndex} total games scheduled`);
+        const firstDate = new Date(startDate);
+        firstDate.setDate(startDate.getDate() + daysToAdd);
+
+        firstOccurrences[day] = firstDate;
+        console.log(
+          `${day}: First date after ${startDate.toDateString()} is ${firstDate.toDateString()}`
+        );
       });
 
-      setGeneratedGames(games);
-      alert(`Schedule generated successfully! Created ${games.length} games for ${seasonWeeks} weeks. (${isTestMode ? 'TEST MODE' : 'Live Mode'})`);
-      
-    } catch (error) {
-      console.error('Error generating games:', error);
-      alert('Error generating schedule: ' + error.message);
-    }
-  };
+      // Keep track of which matchup we are on for this division
+      let matchupIndex = 0;
+
+      // Schedule games for all weeks
+      for (let week = 1; week <= seasonWeeks; week++) {
+        console.log(`\nWeek ${week} for ${divisionName}`);
+        let gamesScheduledThisWeek = 0;
+
+        for (const day of divisionDays) {
+          const firstDate = firstOccurrences[day];
+          const gameDate = new Date(firstDate);
+          gameDate.setDate(firstDate.getDate() + ((week - 1) * 7));
+
+          const dateStr = formatDateForDisplay(gameDate);
+
+          const daySlots = divisionSlots.filter(slot => slot.day === day);
+          const uniqueTimes = [...new Set(daySlots.map(slot => slot.time))].sort();
+
+          for (const time of uniqueTimes) {
+            const availableSlots = daySlots.filter(
+              slot =>
+                slot.time === time &&
+                !games.find(
+                  g =>
+                    g.MatchDate === dateStr &&
+                    g.StartTime === time &&
+                    g.Field === slot.field
+                )
+            );
+
+            if (availableSlots.length === 0) continue;
+
+            for (const fieldSlot of availableSlots) {
+              // Figure out which matchup in the template to use
+              const currentMatchupIndex = matchupIndex % template.length;
+
+              // Figure out which full pass through the template we are on
+              // 0 = first pass, 1 = second pass, 2 = third pass, etc.
+              const cycleNumber = Math.floor(matchupIndex / template.length);
+
+              const match = template[currentMatchupIndex];
+
+              let homeTeamNum;
+              let awayTeamNum;
+
+              // Flip home/away every time the full template repeats
+              if (cycleNumber % 2 === 0) {
+                // 1st pass, 3rd pass, 5th pass...
+                [homeTeamNum, awayTeamNum] = match;
+              } else {
+                // 2nd pass, 4th pass, 6th pass...
+                [awayTeamNum, homeTeamNum] = match;
+              }
+
+              const homeTeam = divisionTeams[homeTeamNum - 1];
+              const awayTeam = divisionTeams[awayTeamNum - 1];
+
+              if (!homeTeam || !awayTeam) {
+                matchupIndex++;
+                continue;
+              }
+
+              const endTime = calculateEndTime(time);
+
+              games.push({
+                SortOrder: sortOrder++,
+                RoundNo: week,
+                HomeTeam: `${homeTeam.name}`,
+                AwayTeam: `${awayTeam.name}`,
+                MatchDate: dateStr,
+                StartTime: time,
+                EndTime: endTime,
+                Location: 'Sayreville Little League',
+                Field: fieldSlot.field,
+                Division: divisionName
+              });
+
+              console.log(
+                `Scheduled: ${homeTeam.name} vs ${awayTeam.name} on ${dateStr} at ${time} on ${fieldSlot.field} (template game ${currentMatchupIndex + 1}/${template.length}, cycle ${cycleNumber + 1})`
+              );
+
+              matchupIndex++;
+              gamesScheduledThisWeek++;
+            }
+          }
+        }
+
+        console.log(`Week ${week} completed: ${gamesScheduledThisWeek} games scheduled`);
+      }
+
+      console.log(`Completed ${divisionName}: ${matchupIndex} total games scheduled`);
+    });
+
+    setGeneratedGames(games);
+    alert(
+      `Schedule generated successfully! Created ${games.length} games for ${seasonWeeks} weeks. (${isTestMode ? 'TEST MODE' : 'Live Mode'})`
+    );
+  } catch (error) {
+    console.error('Error generating games:', error);
+    alert('Error generating schedule: ' + error.message);
+  }
+};
   // ========== END FIXED ==========
 
   const getManagerName = (team) => {

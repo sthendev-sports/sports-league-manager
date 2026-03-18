@@ -1979,7 +1979,7 @@ const handleEditTeam = (team) => {
   </form>
 </Modal>
 
-      {/* Seasons Tab */}
+       {/* Seasons Tab */}
       {activeTab === 'seasons' && (
         <div>
           <div className="flex justify-between items-center mb-6">
@@ -1995,90 +1995,92 @@ const handleEditTeam = (team) => {
 
           {/* Seasons Table */}
           <div className="bg-white shadow overflow-hidden rounded-lg">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Season Name
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Year
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Teams/Divisions
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Status
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Actions
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {seasons.map((season) => {
-                  const seasonTeams = teams.filter(t => t.season_id === season.id);
-                  const seasonDivisions = divisions.filter(d => d.season_id === season.id);
-                  
-                  return (
-                    <tr key={season.id} className={season.is_active ? 'bg-green-50' : ''}>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm font-medium text-gray-900">{season.name}</div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm text-gray-900">{season.year}</div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm text-gray-900">
-                          {seasonDivisions.length} divisions, {seasonTeams.length} teams
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        {season.is_active ? (
-                          <span className="inline-flex items-center px-2 py-1 text-xs bg-green-100 text-green-800 rounded-full">
-                            Active
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center px-2 py-1 text-xs bg-gray-100 text-gray-800 rounded-full">
-                            Inactive
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
-                        <button
-                          onClick={() => handleEditSeason(season)}
-                          className="text-blue-600 hover:text-blue-900"
-                          title="Edit Season"
-                        >
-                          Edit
-                        </button>
-                        <button
-                          onClick={() => handleExportSeason(season.id)}
-                          className="text-green-600 hover:text-green-900"
-                          title="Export Season Data"
-                        >
-                          <Download className="h-4 w-4 inline" />
-                        </button>
-                        <button
-                          onClick={() => handleClearSeasonData(season.id)}
-                          className="text-orange-600 hover:text-orange-900"
-                          title="Clear Season Data"
-                        >
-                          <Trash className="h-4 w-4 inline" />
-                        </button>
-                        <button
-                          onClick={() => handleDeleteSeason(season.id)}
-                          className="text-red-600 hover:text-red-900"
-                          title="Delete Season"
-                        >
-                          Delete
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Season Name
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Year
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Teams/Divisions
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Status
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Actions
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {seasons.map((season) => {
+                    const seasonTeams = teams.filter(t => t.season_id === season.id);
+                    const seasonDivisions = divisions.filter(d => d.season_id === season.id);
+                    
+                    return (
+                      <tr key={season.id} className={season.is_active ? 'bg-green-50' : ''}>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm font-medium text-gray-900">{season.name}</div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm text-gray-900">{season.year}</div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm text-gray-900">
+                            {seasonDivisions.length} divisions, {seasonTeams.length} teams
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          {season.is_active ? (
+                            <span className="inline-flex items-center px-2 py-1 text-xs bg-green-100 text-green-800 rounded-full">
+                              Active
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center px-2 py-1 text-xs bg-gray-100 text-gray-800 rounded-full">
+                              Inactive
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
+                          <button
+                            onClick={() => handleEditSeason(season)}
+                            className="text-blue-600 hover:text-blue-900"
+                            title="Edit Season"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => handleExportSeason(season.id)}
+                            className="text-green-600 hover:text-green-900"
+                            title="Export Season Data"
+                          >
+                            <Download className="h-4 w-4 inline" />
+                          </button>
+                          <button
+                            onClick={() => handleClearSeasonData(season.id)}
+                            className="text-orange-600 hover:text-orange-900"
+                            title="Clear Season Data"
+                          >
+                            <Trash className="h-4 w-4 inline" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteSeason(season.id)}
+                            className="text-red-600 hover:text-red-900"
+                            title="Delete Season"
+                          >
+                            Delete
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
 
             {seasons.length === 0 && (
               <div className="text-center py-12">
@@ -2184,83 +2186,85 @@ const handleEditTeam = (team) => {
 
           {/* Divisions Table */}
           <div className="bg-white shadow overflow-hidden rounded-lg">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Division Name
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Player Agent
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Teams
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Season
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Actions
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {filteredDivisions.map((division) => (
-                  <tr key={division.id}>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm font-medium text-gray-900">{division.name}</div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-900">
-                        {division.player_agent_name ? (
-                          <div>
-                            <div className="font-medium">{division.player_agent_name}</div>
-                            {division.player_agent_email && (
-                              <div className="flex items-center text-gray-500 text-xs mt-1">
-                                <Mail className="h-3 w-3 mr-1" />
-                                {division.player_agent_email}
-                              </div>
-                            )}
-                            {division.player_agent_phone && (
-                              <div className="flex items-center text-gray-500 text-xs mt-1">
-                                <Phone className="h-3 w-3 mr-1" />
-                                {division.player_agent_phone}
-                              </div>
-                            )}
-                          </div>
-                        ) : (
-                          <span className="text-gray-400">Not assigned</span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-900">
-                        {teams.filter(t => t.division_id === division.id).length} teams
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-900">
-                        {seasons.find(s => s.id === division.season_id)?.name || 'N/A'}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                      <button
-                        onClick={() => handleEditDivision(division)}
-                        className="text-blue-600 hover:text-blue-900 mr-4"
-                      >
-                        Edit
-                      </button>
-                      <button
-                        onClick={() => handleDeleteDivision(division.id)}
-                        className="text-red-600 hover:text-red-900"
-                      >
-                        Delete
-                      </button>
-                    </td>
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Division Name
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Player Agent
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Teams
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Season
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Actions
+                    </th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {filteredDivisions.map((division) => (
+                    <tr key={division.id}>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm font-medium text-gray-900">{division.name}</div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm text-gray-900">
+                          {division.player_agent_name ? (
+                            <div>
+                              <div className="font-medium">{division.player_agent_name}</div>
+                              {division.player_agent_email && (
+                                <div className="flex items-center text-gray-500 text-xs mt-1">
+                                  <Mail className="h-3 w-3 mr-1" />
+                                  {division.player_agent_email}
+                                </div>
+                              )}
+                              {division.player_agent_phone && (
+                                <div className="flex items-center text-gray-500 text-xs mt-1">
+                                  <Phone className="h-3 w-3 mr-1" />
+                                  {division.player_agent_phone}
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-gray-400">Not assigned</span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm text-gray-900">
+                          {teams.filter(t => t.division_id === division.id).length} teams
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm text-gray-900">
+                          {seasons.find(s => s.id === division.season_id)?.name || 'N/A'}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                        <button
+                          onClick={() => handleEditDivision(division)}
+                          className="text-blue-600 hover:text-blue-900 mr-4"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => handleDeleteDivision(division.id)}
+                          className="text-red-600 hover:text-red-900"
+                        >
+                          Delete
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
 
             {divisions.length === 0 && (
               <div className="text-center py-12">
@@ -2274,6 +2278,7 @@ const handleEditTeam = (team) => {
           </div>
         </div>
       )}
+	  
 {/* Trainings Tab */}
 {activeTab === 'trainings' && (
   <div>
@@ -2343,109 +2348,111 @@ const handleEditTeam = (team) => {
 
     {/* Trainings Table */}
     <div className="bg-white shadow overflow-hidden rounded-lg">
-      <table className="min-w-full divide-y divide-gray-200">
-        <thead className="bg-gray-50">
-          <tr>
-            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-              Training Name
-            </th>
-            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-              Description
-            </th>
-            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-              Expiration
-            </th>
-            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-              Category
-            </th>
-            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-              Required
-            </th>
-            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-              Actions
-            </th>
-          </tr>
-        </thead>
-        <tbody className="bg-white divide-y divide-gray-200">
-          {trainings.map((training) => (
-            <tr key={training.id}>
-              <td className="px-6 py-4 whitespace-nowrap">
-                <div className="text-sm font-medium text-gray-900">{training.name}</div>
-              </td>
-              <td className="px-6 py-4">
-                <div className="text-sm text-gray-900">{training.description || '—'}</div>
-              </td>
-              <td className="px-6 py-4 whitespace-nowrap">
-  <div className="text-sm text-gray-900">
-    {training.expires_in_days ? (
-      <div>
-        <span className="inline-flex items-center px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded-full mb-1">
-          {training.expires_in_days} days after completion
-        </span>
-        <div className="text-xs text-gray-500">Days-based expiration</div>
-      </div>
-    ) : training.expires_on_date ? (
-      <div>
-        <span className="inline-flex items-center px-2 py-1 text-xs bg-purple-100 text-purple-800 rounded-full mb-1">
-          Expires on: {new Date(training.expires_on_date).toLocaleDateString()}
-        </span>
-        <div className="text-xs text-gray-500">Calendar date expiration</div>
-      </div>
-    ) : (
-      <span className="inline-flex items-center px-2 py-1 text-xs bg-gray-100 text-gray-800 rounded-full">
-        Never expires
-      </span>
-    )}
-  </div>
-</td>
-              <td className="px-6 py-4 whitespace-nowrap">
-                <div className="text-sm text-gray-900">
-                  {training.category === 'both' ? (
-                    <span className="inline-flex items-center px-2 py-1 text-xs bg-purple-100 text-purple-800 rounded-full">
-                      Both
-                    </span>
-                  ) : training.category === 'volunteer' ? (
-                    <span className="inline-flex items-center px-2 py-1 text-xs bg-green-100 text-green-800 rounded-full">
-                      Volunteers
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center px-2 py-1 text-xs bg-indigo-100 text-indigo-800 rounded-full">
-                      Board Members
-                    </span>
-                  )}
-                </div>
-              </td>
-              <td className="px-6 py-4 whitespace-nowrap">
-                <div className="text-sm text-gray-900">
-                  {training.is_required ? (
-                    <span className="inline-flex items-center px-2 py-1 text-xs bg-red-100 text-red-800 rounded-full">
-                      Required
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center px-2 py-1 text-xs bg-gray-100 text-gray-800 rounded-full">
-                      Optional
-                    </span>
-                  )}
-                </div>
-              </td>
-              <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                <button
-                  onClick={() => handleEditTraining(training)}
-                  className="text-blue-600 hover:text-blue-900 mr-4"
-                >
-                  Edit
-                </button>
-                <button
-                  onClick={() => handleDeleteTraining(training.id)}
-                  className="text-red-600 hover:text-red-900"
-                >
-                  Delete
-                </button>
-              </td>
+      <div className="overflow-x-auto">
+        <table className="min-w-full divide-y divide-gray-200">
+          <thead className="bg-gray-50">
+            <tr>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Training Name
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Description
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Expiration
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Category
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Required
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Actions
+              </th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody className="bg-white divide-y divide-gray-200">
+            {trainings.map((training) => (
+              <tr key={training.id}>
+                <td className="px-6 py-4 whitespace-nowrap">
+                  <div className="text-sm font-medium text-gray-900">{training.name}</div>
+                </td>
+                <td className="px-6 py-4">
+                  <div className="text-sm text-gray-900">{training.description || '—'}</div>
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap">
+                  <div className="text-sm text-gray-900">
+                    {training.expires_in_days ? (
+                      <div>
+                        <span className="inline-flex items-center px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded-full mb-1">
+                          {training.expires_in_days} days after completion
+                        </span>
+                        <div className="text-xs text-gray-500">Days-based expiration</div>
+                      </div>
+                    ) : training.expires_on_date ? (
+                      <div>
+                        <span className="inline-flex items-center px-2 py-1 text-xs bg-purple-100 text-purple-800 rounded-full mb-1">
+                          Expires on: {new Date(training.expires_on_date).toLocaleDateString()}
+                        </span>
+                        <div className="text-xs text-gray-500">Calendar date expiration</div>
+                      </div>
+                    ) : (
+                      <span className="inline-flex items-center px-2 py-1 text-xs bg-gray-100 text-gray-800 rounded-full">
+                        Never expires
+                      </span>
+                    )}
+                  </div>
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap">
+                  <div className="text-sm text-gray-900">
+                    {training.category === 'both' ? (
+                      <span className="inline-flex items-center px-2 py-1 text-xs bg-purple-100 text-purple-800 rounded-full">
+                        Both
+                      </span>
+                    ) : training.category === 'volunteer' ? (
+                      <span className="inline-flex items-center px-2 py-1 text-xs bg-green-100 text-green-800 rounded-full">
+                        Volunteers
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center px-2 py-1 text-xs bg-indigo-100 text-indigo-800 rounded-full">
+                        Board Members
+                      </span>
+                    )}
+                  </div>
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap">
+                  <div className="text-sm text-gray-900">
+                    {training.is_required ? (
+                      <span className="inline-flex items-center px-2 py-1 text-xs bg-red-100 text-red-800 rounded-full">
+                        Required
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center px-2 py-1 text-xs bg-gray-100 text-gray-800 rounded-full">
+                        Optional
+                      </span>
+                    )}
+                  </div>
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                  <button
+                    onClick={() => handleEditTraining(training)}
+                    className="text-blue-600 hover:text-blue-900 mr-4"
+                  >
+                    Edit
+                  </button>
+                  <button
+                    onClick={() => handleDeleteTraining(training.id)}
+                    className="text-red-600 hover:text-red-900"
+                  >
+                    Delete
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
 
       {trainings.length === 0 && (
         <div className="text-center py-12">
@@ -2459,6 +2466,7 @@ const handleEditTeam = (team) => {
     </div>
   </div>
 )}
+
       {/* Settings Tab */}
       {/*{activeTab === 'settings' && (
         <div className="bg-white shadow rounded-lg p-6">

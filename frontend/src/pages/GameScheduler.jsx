@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar, Clock, MapPin, Save, Download, Plus, Trash2, Edit, TestTube, Database, Users, CalendarClock } from 'lucide-react';
+import { Calendar, Clock, MapPin, Save, Download, Plus, Trash2, Edit, TestTube, Database, Users, CalendarClock, Layers, CalendarRange } from 'lucide-react';
 import Modal from '../components/Modal'; // Adjust path as needed
 import api, { divisionsAPI, teamsAPI, seasonsAPI, dashboardAPI } from '../services/api';
 
@@ -44,7 +44,7 @@ const GameScheduler = () => {
   const defaultTimes = ['17:45:00', '19:45:00'];
   const defaultFields = ['Field #1', 'Field #2', 'Field #3'];
 
-  // Slot templates from Excel
+  // Slot templates from Excel - UPDATED 12-team template for complete round-robin
   const slotTemplates = {
     2: [
       [1, 2], [2, 1], [1, 2], [2, 1], [1, 2], [2, 1],
@@ -80,10 +80,41 @@ const GameScheduler = () => {
       [6, 4], [3, 7], [1, 5], [6, 2], [7, 5], [2, 4], [3, 1]
     ],
     8: [
+      // Week 1
       [1, 2], [3, 4], [5, 6], [7, 8], [6, 8], [5, 7], [2, 4], [1, 3],
+      // Week 2
       [5, 4], [1, 8], [7, 3], [2, 6], [3, 6], [7, 2], [1, 5], [8, 4],
-      [7, 1], [4, 6], [3, 8], [5, 2], [2, 3], [8, 5], [4, 1], [6, 7]
+      // Week 3
+      [7, 1], [4, 6], [3, 8], [5, 2], [2, 3], [8, 5], [4, 1], [6, 7],
+      // Week 4
+      [4, 7], [6, 1], [8, 2], [3, 5], [5, 6], [7, 8], [3, 4], [1, 2],
+      // Week 5
+      [2, 4], [1, 3], [5, 7], [6, 8], [7, 3], [2, 6], [1, 8], [5, 4],
+      // Week 6
+      [1, 5], [8, 4], [7, 2], [3, 6], [3, 8], [5, 2], [4, 6], [7, 1],
+      // Week 7
+      [4, 1], [6, 7], [8, 5], [2, 3], [8, 2], [3, 5], [6, 1], [4, 7]
     ],
+	9: [
+  // Week 1
+  [9, 2], [8, 3], [7, 4], [6, 5],
+  // Week 2
+  [1, 9], [7, 2], [3, 6], [5, 4],
+  // Week 3
+  [8, 1], [9, 7], [2, 5], [4, 3],
+  // Week 4
+  [7, 1], [6, 8], [5, 9], [3, 2],
+  // Week 5
+  [1, 6], [5, 7], [4, 8], [3, 9],
+  // Week 6
+  [1, 5], [6, 4], [7, 3], [8, 2],
+  // Week 7
+  [4, 1], [3, 5], [2, 6], [9, 8],
+  // Week 8
+  [3, 1], [2, 4], [9, 6], [8, 7],
+  // Week 9
+  [1, 2], [4, 9], [8, 5], [6, 7]
+],
 	10: [
   [1, 2], [3, 4], [5, 6], [7, 8], [9, 10],
   [2, 3], [4, 5], [6, 7], [8, 9], [10, 1],
@@ -101,25 +132,112 @@ const GameScheduler = () => {
   [1, 4], [2, 9], [3, 1], [4, 10], [5, 3],
   [6, 9], [7, 10], [8, 6], [9, 7], [10, 9]
 	],
-	12: [
-    [1, 2], [3, 4], [5, 6], [7, 8], [9, 10], [11, 12],
-    [2, 3], [4, 5], [6, 7], [8, 9], [10, 11], [12, 1],
-    [1, 3], [4, 6], [7, 9], [10, 12], [2, 11], [5, 8],
-    [3, 5], [6, 8], [9, 11], [12, 2], [1, 10], [4, 7],
-    [2, 4], [5, 7], [8, 10], [11, 1], [3, 12], [6, 9],
-    [4, 6], [7, 9], [10, 12], [1, 3], [2, 8], [5, 11],
-    [3, 7], [8, 12], [1, 5], [6, 10], [11, 4], [2, 9],
-    [7, 11], [12, 4], [5, 9], [10, 2], [3, 6], [8, 1],
-    [4, 8], [9, 1], [2, 6], [7, 11], [12, 5], [3, 10],
-    [8, 12], [1, 5], [6, 10], [11, 3], [4, 9], [2, 7],
-    [5, 9], [10, 2], [3, 7], [8, 12], [1, 4], [6, 11],
-    [9, 1], [2, 6], [7, 11], [12, 5], [4, 8], [10, 3],
-    [6, 10], [11, 3], [4, 8], [9, 1], [2, 5], [7, 12],
-    [10, 4], [3, 9], [8, 2], [1, 7], [12, 6], [5, 11],
-    [7, 1], [12, 8], [5, 3], [10, 6], [11, 9], [2, 4],
-    [1, 8], [2, 9], [3, 10], [4, 11], [5, 12], [6, 7]
+	11: [
+  // Week 1
+  [11, 2], [10, 3], [9, 4], [8, 5], [7, 6],
+  // Week 2
+  [1, 11], [9, 2], [8, 3], [4, 7], [6, 5],
+  // Week 3
+  [10, 1], [11, 9], [2, 7], [3, 6], [5, 4],
+  // Week 4
+  [9, 1], [8, 10], [7, 11], [5, 2], [4, 3],
+  // Week 5
+  [1, 8], [7, 9], [6, 10], [11, 5], [3, 2],
+  // Week 6
+  [1, 7], [8, 6], [5, 9], [10, 4], [3, 11],
+  // Week 7
+  [6, 1], [5, 7], [4, 8], [9, 3], [2, 10],
+  // Week 8
+  [1, 5], [4, 6], [7, 3], [2, 8], [11, 10],
+  // Week 9
+  [1, 4], [3, 5], [6, 2], [8, 11], [10, 9],
+  // Week 10
+  [3, 1], [2, 4], [11, 6], [10, 7], [9, 8],
+  // Week 11
+  [2, 1], [4, 11], [5, 10], [9, 6], [8, 7]
+],
+    12: [
+    // Week 1
+    [1, 12], [2, 11], [3, 10], [4, 9], [5, 8], [6, 7],
+    // Week 2
+    [11, 1], [10, 12], [9, 2], [8, 3], [7, 4], [6, 5],
+    // Week 3
+    [1, 10], [11, 9], [12, 8], [2, 7], [3, 6], [4, 5],
+    // Week 4
+    [9, 1], [8, 10], [7, 11], [6, 12], [5, 2], [4, 3],
+    // Week 5
+    [1, 8], [9, 7], [10, 6], [11, 5], [12, 4], [2, 3],
+    // Week 6
+    [7, 1], [6, 8], [5, 9], [4, 10], [3, 11], [2, 12],
+    // Week 7
+    [1, 6], [7, 5], [8, 4], [9, 3], [10, 2], [11, 12],
+    // Week 8
+    [5, 1], [4, 6], [3, 7], [2, 8], [12, 9], [11, 10],
+    // Week 9
+    [1, 4], [5, 3], [6, 2], [7, 12], [8, 11], [9, 10],
+    // Week 10
+    [3, 1], [2, 4], [12, 5], [11, 6], [10, 7], [9, 8],
+    // Week 11
+    [1, 2], [3, 12], [4, 11], [5, 10], [6, 9], [7, 8]
+  ],
+  13: [
+  // Week 1
+  [13, 2], [12, 3], [11, 4], [10, 5], [9, 6], [8, 7],
+  // Week 2
+  [1, 13], [11, 2], [10, 3], [9, 4], [5, 8], [7, 6],
+  // Week 3
+  [12, 1], [13, 11], [2, 9], [3, 8], [4, 7], [6, 5],
+  // Week 4
+  [11, 1], [10, 12], [9, 13], [7, 2], [6, 3], [5, 4],
+  // Week 5
+  [1, 10], [9, 11], [8, 12], [7, 13], [2, 5], [4, 3],
+  // Week 6
+  [1, 9], [10, 8], [11, 7], [12, 6], [13, 5], [3, 2],
+  // Week 7
+  [8, 1], [7, 9], [6, 10], [5, 11], [4, 12], [3, 13],
+  // Week 8
+  [7, 1], [6, 8], [9, 5], [4, 10], [11, 3], [2, 12],
+  // Week 9
+  [1, 6], [5, 7], [8, 4], [3, 9], [10, 2], [12, 13],
+  // Week 10
+  [1, 5], [4, 6], [3, 7], [2, 8], [13, 10], [12, 11],
+  // Week 11
+  [4, 1], [5, 3], [6, 2], [13, 8], [9, 12], [11, 10],
+  // Week 12
+  [3, 1], [2, 4], [6, 13], [12, 7], [8, 11], [10, 9],
+  // Week 13
+  [1, 2], [13, 4], [12, 5], [11, 6], [10, 7], [9, 8]
+],
+
+  14: [
+    // Week 1
+    [1, 14], [2, 13], [3, 12], [4, 11], [5, 10], [6, 9], [7, 8],
+    // Week 2
+    [13, 1], [12, 14], [11, 2], [10, 3], [9, 4], [8, 5], [7, 6],
+    // Week 3
+    [1, 12], [13, 11], [14, 10], [2, 9], [3, 8], [4, 7], [5, 6],
+    // Week 4
+    [11, 1], [10, 12], [9, 13], [8, 14], [7, 2], [6, 3], [5, 4],
+    // Week 5
+    [1, 10], [11, 9], [12, 8], [13, 7], [14, 6], [2, 5], [3, 4],
+    // Week 6
+    [9, 1], [8, 10], [7, 11], [6, 12], [5, 13], [4, 14], [3, 2],
+    // Week 7
+    [1, 8], [9, 7], [10, 6], [11, 5], [12, 4], [13, 3], [14, 2],
+    // Week 8
+    [7, 1], [6, 8], [5, 9], [4, 10], [3, 11], [2, 12], [14, 13],
+    // Week 9
+    [1, 6], [7, 5], [8, 4], [9, 3], [10, 2], [11, 14], [12, 13],
+    // Week 10
+    [5, 1], [4, 6], [3, 7], [2, 8], [14, 9], [13, 10], [12, 11],
+    // Week 11
+    [1, 4], [5, 3], [6, 2], [7, 14], [8, 13], [9, 12], [10, 11],
+    // Week 12
+    [3, 1], [2, 4], [14, 5], [13, 6], [12, 7], [11, 8], [10, 9],
+    // Week 13
+    [1, 2], [3, 14], [4, 13], [5, 12], [6, 11], [7, 10], [8, 9]
   ]
-  };
+};
 
   // Helper function to format dates correctly
   const formatDateForDisplay = (date) => {
@@ -390,7 +508,7 @@ const GameScheduler = () => {
     return division?.current || 0;
   };
 
-  // ========== NEW: Calculate game counts per team ==========
+  // Calculate game counts per team
   const getGameCountsPerTeam = () => {
     const gameCounts = {};
     
@@ -410,7 +528,51 @@ const GameScheduler = () => {
     
     return gameCounts;
   };
-  // ========== END NEW ==========
+
+  // Get slot counts per division
+  const getDivisionSlotCounts = () => {
+    const slotCounts = {};
+    
+    // Initialize all divisions with 0
+    divisions.forEach(division => {
+      slotCounts[division.name] = 0;
+    });
+    
+    // Count slots assigned to each division
+    scheduleConfig.forEach(slot => {
+      if (slot.division) {
+        slotCounts[slot.division] = (slotCounts[slot.division] || 0) + 1;
+      }
+    });
+    
+    return slotCounts;
+  };
+
+  // Get division schedule summary
+  const getDivisionScheduleSummary = () => {
+    const summary = {};
+    
+    // Group slots by division, then by day, then by time
+    scheduleConfig.forEach(slot => {
+      if (!slot.division) return;
+      
+      if (!summary[slot.division]) {
+        summary[slot.division] = {};
+      }
+      
+      if (!summary[slot.division][slot.day]) {
+        summary[slot.division][slot.day] = {};
+      }
+      
+      if (!summary[slot.division][slot.day][slot.time]) {
+        summary[slot.division][slot.day][slot.time] = [];
+      }
+      
+      summary[slot.division][slot.day][slot.time].push(slot.field);
+    });
+    
+    return summary;
+  };
 
   // Test Mode Functions
   const initializeTestConfig = () => {
@@ -555,7 +717,7 @@ const GameScheduler = () => {
     );
   };
 
-  // Generate games - FIXED to use all available fields at each time slot
+  // ========== FIXED: Generate games with proper date calculation ==========
   const generateGames = () => {
     if (!seasonStartDate) {
       alert('Please set the season start date');
@@ -588,8 +750,9 @@ const GameScheduler = () => {
           return;
         }
 
-        const template = slotTemplates[teamCount] || slotTemplates[Math.min(teamCount, 8)];
-        if (!template) {
+        //const template = slotTemplates[teamCount] || slotTemplates[Math.min(teamCount, 8)];
+        const template = slotTemplates[teamCount];
+		if (!template) {
           console.log(`No template found for ${teamCount} teams`);
           return;
         }
@@ -608,21 +771,37 @@ const GameScheduler = () => {
         // Get unique days for this division
         const divisionDays = [...new Set(divisionSlots.map(slot => slot.day))];
         
-        // Find first occurrence of each day after start date
-        const firstOccurrences = {};
-        divisionDays.forEach(day => {
-          const dayOffset = daysOfWeek.indexOf(day);
-          // Convert Sunday (0) to 7 for easier calculation
-          const startDay = startDate.getDay() === 0 ? 7 : startDate.getDay();
-          const targetDay = dayOffset + 1; // Convert to 1-7 (Mon-Sun)
-          
-          let daysToAdd = targetDay - startDay;
-          if (daysToAdd < 0) daysToAdd += 7;
-          
-          const firstDate = new Date(startDate);
-          firstDate.setDate(startDate.getDate() + daysToAdd);
-          firstOccurrences[day] = firstDate;
-        });
+        // Find first occurrence of each day on or after start date
+// Find first occurrence of each day on or after start date
+const firstOccurrences = {};
+divisionDays.forEach(day => {
+  const dayOffset = daysOfWeek.indexOf(day); // 0-6 (Monday=0, Sunday=6)
+  
+  // Get the day of week for the start date (0-6, where Sunday=0, Monday=1, ..., Saturday=6)
+  const startDayOfWeek = startDate.getDay(); // 0=Sunday, 1=Monday, ..., 6=Saturday
+  
+  // Convert startDayOfWeek to our system where Monday=0, Tuesday=1, ..., Sunday=6
+  // Sunday (0) becomes 6, Monday (1) becomes 0, Tuesday (2) becomes 1, etc.
+  const startDayMapped = startDayOfWeek === 0 ? 6 : startDayOfWeek - 1;
+  
+  // Calculate days to add to reach the target day
+  let daysToAdd = dayOffset - startDayMapped;
+  
+  // IMPORTANT FIX: If the target day is BEFORE the start day OR it's the same day,
+  // we need to add 7 days to go to the NEXT occurrence
+  // This ensures we never schedule games BEFORE the start date
+  if (daysToAdd <= 0) {
+    daysToAdd += 7;
+  }
+  
+  // Calculate the first date for this day of week on or after the start date
+  const firstDate = new Date(startDate);
+  firstDate.setDate(startDate.getDate() + daysToAdd);
+  
+  firstOccurrences[day] = firstDate;
+  console.log(`${day}: First date on or after ${startDate.toDateString()} is ${firstDate.toDateString()}`);
+});
+        // ========== END FIXED ==========
 
         // Schedule games for ALL weeks of the season
         let matchupIndex = 0;
@@ -706,6 +885,7 @@ const GameScheduler = () => {
       alert('Error generating schedule: ' + error.message);
     }
   };
+  // ========== END FIXED ==========
 
   const getManagerName = (team) => {
     if (team.manager) {
@@ -843,9 +1023,14 @@ const GameScheduler = () => {
   // Get player counts for display
   const playerCounts = getRegistrationCount;
   
-  // ========== NEW: Get game counts for display ==========
+  // Get game counts for display
   const gameCounts = getGameCountsPerTeam();
-  // ========== END NEW ==========
+  
+  // Get division slot counts
+  const divisionSlotCounts = getDivisionSlotCounts();
+  
+  // Get division schedule summary
+  const divisionScheduleSummary = getDivisionScheduleSummary();
 
   return (
     <div className="w-full max-w-7xl mx-auto p-6">
@@ -965,6 +1150,97 @@ const GameScheduler = () => {
             <button onClick={() => setShowAddFieldModal(true)} className="inline-flex items-center px-3 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50">
               <Plus className="h-4 w-4 mr-1" /> Add Field
             </button>
+          </div>
+        </div>
+
+        {/* Division Slot Counters */}
+        <div className="mb-6 p-4 bg-gray-50 rounded-lg">
+          <h3 className="text-lg font-medium text-gray-900 mb-3 flex items-center">
+            <Layers className="h-5 w-5 mr-2 text-blue-600" />
+            Division Slot Summary
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {divisions
+              .slice()
+              .sort((a, b) => {
+                const order = [
+                  'T-Ball Division',
+                  'Baseball - Coach Pitch Division',
+                  'Baseball - Rookies Division',
+                  'Baseball - Minors Division',
+                  'Baseball - Majors Division',
+                  'Softball - Rookies Division (Coach Pitch)',
+                  'Softball - Minors Division',
+                  'Softball - Majors Division',
+                  'Challenger Division'
+                ];
+                return order.indexOf(a.name) - order.indexOf(b.name);
+              })
+              .map(division => {
+                const slotCount = divisionSlotCounts[division.name] || 0;
+                
+                return (
+                  <div key={division.id} className="flex items-center justify-between bg-white p-3 rounded-lg border border-gray-200">
+                    <span className="font-medium text-gray-700">{division.name}</span>
+                    <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-bold bg-blue-100 text-blue-800">
+                      {slotCount} {slotCount === 1 ? 'slot' : 'slots'}
+                    </span>
+                  </div>
+                );
+              })}
+          </div>
+        </div>
+
+        {/* Division Schedule Summary */}
+        <div className="mb-6 p-4 bg-gray-50 rounded-lg">
+          <h3 className="text-lg font-medium text-gray-900 mb-3 flex items-center">
+            <CalendarRange className="h-5 w-5 mr-2 text-green-600" />
+            Division Schedule Summary
+          </h3>
+          <div className="space-y-4">
+            {Object.entries(divisionScheduleSummary)
+              .sort(([aName], [bName]) => {
+                const order = [
+                  'T-Ball Division',
+                  'Baseball - Coach Pitch Division',
+                  'Baseball - Rookies Division',
+                  'Baseball - Minors Division',
+                  'Baseball - Majors Division',
+                  'Softball - Rookies Division (Coach Pitch)',
+                  'Softball - Minors Division',
+                  'Softball - Majors Division',
+                  'Challenger Division'
+                ];
+                return order.indexOf(aName) - order.indexOf(bName);
+              })
+              .map(([divisionName, days]) => (
+                <div key={divisionName} className="bg-white rounded-lg p-4 border border-gray-200">
+                  <h4 className="font-semibold text-gray-800 mb-2">{divisionName}</h4>
+                  <div className="space-y-2">
+                    {Object.entries(days)
+                      .sort(([aDay], [bDay]) => daysOfWeek.indexOf(aDay) - daysOfWeek.indexOf(bDay))
+                      .map(([day, times]) => (
+                        <div key={day} className="flex items-start">
+                          <span className="w-24 text-sm font-medium text-gray-600">{day.substring(0,3)} |</span>
+                          <div className="flex-1 flex flex-wrap gap-2">
+                            {Object.entries(times)
+                              .sort(([aTime], [bTime]) => aTime.localeCompare(bTime))
+                              .map(([time, fields]) => (
+                                <div key={time} className="flex items-center flex-wrap">
+                                  <span className="text-sm font-medium text-gray-700 mr-1">
+                                    {time.substring(0,5)}
+                                  </span>
+                                  <span className="text-sm text-gray-500 mr-2">
+                                    ({fields.join(', ')})|
+                                  </span>
+                                </div>
+                              ))}
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              ))}
           </div>
         </div>
 
@@ -1181,7 +1457,7 @@ const GameScheduler = () => {
         </div>
       </Modal>
 
-      {/* ========== UPDATED: Team Summary with Game Counts ========== */}
+      {/* Team Summary with Game Counts */}
       <div className="bg-white shadow rounded-lg p-6 mb-6">
         <h2 className="text-xl font-semibold mb-4">
           Team Summary {isTestMode && '(Test Mode)'}
@@ -1194,16 +1470,19 @@ const GameScheduler = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {Object.entries(getTeamsByDivision()).map(([divisionName, divisionTeams]) => {
             const registeredCount = getRegistrationCount(divisionName);
+            const slotCount = divisionSlotCounts[divisionName] || 0;
             return (
               <div key={divisionName} className="border border-gray-200 rounded-lg p-4">
                 <div className="flex justify-between items-start mb-2">
                   <h3 className="font-semibold text-lg">{divisionName}</h3>
                   <span className="text-sm text-gray-500 flex items-center">
                     <Users className="h-3 w-3 mr-1" />
-                    {registeredCount} registered
+                    {registeredCount} reg
                   </span>
                 </div>
-                <p className="text-sm text-gray-600 mb-3">{divisionTeams.length} team{divisionTeams.length !== 1 ? 's' : ''}</p>
+                <p className="text-sm text-gray-600 mb-3">
+                  {divisionTeams.length} team{divisionTeams.length !== 1 ? 's' : ''} • {slotCount} slot{slotCount !== 1 ? 's' : ''}
+                </p>
                 <div className="space-y-2">
                   {divisionTeams.map((team, index) => {
                     const gameCount = gameCounts[team.name] || 0;
@@ -1228,7 +1507,6 @@ const GameScheduler = () => {
                     );
                   })}
                 </div>
-                {/* ========== NEW: Division game count summary ========== */}
                 {generatedGames.length > 0 && (
                   <div className="mt-3 pt-2 border-t border-gray-100">
                     <div className="flex justify-between items-center text-xs text-gray-500">
@@ -1239,13 +1517,11 @@ const GameScheduler = () => {
                     </div>
                   </div>
                 )}
-                {/* ========== END NEW ========== */}
               </div>
             );
           })}
         </div>
       </div>
-      {/* ========== END UPDATED ========== */}
 
       {/* Action Buttons */}
       <div className="flex justify-center space-x-4 mb-6">

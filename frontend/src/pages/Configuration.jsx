@@ -1979,7 +1979,7 @@ const handleEditTeam = (team) => {
   </form>
 </Modal>
 
-       {/* Seasons Tab */}
+      {/* Seasons Tab */}
       {activeTab === 'seasons' && (
         <div>
           <div className="flex justify-between items-center mb-6">
@@ -2278,7 +2278,6 @@ const handleEditTeam = (team) => {
           </div>
         </div>
       )}
-	  
 {/* Trainings Tab */}
 {activeTab === 'trainings' && (
   <div>
@@ -2382,28 +2381,28 @@ const handleEditTeam = (team) => {
                   <div className="text-sm text-gray-900">{training.description || '—'}</div>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
-                  <div className="text-sm text-gray-900">
-                    {training.expires_in_days ? (
-                      <div>
-                        <span className="inline-flex items-center px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded-full mb-1">
-                          {training.expires_in_days} days after completion
-                        </span>
-                        <div className="text-xs text-gray-500">Days-based expiration</div>
-                      </div>
-                    ) : training.expires_on_date ? (
-                      <div>
-                        <span className="inline-flex items-center px-2 py-1 text-xs bg-purple-100 text-purple-800 rounded-full mb-1">
-                          Expires on: {new Date(training.expires_on_date).toLocaleDateString()}
-                        </span>
-                        <div className="text-xs text-gray-500">Calendar date expiration</div>
-                      </div>
-                    ) : (
-                      <span className="inline-flex items-center px-2 py-1 text-xs bg-gray-100 text-gray-800 rounded-full">
-                        Never expires
-                      </span>
-                    )}
-                  </div>
-                </td>
+  <div className="text-sm text-gray-900">
+    {training.expires_in_days ? (
+      <div>
+        <span className="inline-flex items-center px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded-full mb-1">
+          {training.expires_in_days} days after completion
+        </span>
+        <div className="text-xs text-gray-500">Days-based expiration</div>
+      </div>
+    ) : training.expires_on_date ? (
+      <div>
+        <span className="inline-flex items-center px-2 py-1 text-xs bg-purple-100 text-purple-800 rounded-full mb-1">
+          Expires on: {new Date(training.expires_on_date).toLocaleDateString()}
+        </span>
+        <div className="text-xs text-gray-500">Calendar date expiration</div>
+      </div>
+    ) : (
+      <span className="inline-flex items-center px-2 py-1 text-xs bg-gray-100 text-gray-800 rounded-full">
+        Never expires
+      </span>
+    )}
+  </div>
+</td>
                 <td className="px-6 py-4 whitespace-nowrap">
                   <div className="text-sm text-gray-900">
                     {training.category === 'both' ? (
@@ -2466,7 +2465,6 @@ const handleEditTeam = (team) => {
     </div>
   </div>
 )}
-
       {/* Settings Tab */}
       {/*{activeTab === 'settings' && (
         <div className="bg-white shadow rounded-lg p-6">

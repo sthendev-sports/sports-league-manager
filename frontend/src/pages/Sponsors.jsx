@@ -764,12 +764,14 @@ const handleAddLocationOption = async () => {
     setShowForm(false);
   };
 
-  // Calculate totals for reports
+  // Calculate totals for reports based on filtered sponsors
   const calculateTotals = () => {
-    const filteredSponsors = showActiveOnly ? sponsors.filter(s => s.is_active) : sponsors;
+    const filteredSponsors = getFilteredSponsors();
     
     const totalSponsors = filteredSponsors.length;
     const totalRevenue = filteredSponsors.reduce((sum, s) => sum + (s.total_amount || 0), 0);
+    const paidRevenue = filteredSponsors.filter(s => s.has_paid).reduce((sum, s) => sum + (s.total_amount || 0), 0);
+    const unpaidRevenue = filteredSponsors.filter(s => !s.has_paid && s.is_active).reduce((sum, s) => sum + (s.total_amount || 0), 0);
     const newSponsors = filteredSponsors.filter(s => s.is_new_sponsor).length;
     const returningSponsors = filteredSponsors.filter(s => s.is_returning).length;
     const paidSponsors = filteredSponsors.filter(s => s.has_paid).length;
@@ -777,25 +779,36 @@ const handleAddLocationOption = async () => {
     const contactedSponsors = filteredSponsors.filter(s => s.contacted_this_season).length;
     const notContactedSponsors = filteredSponsors.filter(s => !s.contacted_this_season && s.is_active).length;
     
-    // Count signs by location
-    const locationCounts = {};
+    // Count signs by location for ACTIVE and PAID sponsors only
+    const locationCountsPaid = {};
+    const locationCountsAllActive = {};
+    
     sponsors.forEach(sponsor => {
-      (sponsor.locations || []).forEach(loc => {
-        const key = `${loc.field} - ${loc.location}`;
-        locationCounts[key] = (locationCounts[key] || 0) + 1;
-      });
+      if (sponsor.is_active) {
+        (sponsor.locations || []).forEach(loc => {
+          const key = `${loc.field} - ${loc.location}`;
+          locationCountsAllActive[key] = (locationCountsAllActive[key] || 0) + 1;
+          
+          if (sponsor.has_paid) {
+            locationCountsPaid[key] = (locationCountsPaid[key] || 0) + 1;
+          }
+        });
+      }
     });
     
     return {
       totalSponsors,
       totalRevenue,
+      paidRevenue,
+      unpaidRevenue,
       newSponsors,
       returningSponsors,
       paidSponsors,
       unpaidSponsors,
       contactedSponsors,
       notContactedSponsors,
-      locationCounts
+      locationCountsPaid,
+      locationCountsAllActive
     };
   };
 
@@ -846,11 +859,12 @@ const getFilteredSponsors = () => {
     }
   };
 
+  // Export to CSV function (similar to Volunteers page)
   const handleExportCsv = () => {
   const filteredSponsors = getFilteredSponsors();
   
   const rows = [
-    ['Company Name', 'Contact Name', 'Email', 'Phone', 'Contacted', 'Locations', 'Amount', 'Paid', 'Status']
+    ['Company Name', 'Contact Name', 'Email', 'Phone', 'Contacted', 'Locations', 'Amount', 'Paid', 'Status', 'Notes']
   ];
   
   filteredSponsors.forEach(s => {
@@ -868,7 +882,8 @@ const getFilteredSponsors = () => {
       locationStr,
       `$${s.total_amount || 0}`,
       s.has_paid ? 'Yes' : 'No',
-      s.is_active ? 'Active' : 'Inactive'
+      s.is_active ? 'Active' : 'Inactive',
+      s.notes || ''
     ]);
   });
   
@@ -880,7 +895,7 @@ const getFilteredSponsors = () => {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = 'sponsors.csv';
+  a.download = `sponsors_export_${new Date().toISOString().split('T')[0]}.csv`;
   a.click();
   URL.revokeObjectURL(url);
 };
@@ -1241,8 +1256,8 @@ const getFilteredSponsors = () => {
   </div>
 </div>
 
-          {/* Summary Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
+          {/* Summary Cards - Updated to show dynamic revenue based on filters */}
+          <div className="grid grid-cols-1 md:grid-cols-6 gap-4 mb-6">
             <div className="bg-white rounded-lg shadow p-4 border border-gray-200">
               <div className="flex items-center">
                 <div className="p-3 rounded-full bg-blue-100 text-blue-600 mr-4">
@@ -1263,6 +1278,30 @@ const getFilteredSponsors = () => {
                 <div>
                   <p className="text-sm text-gray-500">Total Revenue</p>
                   <p className="text-2xl font-semibold">${totals.totalRevenue}</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-lg shadow p-4 border border-gray-200">
+              <div className="flex items-center">
+                <div className="p-3 rounded-full bg-emerald-100 text-emerald-600 mr-4">
+                  <CheckCircle className="h-6 w-6" />
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500">Paid Revenue</p>
+                  <p className="text-2xl font-semibold text-green-600">${totals.paidRevenue}</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-lg shadow p-4 border border-gray-200">
+              <div className="flex items-center">
+                <div className="p-3 rounded-full bg-yellow-100 text-yellow-600 mr-4">
+                  <XCircle className="h-6 w-6" />
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500">Unpaid Revenue</p>
+                  <p className="text-2xl font-semibold text-yellow-600">${totals.unpaidRevenue}</p>
                 </div>
               </div>
             </div>
@@ -1290,22 +1329,20 @@ const getFilteredSponsors = () => {
                 </div>
               </div>
             </div>
-
-            <div className="bg-white rounded-lg shadow p-4 border border-gray-200">
-              <div className="flex items-center">
-                <div className="p-3 rounded-full bg-orange-100 text-orange-600 mr-4">
-                  <Mail className="h-6 w-6" />
-                </div>
-                <div>
-                  <p className="text-sm text-gray-500">Contacted</p>
-                  <p className="text-2xl font-semibold">{totals.contactedSponsors} / {totals.notContactedSponsors}</p>
-                </div>
-              </div>
-            </div>
           </div>
 
-          {/* Sponsors Table */}
+          {/* Sponsors Table with Export Button */}
           <div className="bg-white shadow overflow-hidden rounded-lg">
+            <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+              <h2 className="text-lg font-medium text-gray-900">Sponsors List</h2>
+              <button
+                onClick={handleExportCsv}
+                className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+              >
+                <Download className="h-4 w-4 mr-2" />
+                Export CSV
+              </button>
+            </div>
             <div className="overflow-x-auto">
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
@@ -1511,6 +1548,14 @@ const getFilteredSponsors = () => {
                   <span className="font-semibold text-lg">${totals.totalRevenue}</span>
                 </div>
                 <div className="flex justify-between">
+                  <span className="text-gray-600">Paid Revenue:</span>
+                  <span className="font-semibold text-green-600">${totals.paidRevenue}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Unpaid Revenue:</span>
+                  <span className="font-semibold text-yellow-600">${totals.unpaidRevenue}</span>
+                </div>
+                <div className="flex justify-between">
                   <span className="text-gray-600">Average per Sponsor:</span>
                   <span className="font-semibold">
                     ${totals.totalSponsors ? (totals.totalRevenue / totals.totalSponsors).toFixed(2) : 0}
@@ -1580,16 +1625,32 @@ const getFilteredSponsors = () => {
             </div>
           </div>
 
-          {/* Location Breakdown */}
+          {/* Location Breakdown - Updated to show both All Active and Paid only */}
           <div className="bg-white rounded-lg shadow p-6 border border-gray-200">
             <h3 className="text-lg font-medium text-gray-900 mb-4">Signs by Location</h3>
+            <div className="mb-4 p-3 bg-blue-50 rounded-lg">
+              <p className="text-sm text-blue-800">
+                <span className="font-medium">Note:</span> Showing counts for Active sponsors only. 
+                Paid counts in green, All Active in gray.
+              </p>
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {Object.entries(totals.locationCounts).map(([location, count]) => (
-                <div key={location} className="flex justify-between items-center p-2 border-b">
-                  <span className="text-gray-600">{location}</span>
-                  <span className="font-semibold">{count} signs</span>
+              {Object.keys(totals.locationCountsAllActive).length > 0 ? (
+                Object.entries(totals.locationCountsAllActive).map(([location, count]) => (
+                  <div key={location} className="flex justify-between items-center p-2 border-b">
+                    <span className="text-gray-600">{location}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-green-600">{totals.locationCountsPaid[location] || 0} paid</span>
+                      <span className="text-gray-400">/</span>
+                      <span className="font-semibold text-gray-700">{count} total</span>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="col-span-2 text-center py-4 text-gray-500">
+                  No active sponsors with locations found
                 </div>
-              ))}
+              )}
             </div>
           </div>
         </div>

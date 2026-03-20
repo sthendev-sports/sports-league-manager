@@ -757,7 +757,7 @@ const GameScheduler = () => {
     );
   };
 
-  // ========== FIXED: Generate games with proper date calculation ==========
+  // ========== FIXED: Generate games with fair back-to-back distribution ==========
   const generateGames = () => {
   if (!seasonStartDate) {
     alert('Please set the season start date');
@@ -790,8 +790,6 @@ const GameScheduler = () => {
         return;
       }
 
-      // IMPORTANT:
-      // Use only the exact template for the team count.
       const template = slotTemplates[teamCount];
       if (!template) {
         console.log(`No template found for ${teamCount} teams`);
@@ -817,14 +815,13 @@ const GameScheduler = () => {
       // Find first occurrence of each day after the season start date
       const firstOccurrences = {};
       divisionDays.forEach(day => {
-        const dayOffset = daysOfWeek.indexOf(day); // Monday=0 ... Sunday=6
+        const dayOffset = daysOfWeek.indexOf(day);
 
-        const startDayOfWeek = startDate.getDay(); // Sunday=0 ... Saturday=6
+        const startDayOfWeek = startDate.getDay();
         const startDayMapped = startDayOfWeek === 0 ? 6 : startDayOfWeek - 1;
 
         let daysToAdd = dayOffset - startDayMapped;
 
-        // If same day or earlier in the week, move to the next week
         if (daysToAdd <= 0) {
           daysToAdd += 7;
         }
@@ -833,24 +830,39 @@ const GameScheduler = () => {
         firstDate.setDate(startDate.getDate() + daysToAdd);
 
         firstOccurrences[day] = firstDate;
-        console.log(
-          `${day}: First date after ${startDate.toDateString()} is ${firstDate.toDateString()}`
-        );
       });
 
-      // Keep track of which matchup we are on for this division
-      let matchupIndex = 0;
+      // Create a shuffled order of matchups to distribute back-to-backs fairly
+      let matchupOrder = [...Array(template.length).keys()];
+      
+      // Create a rotating schedule for which matchup gets used first each week
+      let weekOffset = 0;
+      
+      // Track which teams played on which dates to avoid back-to-back
+      const teamLastPlayedDate = {};
+      divisionTeams.forEach(team => {
+        teamLastPlayedDate[team.name] = null;
+      });
+      
+      // Track which matchups have been used to ensure fair distribution
+      let usedMatchups = [];
+      let matchupCycle = 0;
 
       // Schedule games for all weeks
       for (let week = 1; week <= seasonWeeks; week++) {
         console.log(`\nWeek ${week} for ${divisionName}`);
+        
+        // For each week, start at a different point in the template to rotate
+        const startIndex = (weekOffset * Math.floor(template.length / Math.min(divisionDays.length, 3))) % template.length;
+        const orderedMatchups = [...matchupOrder.slice(startIndex), ...matchupOrder.slice(0, startIndex)];
+        
+        let matchupPointer = 0;
         let gamesScheduledThisWeek = 0;
 
         for (const day of divisionDays) {
           const firstDate = firstOccurrences[day];
           const gameDate = new Date(firstDate);
           gameDate.setDate(firstDate.getDate() + ((week - 1) * 7));
-
           const dateStr = formatDateForDisplay(gameDate);
 
           const daySlots = divisionSlots.filter(slot => slot.day === day);
@@ -871,33 +883,90 @@ const GameScheduler = () => {
             if (availableSlots.length === 0) continue;
 
             for (const fieldSlot of availableSlots) {
-              // Figure out which matchup in the template to use
-              const currentMatchupIndex = matchupIndex % template.length;
-
-              // Figure out which full pass through the template we are on
-              // 0 = first pass, 1 = second pass, 2 = third pass, etc.
-              const cycleNumber = Math.floor(matchupIndex / template.length);
-
-              const match = template[currentMatchupIndex];
-
-              let homeTeamNum;
-              let awayTeamNum;
-
-              // Flip home/away every time the full template repeats
-              if (cycleNumber % 2 === 0) {
-                // 1st pass, 3rd pass, 5th pass...
-                [homeTeamNum, awayTeamNum] = match;
-              } else {
-                // 2nd pass, 4th pass, 6th pass...
-                [awayTeamNum, homeTeamNum] = match;
+              // Find a matchup where neither team played on the previous day
+              let foundValidMatchup = false;
+              let attempts = 0;
+              let matchupToUse = null;
+              let homeTeamNum = null;
+              let awayTeamNum = null;
+              let homeTeam = null;
+              let awayTeam = null;
+              
+              // Check if there's a previous date to compare with
+              const previousDate = new Date(gameDate);
+              previousDate.setDate(gameDate.getDate() - 1);
+              const previousDateStr = formatDateForDisplay(previousDate);
+              
+              // Get teams that played on the previous date
+              const teamsPlayedPrevDay = new Set();
+              games.forEach(game => {
+                if (game.MatchDate === previousDateStr && game.Division === divisionName) {
+                  teamsPlayedPrevDay.add(game.HomeTeam);
+                  teamsPlayedPrevDay.add(game.AwayTeam);
+                }
+              });
+              
+              // Try to find a matchup where neither team played yesterday
+              while (!foundValidMatchup && attempts < template.length * 2) {
+                const templateIndex = orderedMatchups[matchupPointer % orderedMatchups.length];
+                const cycleNumber = Math.floor((matchupCycle + attempts) / template.length);
+                const match = template[templateIndex];
+                
+                let tempHomeNum, tempAwayNum;
+                if (cycleNumber % 2 === 0) {
+                  [tempHomeNum, tempAwayNum] = match;
+                } else {
+                  [tempAwayNum, tempHomeNum] = match;
+                }
+                
+                const tempHome = divisionTeams[tempHomeNum - 1];
+                const tempAway = divisionTeams[tempAwayNum - 1];
+                
+                if (tempHome && tempAway) {
+                  // Check if either team played yesterday
+                  const homePlayedPrev = teamsPlayedPrevDay.has(tempHome.name);
+                  const awayPlayedPrev = teamsPlayedPrevDay.has(tempAway.name);
+                  
+                  if (!homePlayedPrev && !awayPlayedPrev) {
+                    // Perfect - neither team played yesterday
+                    foundValidMatchup = true;
+                    matchupToUse = templateIndex;
+                    homeTeamNum = tempHomeNum;
+                    awayTeamNum = tempAwayNum;
+                    homeTeam = tempHome;
+                    awayTeam = tempAway;
+                  } else if (attempts >= template.length) {
+                    // After trying all matchups, allow back-to-back but track it for fairness
+                    foundValidMatchup = true;
+                    matchupToUse = templateIndex;
+                    homeTeamNum = tempHomeNum;
+                    awayTeamNum = tempAwayNum;
+                    homeTeam = tempHome;
+                    awayTeam = tempAway;
+                    console.log(`Warning: Back-to-back game for ${homeTeam.name} or ${awayTeam.name} on ${dateStr}`);
+                  }
+                }
+                
+                matchupPointer++;
+                attempts++;
               }
-
-              const homeTeam = divisionTeams[homeTeamNum - 1];
-              const awayTeam = divisionTeams[awayTeamNum - 1];
-
-              if (!homeTeam || !awayTeam) {
-                matchupIndex++;
-                continue;
+              
+              if (!foundValidMatchup || !homeTeam || !awayTeam) {
+                // Fallback to sequential order
+                const fallbackIndex = matchupPointer % template.length;
+                const fallbackMatch = template[fallbackIndex];
+                const fallbackCycle = Math.floor(matchupPointer / template.length);
+                if (fallbackCycle % 2 === 0) {
+                  [homeTeamNum, awayTeamNum] = fallbackMatch;
+                } else {
+                  [awayTeamNum, homeTeamNum] = fallbackMatch;
+                }
+                homeTeam = divisionTeams[homeTeamNum - 1];
+                awayTeam = divisionTeams[awayTeamNum - 1];
+                if (!homeTeam || !awayTeam) {
+                  matchupPointer++;
+                  continue;
+                }
               }
 
               const endTime = calculateEndTime(time);
@@ -916,31 +985,64 @@ const GameScheduler = () => {
               });
 
               console.log(
-                `Scheduled: ${homeTeam.name} vs ${awayTeam.name} on ${dateStr} at ${time} on ${fieldSlot.field} (template game ${currentMatchupIndex + 1}/${template.length}, cycle ${cycleNumber + 1})`
+                `Scheduled: ${homeTeam.name} vs ${awayTeam.name} on ${dateStr} at ${time}`
               );
-
-              matchupIndex++;
+              
+              matchupCycle++;
               gamesScheduledThisWeek++;
             }
           }
         }
-
+        
+        weekOffset++;
         console.log(`Week ${week} completed: ${gamesScheduledThisWeek} games scheduled`);
       }
 
-      console.log(`Completed ${divisionName}: ${matchupIndex} total games scheduled`);
+      console.log(`Completed ${divisionName}`);
     });
 
     setGeneratedGames(games);
+    
+    // Check and report any back-to-back issues
+    const backToBackTeams = {};
+    const gameMap = {};
+    games.forEach(game => {
+      if (!gameMap[game.MatchDate]) gameMap[game.MatchDate] = [];
+      gameMap[game.MatchDate].push(game);
+    });
+    
+    const dates = Object.keys(gameMap).sort();
+    for (let i = 1; i < dates.length; i++) {
+      const prevGames = gameMap[dates[i-1]];
+      const currGames = gameMap[dates[i]];
+      prevGames.forEach(prevGame => {
+        currGames.forEach(currGame => {
+          if (prevGame.HomeTeam === currGame.HomeTeam || 
+              prevGame.HomeTeam === currGame.AwayTeam ||
+              prevGame.AwayTeam === currGame.HomeTeam ||
+              prevGame.AwayTeam === currGame.AwayTeam) {
+            const team = prevGame.HomeTeam === currGame.HomeTeam || prevGame.HomeTeam === currGame.AwayTeam 
+              ? prevGame.HomeTeam : prevGame.AwayTeam;
+            backToBackTeams[team] = (backToBackTeams[team] || 0) + 1;
+          }
+        });
+      });
+    }
+    
+    const backToBackSummary = Object.entries(backToBackTeams)
+      .sort((a, b) => b[1] - a[1])
+      .map(([team, count]) => `${team}: ${count}`)
+      .join(', ');
+    
     alert(
-      `Schedule generated successfully! Created ${games.length} games for ${seasonWeeks} weeks. (${isTestMode ? 'TEST MODE' : 'Live Mode'})`
+      `Schedule generated successfully! Created ${games.length} games for ${seasonWeeks} weeks. (${isTestMode ? 'TEST MODE' : 'Live Mode'})\n\n` +
+      `Back-to-back games summary (teams playing consecutive days):\n${backToBackSummary || 'None!'}`
     );
   } catch (error) {
     console.error('Error generating games:', error);
     alert('Error generating schedule: ' + error.message);
   }
 };
-  // ========== END FIXED ==========
 
   const getManagerName = (team) => {
     if (team.manager) {
@@ -1246,62 +1348,9 @@ const GameScheduler = () => {
           </div>
         </div>
 
-        {/* Division Schedule Summary */}
-        <div className="mb-6 p-4 bg-gray-50 rounded-lg">
-          <h3 className="text-lg font-medium text-gray-900 mb-3 flex items-center">
-            <CalendarRange className="h-5 w-5 mr-2 text-green-600" />
-            Division Schedule Summary
-          </h3>
-          <div className="space-y-4">
-            {Object.entries(divisionScheduleSummary)
-              .sort(([aName], [bName]) => {
-                const order = [
-                  'T-Ball Division',
-                  'Baseball - Coach Pitch Division',
-                  'Baseball - Rookies Division',
-                  'Baseball - Minors Division',
-                  'Baseball - Majors Division',
-                  'Softball - Rookies Division (Coach Pitch)',
-                  'Softball - Minors Division',
-                  'Softball - Majors Division',
-                  'Challenger Division'
-                ];
-                return order.indexOf(aName) - order.indexOf(bName);
-              })
-              .map(([divisionName, days]) => (
-                <div key={divisionName} className="bg-white rounded-lg p-4 border border-gray-200">
-                  <h4 className="font-semibold text-gray-800 mb-2">{divisionName}</h4>
-                  <div className="space-y-2">
-                    {Object.entries(days)
-                      .sort(([aDay], [bDay]) => daysOfWeek.indexOf(aDay) - daysOfWeek.indexOf(bDay))
-                      .map(([day, times]) => (
-                        <div key={day} className="flex items-start">
-                          <span className="w-24 text-sm font-medium text-gray-600">{day.substring(0,3)} |</span>
-                          <div className="flex-1 flex flex-wrap gap-2">
-                            {Object.entries(times)
-                              .sort(([aTime], [bTime]) => aTime.localeCompare(bTime))
-                              .map(([time, fields]) => (
-                                <div key={time} className="flex items-center flex-wrap">
-                                  <span className="text-sm font-medium text-gray-700 mr-1">
-                                    {time.substring(0,5)}
-                                  </span>
-                                  <span className="text-sm text-gray-500 mr-2">
-                                    ({fields.join(', ')})|
-                                  </span>
-                                </div>
-                              ))}
-                          </div>
-                        </div>
-                      ))}
-                  </div>
-                </div>
-              ))}
-          </div>
-        </div>
-
-        {/* Field Management */}
+{/* Field Management */}
         <div className="mb-4">
-          <h3 className="text-lg font-medium text-gray-900 mb-2">Fields</h3>
+          <h3 className="text-lg font-medium text-gray-900 mb-2">Division Assignments</h3>
           <div className="flex flex-wrap gap-2">
             {getUniqueFields().map(field => (
               <div key={field} className="flex items-center bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm">
@@ -1387,6 +1436,61 @@ const GameScheduler = () => {
           </table>
         </div>
       </div>
+
+        {/* Division Schedule Summary */}
+        <div className="mb-6 p-4 bg-gray-50 rounded-lg">
+          <h3 className="text-lg font-medium text-gray-900 mb-3 flex items-center">
+            <CalendarRange className="h-5 w-5 mr-2 text-green-600" />
+            Division Schedule Summary
+          </h3>
+          <div className="space-y-4">
+            {Object.entries(divisionScheduleSummary)
+              .sort(([aName], [bName]) => {
+                const order = [
+                  'T-Ball Division',
+                  'Baseball - Coach Pitch Division',
+                  'Baseball - Rookies Division',
+                  'Baseball - Minors Division',
+                  'Baseball - Majors Division',
+                  'Softball - Rookies Division (Coach Pitch)',
+                  'Softball - Minors Division',
+                  'Softball - Majors Division',
+                  'Challenger Division'
+                ];
+                return order.indexOf(aName) - order.indexOf(bName);
+              })
+              .map(([divisionName, days]) => (
+                <div key={divisionName} className="bg-white rounded-lg p-4 border border-gray-200">
+                  <h4 className="font-semibold text-gray-800 mb-2">{divisionName}</h4>
+                  <div className="space-y-2">
+                    {Object.entries(days)
+                      .sort(([aDay], [bDay]) => daysOfWeek.indexOf(aDay) - daysOfWeek.indexOf(bDay))
+                      .map(([day, times]) => (
+                        <div key={day} className="flex items-start">
+                          <span className="w-24 text-sm font-medium text-gray-600">{day.substring(0,3)} |</span>
+                          <div className="flex-1 flex flex-wrap gap-2">
+                            {Object.entries(times)
+                              .sort(([aTime], [bTime]) => aTime.localeCompare(bTime))
+                              .map(([time, fields]) => (
+                                <div key={time} className="flex items-center flex-wrap">
+                                  <span className="text-sm font-medium text-gray-700 mr-1">
+                                    {time.substring(0,5)}
+                                  </span>
+                                  <span className="text-sm text-gray-500 mr-2">
+                                    ({fields.join(', ')})|
+                                  </span>
+                                </div>
+                              ))}
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              ))}
+          </div>
+        </div>
+
+        
 
       {/* Add Time Modal */}
       <Modal isOpen={showAddTimeModal} onClose={() => setShowAddTimeModal(false)} title="Add New Time Slot" footer={AddTimeModalFooter}>

@@ -102,7 +102,7 @@ router.get('/', async (req, res) => {
   }
 });
 
-/**router.put('/:id', async (req, res) => {
+/**
  * POST /api/volunteers
  * Create a new volunteer record.
  */
@@ -134,7 +134,6 @@ router.post('/', async (req, res) => {
 /**
  * PUT /api/volunteers/:id
  * Update an existing volunteer.
- * REVERTED: No longer updates families table
  */
 router.put('/:id', async (req, res) => {
   try {
@@ -215,7 +214,6 @@ router.delete('/:id', async (req, res) => {
  *   - division name
  *   - team name (optional / "Unallocated")
  */
-
 router.post('/import', async (req, res) => {
   try {
     const { volunteers: volunteersData, season_id } = req.body;
@@ -223,13 +221,11 @@ router.post('/import', async (req, res) => {
     console.log('=== VOLUNTEER IMPORT START ===');
     console.log('Season ID:', season_id);
     console.log('Raw volunteers data length:', volunteersData?.length);
-	// === ADD THIS NEW DEBUG CODE HERE ===
     console.log('=== FIRST 3 ROWS RAW DATA ===');
     for (let i = 0; i < Math.min(3, volunteersData?.length || 0); i++) {
       console.log(`Row ${i}:`, JSON.stringify(volunteersData[i], null, 2));
     }
     console.log('=== END RAW DATA ===');
-    // === END OF NEW DEBUG CODE ===
 
     if (!volunteersData || !Array.isArray(volunteersData)) {
       return res.status(400).json({ error: 'Invalid volunteers data' });
@@ -244,45 +240,45 @@ router.post('/import', async (req, res) => {
 
     // Cache family matches so we don't query Supabase repeatedly for the same email/phone
     const familyMatchCache = new Map();
-    // Replace the getCachedFamilyId function
-const getCachedFamilyId = async ({ email, phone }, seasonId) => {
-  const e = String(email || '').trim().toLowerCase();
-  const p = normalizePhone(phone);
-  
-  // Create multiple cache keys to handle variations
-  const baseEmail = e.split('@')[0]?.replace(/\./g, ''); // Remove dots from local part
-  const cacheKeys = [];
-  
-  // Full match keys
-  if (e && p) cacheKeys.push(`${e}|${p}|${seasonId}`);
-  if (e) cacheKeys.push(`${e}||${seasonId}`); // Email only
-  if (p) cacheKeys.push(`|${p}|${seasonId}`); // Phone only
-  
-  // Try base email (without dots)
-  if (baseEmail && p) cacheKeys.push(`${baseEmail}@${e.split('@')[1]}|${p}|${seasonId}`);
-  
-  console.log(`\n🔑 [CACHE] Looking up with keys:`, cacheKeys);
-  
-  // Check all cache keys
-  for (const key of cacheKeys) {
-    if (familyMatchCache.has(key)) {
-      const cached = familyMatchCache.get(key);
-      console.log(`🔑 [CACHE HIT] Key: "${key}" -> ${cached}`);
-      return cached;
-    }
-  }
-  
-  console.log(`🔑 [CACHE MISS] No cache hits, calling findMatchingFamilyId`);
-  const fid = await findMatchingFamilyId({ email: e, phone: p }, seasonId);
-  
-  // Cache under all keys
-  cacheKeys.forEach(key => {
-    familyMatchCache.set(key, fid);
-    console.log(`🔑 [CACHE SET] Key: "${key}" -> ${fid}`);
-  });
-  
-  return fid;
-};
+    
+    const getCachedFamilyId = async ({ email, phone }, seasonId) => {
+      const e = String(email || '').trim().toLowerCase();
+      const p = normalizePhone(phone);
+      
+      // Create multiple cache keys to handle variations
+      const baseEmail = e.split('@')[0]?.replace(/\./g, ''); // Remove dots from local part
+      const cacheKeys = [];
+      
+      // Full match keys
+      if (e && p) cacheKeys.push(`${e}|${p}|${seasonId}`);
+      if (e) cacheKeys.push(`${e}||${seasonId}`); // Email only
+      if (p) cacheKeys.push(`|${p}|${seasonId}`); // Phone only
+      
+      // Try base email (without dots)
+      if (baseEmail && p) cacheKeys.push(`${baseEmail}@${e.split('@')[1]}|${p}|${seasonId}`);
+      
+      console.log(`\n🔑 [CACHE] Looking up with keys:`, cacheKeys);
+      
+      // Check all cache keys
+      for (const key of cacheKeys) {
+        if (familyMatchCache.has(key)) {
+          const cached = familyMatchCache.get(key);
+          console.log(`🔑 [CACHE HIT] Key: "${key}" -> ${cached}`);
+          return cached;
+        }
+      }
+      
+      console.log(`🔑 [CACHE MISS] No cache hits, calling findMatchingFamilyId`);
+      const fid = await findMatchingFamilyId({ email: e, phone: p }, seasonId);
+      
+      // Cache under all keys
+      cacheKeys.forEach(key => {
+        familyMatchCache.set(key, fid);
+        console.log(`🔑 [CACHE SET] Key: "${key}" -> ${fid}`);
+      });
+      
+      return fid;
+    };
 
     // Load existing volunteers for this season for matching
     console.log('Loading existing volunteers for season:', season_id);
@@ -305,29 +301,22 @@ const getCachedFamilyId = async ({ email, phone }, seasonId) => {
       const { data: divisions, error: divisionsError } = await supabase
         .from('divisions')
         .select('id, name')
-  .eq('season_id', season_id);  // <-- ADD THIS FILTER!
+        .eq('season_id', season_id);
 
-// Create division map
-if (divisions && divisions.length > 0) {
-  divisions.forEach((division) => {
-    divisionMap.set(division.name, division.id);
-  });
-  console.log(`Division map created with ${divisionMap.size} divisions for season ${season_id}`);
-} else {
-  console.warn(`No divisions found for season ${season_id}`);
-  errors.push(`No divisions configured for season ${season_id}. Please create divisions first.`);
-}
+      // Create division map
+      if (divisions && divisions.length > 0) {
+        divisions.forEach((division) => {
+          divisionMap.set(division.name, division.id);
+        });
+        console.log(`Division map created with ${divisionMap.size} divisions for season ${season_id}`);
+      } else {
+        console.warn(`No divisions found for season ${season_id}`);
+        errors.push(`No divisions configured for season ${season_id}. Please create divisions first.`);
+      }
 
       if (divisionsError) {
         console.error('Error loading divisions:', divisionsError);
         errors.push('Failed to load divisions from database');
-      } else if (divisions && divisions.length > 0) {
-        divisions.forEach((division) => {
-          divisionMap.set(division.name, division.id);
-        });
-        console.log('Division map created with', divisionMap.size, 'divisions');
-      } else {
-        console.warn('No divisions found in database');
       }
 
       console.log('Loading teams for mapping...');
@@ -349,9 +338,9 @@ if (divisions && divisions.length > 0) {
       errors.push('Failed to load divisions/teams from database');
     }
 
-      console.log('Processing CSV rows...');
+    console.log('Processing CSV rows...');
 
-    // Process in batches of 50 to avoid timeouts
+    // Process in batches of 100 to avoid timeouts
     const BATCH_SIZE = 100;
     const totalRows = volunteersData.length;
     let processedCount = 0;
@@ -379,20 +368,20 @@ if (divisions && divisions.length > 0) {
             continue;
           }
 
-// Helper function to clean string values (remove quotes, trim spaces)
-const cleanString = (value) => {
-  if (!value) return '';
-  // Convert to string, remove leading/trailing quotes, then trim
-  return String(value)
-    .replace(/^["']+|["']+$/g, '') // Remove quotes at start or end
-    .trim();
-};
+          // Helper function to clean string values (remove quotes, trim spaces)
+          const cleanString = (value) => {
+            if (!value) return '';
+            // Convert to string, remove leading/trailing quotes, then trim
+            return String(value)
+              .replace(/^["']+|["']+$/g, '') // Remove quotes at start or end
+              .trim();
+          };
 
-// Find division ID - CLEAN the division name first!
-const rawDivisionName = volunteerData['division name'] || '';
-const divisionName = cleanString(rawDivisionName);
-console.log(`Raw division name: "${rawDivisionName}"`);
-console.log(`Cleaned division name: "${divisionName}"`);
+          // Find division ID - CLEAN the division name first!
+          const rawDivisionName = volunteerData['division name'] || '';
+          const divisionName = cleanString(rawDivisionName);
+          console.log(`Raw division name: "${rawDivisionName}"`);
+          console.log(`Cleaned division name: "${divisionName}"`);
           let divisionId = null;
 
           if (divisionMap.size > 0) {
@@ -441,7 +430,6 @@ console.log(`Cleaned division name: "${divisionName}"`);
             }
           }
 
-          // === NEW R1 BEHAVIOR HERE ===
           const rawInterestedRoles = volunteerData['volunteer role'] || null;
 
           // FIRST: Check if this volunteer already exists
@@ -458,11 +446,18 @@ console.log(`Cleaned division name: "${divisionName}"`);
 
           // DECIDE family_id: Keep existing if we have it, otherwise try to find match
           let finalFamilyId = null;
+          
+          console.log(`\n🔍 [FAMILY LINKING DEBUG] for volunteer: ${volunteerData['volunteer first name']} ${volunteerData['volunteer last name']}`);
+          console.log(`   Email: ${volunteerData['volunteer email address']}`);
+          console.log(`   Phone: ${volunteerData['volunteer cellphone']}`);
+          
           if (matchedVolunteer && matchedVolunteer.family_id) {
             // Volunteer already exists with a family_id - KEEP IT
             finalFamilyId = matchedVolunteer.family_id;
+            console.log(`   ✅ Using existing family_id from matched volunteer: ${finalFamilyId}`);
           } else {
-            // No existing volunteer or no family_id - try to find match
+            // No existing family_id - try to find match
+            console.log(`   🔍 No family_id in existing volunteer, attempting to find family match...`);
             finalFamilyId = await getCachedFamilyId(
               { 
                 email: volunteerData['volunteer email address'], 
@@ -470,7 +465,10 @@ console.log(`Cleaned division name: "${divisionName}"`);
               },
               season_id
             );
+            console.log(`   📌 Family match result: ${finalFamilyId || 'NO MATCH FOUND'}`);
           }
+          
+          console.log(`   🏁 Final family_id for volunteer: ${finalFamilyId || 'none'}`);
 
           // NOW create the volunteerRecord with the determined family_id
           const volunteerRecord = {
@@ -552,15 +550,15 @@ console.log(`Cleaned division name: "${divisionName}"`);
           }
           
         } catch (rowError) {
-      console.error(`Error processing row ${index + 1}:`, rowError);
-      errors.push(`Row ${index + 1}: ${rowError.message}`);
+          console.error(`Error processing row ${index + 1}:`, rowError);
+          errors.push(`Row ${index + 1}: ${rowError.message}`);
         }
       }
       
       // Add a small delay between batches to let the server breathe
       if (batchEnd < totalRows) {
         console.log(`Batch complete. Waiting a moment before next batch...`);
-        await new Promise(resolve => setTimeout(resolve, 10)); // 100ms delay
+        await new Promise(resolve => setTimeout(resolve, 10));
       }
     }
 
@@ -729,31 +727,29 @@ async function updateExistingVolunteer(existingVolunteer, newVolunteerData) {
   console.log(`   Existing family_id: ${existingVolunteer.family_id}`);
   console.log(`   New family_id: ${newVolunteerData.family_id}`);
   
+  // Division ID
   if (newVolunteerData.division_id !== undefined && 
       newVolunteerData.division_id !== existingVolunteer.division_id) {
     updates.division_id = newVolunteerData.division_id;
     hasChanges = true;
     console.log(`   ✅ Division ID needs update: ${existingVolunteer.division_id} -> ${newVolunteerData.division_id}`);
   }
- // ==== CRITICAL FIX: Never clear an existing family_id ====
-  // If we have existing family_id and import doesn't provide a new one, keep existing
-  if (existingVolunteer.family_id && (!newVolunteerData.family_id || newVolunteerData.family_id === null)) {
-    console.log(`   🛡️  Preserving existing family_id: ${existingVolunteer.family_id}`);
-    // Remove family_id from newVolunteerData so it won't be updated
-    delete newVolunteerData.family_id;
-  }
-  // ==== END FIX ====
 
-
-  // Check family_id FIRST - this is critical!
-  if (
-    newVolunteerData.family_id !== undefined &&
-    newVolunteerData.family_id !== existingVolunteer.family_id
-  ) {
-    updates.family_id = newVolunteerData.family_id;
-    hasChanges = true;
-    console.log(`   ✅ Family ID needs update: ${existingVolunteer.family_id} -> ${newVolunteerData.family_id}`);
-	console.log(`   ✅ Division ID needs update: ${existingVolunteer.division_id} -> ${newVolunteerData.division_id}`);
+  // Family ID - ONLY update if we have a VALID family_id from matching
+  // The CSV doesn't have a family_id column, so we should only update if we found a match
+  if (newVolunteerData.family_id !== undefined && 
+      newVolunteerData.family_id !== null && 
+      newVolunteerData.family_id !== '') {
+    // We have a valid family_id from matching - update it
+    if (newVolunteerData.family_id !== existingVolunteer.family_id) {
+      updates.family_id = newVolunteerData.family_id;
+      hasChanges = true;
+      console.log(`   ✅ Family ID needs update: ${existingVolunteer.family_id} -> ${newVolunteerData.family_id}`);
+    }
+  } else if (existingVolunteer.family_id) {
+    // No family_id from import (no match found), but volunteer already has one - PRESERVE it
+    console.log(`   🛡️ Preserving existing family_id: ${existingVolunteer.family_id} (no match found in import)`);
+    // Do NOT add family_id to updates - keep existing
   }
 
   // Email
@@ -773,14 +769,17 @@ async function updateExistingVolunteer(existingVolunteer, newVolunteerData) {
     console.log(`   ✅ Phone needs update`);
   }
 
-  // Team
-  if (
-    newVolunteerData.team_id !== undefined &&
-    newVolunteerData.team_id !== existingVolunteer.team_id
-  ) {
-    updates.team_id = newVolunteerData.team_id;
-    hasChanges = true;
-    console.log(`   ✅ Team ID needs update`);
+  // Team - Only update if a valid team_id is provided
+  if (newVolunteerData.team_id !== undefined && newVolunteerData.team_id !== null && newVolunteerData.team_id !== '') {
+    if (newVolunteerData.team_id !== existingVolunteer.team_id) {
+      updates.team_id = newVolunteerData.team_id;
+      hasChanges = true;
+      console.log(`   ✅ Team ID needs update: ${existingVolunteer.team_id} -> ${newVolunteerData.team_id}`);
+    }
+  } else if (existingVolunteer.team_id) {
+    // No team in CSV but volunteer already has a team - PRESERVE it
+    console.log(`   ⏭️ No team in CSV, preserving existing team: ${existingVolunteer.team_id}`);
+    // Do NOT add team_id to updates
   }
 
   // Notes
@@ -872,14 +871,8 @@ async function updateExistingVolunteer(existingVolunteer, newVolunteerData) {
   return updatedVolunteer;
 }
 
-// Normalize phone numbers for matching (digits only)
-function normalizePhone(phone) {
-  return String(phone || '').replace(/\D/g, '');
-}
-
 // Try to find a matching family by email/phone.
 // Returns family UUID (families.id) or null.
-// Replace the ENTIRE findMatchingFamilyId function (around line ~350)
 async function findMatchingFamilyId({ email, phone }, seasonId) {
   console.log(`\n🔍 [FIND FAMILY DEBUG START] =================================`);
   console.log(`   Email: "${email}"`);
@@ -894,22 +887,20 @@ async function findMatchingFamilyId({ email, phone }, seasonId) {
 
   let candidateFamilies = [];
 
-  // 1. Find families by EMAIL - FIXED SYNTAX
+  // 1. Find families by EMAIL
   if (emailNorm) {
     console.log(`\n   📧 Searching families by email...`);
     
-    // Try multiple query approaches
-    console.log(`   Trying query 1: .or() with ilike`);
     const { data: famByEmail, error: emailError } = await supabase
       .from('families')
       .select('id, primary_contact_email, parent2_email')
       .or(`primary_contact_email.ilike.${emailNorm},parent2_email.ilike.${emailNorm}`);
 
     if (emailError) {
-      console.error(`   ❌ Query 1 error:`, emailError.message);
+      console.error(`   ❌ Email search error:`, emailError.message);
       
       // Fallback: Try separate queries
-      console.log(`   Trying query 2: Separate ilike queries`);
+      console.log(`   Trying fallback: Separate ilike queries`);
       const { data: fam1 } = await supabase
         .from('families')
         .select('id, primary_contact_email')
@@ -962,7 +953,7 @@ async function findMatchingFamilyId({ email, phone }, seasonId) {
 
   console.log(`\n   📊 Total candidate families: ${candidateFamilies.length}`);
 
-  // 3. Return FIRST matching family (we'll deal with season/division later)
+  // 3. Return FIRST matching family
   if (candidateFamilies.length > 0) {
     const familyId = candidateFamilies[0].id;
     console.log(`   🎉 RETURNING FAMILY ID: ${familyId}`);

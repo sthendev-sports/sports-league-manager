@@ -846,6 +846,7 @@ const filteredVolunteers = volunteers.filter(volunteer => {
           <option value="Coach">Coach</option>
           <option value="Assistant Coach">Assistant Coach</option>
           <option value="Team Parent">Team Parent</option>
+		  <option value="Parent">Parent</option>
         </select>
       </div>
 
@@ -1543,6 +1544,7 @@ const exportVolunteersToCSV = () => {
         <option value="Manager">Manager</option>
         <option value="Assistant Coach">Assistant Coach</option>
         <option value="Team Parent">Team Parent</option>
+		<option value="Parent">Parent</option>
       </select>
     </div>
     

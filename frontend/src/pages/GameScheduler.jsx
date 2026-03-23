@@ -757,7 +757,7 @@ const GameScheduler = () => {
     );
   };
 
-  // ========== FIXED: Generate games with fair back-to-back distribution ==========
+  // ========== FIXED: No same-day double games with proper day tracking ==========
   const generateGames = () => {
   if (!seasonStartDate) {
     alert('Please set the season start date');
@@ -777,266 +777,356 @@ const GameScheduler = () => {
   try {
     const teamsByDivision = getTeamsByDivision();
     const games = [];
+    const unscheduledSlots = [];
     let sortOrder = 1;
 
     const startDate = new Date(seasonStartDate);
 
-    // Process each division
+    const getFirstOccurrenceForDay = (day) => {
+      const dayOffset = daysOfWeek.indexOf(day);
+      const startDayOfWeek = startDate.getDay(); // 0=Sun
+      const startDayMapped = startDayOfWeek === 0 ? 6 : startDayOfWeek - 1; // Mon=0...Sun=6
+
+      let daysToAdd = dayOffset - startDayMapped;
+      if (daysToAdd <= 0) {
+        daysToAdd += 7;
+      }
+
+      const firstDate = new Date(startDate);
+      firstDate.setDate(startDate.getDate() + daysToAdd);
+      return firstDate;
+    };
+
+    const getPairKey = (a, b) => [Math.min(a, b), Math.max(a, b)].join('-');
+
     Object.entries(teamsByDivision).forEach(([divisionName, divisionTeams]) => {
       const teamCount = divisionTeams.length;
+      const divisionSlots = scheduleConfig.filter(slot => slot.division === divisionName);
+
+      if (divisionSlots.length === 0) {
+        console.log(`No slots assigned for ${divisionName}, skipping`);
+        return;
+      }
 
       if (teamCount < 2) {
-        console.log(`Skipping division ${divisionName} - not enough teams`);
+        console.log(`Not enough teams in ${divisionName}, skipping`);
         return;
       }
 
       const template = slotTemplates[teamCount];
-      if (!template) {
-        console.log(`No template found for ${teamCount} teams`);
+      if (!template || template.length === 0) {
+        console.log(`No slot template found for ${teamCount} teams in ${divisionName}, skipping`);
         return;
       }
 
-      const divisionSlots = scheduleConfig.filter(
-        slot => slot.division === divisionName
+      const slotsPerWeek = divisionSlots.length;
+      const totalGamesNeeded = slotsPerWeek * seasonWeeks;
+      const expectedGamesPerTeam = (totalGamesNeeded * 2) / teamCount;
+
+      console.log(`\n${divisionName}:`);
+      console.log(`  Teams: ${teamCount}`);
+      console.log(`  Slots per week: ${slotsPerWeek}`);
+      console.log(`  Total weeks: ${seasonWeeks}`);
+      console.log(`  Expected games per team: ${expectedGamesPerTeam}`);
+      console.log(`  Template games per cycle: ${template.length}`);
+
+      // Group slots by day
+      const slotsByDay = {};
+      divisionSlots.forEach(slot => {
+        if (!slotsByDay[slot.day]) {
+          slotsByDay[slot.day] = [];
+        }
+        slotsByDay[slot.day].push(slot);
+      });
+
+      Object.keys(slotsByDay).forEach(day => {
+        slotsByDay[day].sort((a, b) => a.time.localeCompare(b.time));
+      });
+
+      const divisionDays = Object.keys(slotsByDay).sort(
+        (a, b) => daysOfWeek.indexOf(a) - daysOfWeek.indexOf(b)
       );
 
-      if (divisionSlots.length === 0) {
-        console.log(`No schedule slots configured for division ${divisionName}`);
-        return;
-      }
-
-      console.log(
-        `Processing ${divisionName}: ${teamCount} teams, ${divisionSlots.length} slots, template length: ${template.length}`
-      );
-
-      // Get unique days for this division
-      const divisionDays = [...new Set(divisionSlots.map(slot => slot.day))];
-
-      // Find first occurrence of each day after the season start date
       const firstOccurrences = {};
       divisionDays.forEach(day => {
-        const dayOffset = daysOfWeek.indexOf(day);
+        firstOccurrences[day] = getFirstOccurrenceForDay(day);
+      });
 
-        const startDayOfWeek = startDate.getDay();
-        const startDayMapped = startDayOfWeek === 0 ? 6 : startDayOfWeek - 1;
+      const teams = divisionTeams.map((team, idx) => ({
+        id: idx,
+        name: team.name
+      }));
 
-        let daysToAdd = dayOffset - startDayMapped;
+      // Trackers
+      const seasonGameCounts = new Array(teamCount).fill(0);
+      const weeklyGameCounts = new Array(teamCount).fill(0);
+      const homeCounts = new Array(teamCount).fill(0);
+      const awayCounts = new Array(teamCount).fill(0);
+      const consecutiveHome = new Array(teamCount).fill(0);
+      const consecutiveAway = new Array(teamCount).fill(0);
 
-        if (daysToAdd <= 0) {
-          daysToAdd += 7;
+      const lastOpponent = new Array(teamCount).fill(null);
+
+      // Build template queue once, then keep cycling through it.
+      // Every other cycle, reverse home/away to help balance home/away totals.
+      const buildTemplateCycle = (reverseHomeAway = false) => {
+        return template.map(([homeSeed, awaySeed]) => {
+          const home = homeSeed - 1;
+          const away = awaySeed - 1;
+
+          if (!reverseHomeAway) {
+            return { home, away };
+          }
+
+          return { home: away, away: home };
+        });
+      };
+
+      let cycleNumber = 0;
+      let templateQueue = buildTemplateCycle(false);
+
+      const getNextTemplateCandidates = () => {
+        // Make sure queue always has enough options to look ahead
+        while (templateQueue.length < 20) {
+          cycleNumber++;
+          const reverse = cycleNumber % 2 === 1;
+          templateQueue.push(...buildTemplateCycle(reverse));
         }
+      };
 
-        const firstDate = new Date(startDate);
-        firstDate.setDate(startDate.getDate() + daysToAdd);
-
-        firstOccurrences[day] = firstDate;
-      });
-
-      // Create a shuffled order of matchups to distribute back-to-backs fairly
-      let matchupOrder = [...Array(template.length).keys()];
-      
-      // Create a rotating schedule for which matchup gets used first each week
-      let weekOffset = 0;
-      
-      // Track which teams played on which dates to avoid back-to-back
-      const teamLastPlayedDate = {};
-      divisionTeams.forEach(team => {
-        teamLastPlayedDate[team.name] = null;
-      });
-      
-      // Track which matchups have been used to ensure fair distribution
-      let usedMatchups = [];
-      let matchupCycle = 0;
-
-      // Schedule games for all weeks
       for (let week = 1; week <= seasonWeeks; week++) {
         console.log(`\nWeek ${week} for ${divisionName}`);
-        
-        // For each week, start at a different point in the template to rotate
-        const startIndex = (weekOffset * Math.floor(template.length / Math.min(divisionDays.length, 3))) % template.length;
-        const orderedMatchups = [...matchupOrder.slice(startIndex), ...matchupOrder.slice(0, startIndex)];
-        
-        let matchupPointer = 0;
-        let gamesScheduledThisWeek = 0;
 
-        for (const day of divisionDays) {
+        // Reset weekly game counts each week
+        for (let i = 0; i < teamCount; i++) {
+          weeklyGameCounts[i] = 0;
+        }
+
+        const teamsPlayedByDate = {};
+
+        const weekSlots = [];
+        divisionDays.forEach(day => {
           const firstDate = firstOccurrences[day];
           const gameDate = new Date(firstDate);
           gameDate.setDate(firstDate.getDate() + ((week - 1) * 7));
           const dateStr = formatDateForDisplay(gameDate);
 
-          const daySlots = divisionSlots.filter(slot => slot.day === day);
-          const uniqueTimes = [...new Set(daySlots.map(slot => slot.time))].sort();
+          slotsByDay[day].forEach(slot => {
+            weekSlots.push({
+              ...slot,
+              dateStr
+            });
+          });
+        });
 
-          for (const time of uniqueTimes) {
-            const availableSlots = daySlots.filter(
-              slot =>
-                slot.time === time &&
-                !games.find(
-                  g =>
-                    g.MatchDate === dateStr &&
-                    g.StartTime === time &&
-                    g.Field === slot.field
-                )
-            );
+        weekSlots.sort((a, b) => {
+          if (a.dateStr !== b.dateStr) return a.dateStr.localeCompare(b.dateStr);
+          return a.time.localeCompare(b.time);
+        });
 
-            if (availableSlots.length === 0) continue;
-
-            for (const fieldSlot of availableSlots) {
-              // Find a matchup where neither team played on the previous day
-              let foundValidMatchup = false;
-              let attempts = 0;
-              let matchupToUse = null;
-              let homeTeamNum = null;
-              let awayTeamNum = null;
-              let homeTeam = null;
-              let awayTeam = null;
-              
-              // Check if there's a previous date to compare with
-              const previousDate = new Date(gameDate);
-              previousDate.setDate(gameDate.getDate() - 1);
-              const previousDateStr = formatDateForDisplay(previousDate);
-              
-              // Get teams that played on the previous date
-              const teamsPlayedPrevDay = new Set();
-              games.forEach(game => {
-                if (game.MatchDate === previousDateStr && game.Division === divisionName) {
-                  teamsPlayedPrevDay.add(game.HomeTeam);
-                  teamsPlayedPrevDay.add(game.AwayTeam);
-                }
-              });
-              
-              // Try to find a matchup where neither team played yesterday
-              while (!foundValidMatchup && attempts < template.length * 2) {
-                const templateIndex = orderedMatchups[matchupPointer % orderedMatchups.length];
-                const cycleNumber = Math.floor((matchupCycle + attempts) / template.length);
-                const match = template[templateIndex];
-                
-                let tempHomeNum, tempAwayNum;
-                if (cycleNumber % 2 === 0) {
-                  [tempHomeNum, tempAwayNum] = match;
-                } else {
-                  [tempAwayNum, tempHomeNum] = match;
-                }
-                
-                const tempHome = divisionTeams[tempHomeNum - 1];
-                const tempAway = divisionTeams[tempAwayNum - 1];
-                
-                if (tempHome && tempAway) {
-                  // Check if either team played yesterday
-                  const homePlayedPrev = teamsPlayedPrevDay.has(tempHome.name);
-                  const awayPlayedPrev = teamsPlayedPrevDay.has(tempAway.name);
-                  
-                  if (!homePlayedPrev && !awayPlayedPrev) {
-                    // Perfect - neither team played yesterday
-                    foundValidMatchup = true;
-                    matchupToUse = templateIndex;
-                    homeTeamNum = tempHomeNum;
-                    awayTeamNum = tempAwayNum;
-                    homeTeam = tempHome;
-                    awayTeam = tempAway;
-                  } else if (attempts >= template.length) {
-                    // After trying all matchups, allow back-to-back but track it for fairness
-                    foundValidMatchup = true;
-                    matchupToUse = templateIndex;
-                    homeTeamNum = tempHomeNum;
-                    awayTeamNum = tempAwayNum;
-                    homeTeam = tempHome;
-                    awayTeam = tempAway;
-                    console.log(`Warning: Back-to-back game for ${homeTeam.name} or ${awayTeam.name} on ${dateStr}`);
-                  }
-                }
-                
-                matchupPointer++;
-                attempts++;
-              }
-              
-              if (!foundValidMatchup || !homeTeam || !awayTeam) {
-                // Fallback to sequential order
-                const fallbackIndex = matchupPointer % template.length;
-                const fallbackMatch = template[fallbackIndex];
-                const fallbackCycle = Math.floor(matchupPointer / template.length);
-                if (fallbackCycle % 2 === 0) {
-                  [homeTeamNum, awayTeamNum] = fallbackMatch;
-                } else {
-                  [awayTeamNum, homeTeamNum] = fallbackMatch;
-                }
-                homeTeam = divisionTeams[homeTeamNum - 1];
-                awayTeam = divisionTeams[awayTeamNum - 1];
-                if (!homeTeam || !awayTeam) {
-                  matchupPointer++;
-                  continue;
-                }
-              }
-
-              const endTime = calculateEndTime(time);
-
-              games.push({
-                SortOrder: sortOrder++,
-                RoundNo: week,
-                HomeTeam: `${homeTeam.name}`,
-                AwayTeam: `${awayTeam.name}`,
-                MatchDate: dateStr,
-                StartTime: time,
-                EndTime: endTime,
-                Location: 'Sayreville Little League',
-                Field: fieldSlot.field,
-                Division: divisionName
-              });
-
-              console.log(
-                `Scheduled: ${homeTeam.name} vs ${awayTeam.name} on ${dateStr} at ${time}`
-              );
-              
-              matchupCycle++;
-              gamesScheduledThisWeek++;
-            }
+        for (const slot of weekSlots) {
+          if (!teamsPlayedByDate[slot.dateStr]) {
+            teamsPlayedByDate[slot.dateStr] = new Set();
           }
+
+          const playedToday = teamsPlayedByDate[slot.dateStr];
+
+          getNextTemplateCandidates();
+
+          let selectedMatchup = null;
+          let selectedIndex = -1;
+
+          // Look ahead a limited amount so we mostly preserve template order
+          const LOOKAHEAD = Math.min(12, templateQueue.length);
+
+          const scoredCandidates = [];
+
+          for (let i = 0; i < LOOKAHEAD; i++) {
+            const matchup = templateQueue[i];
+            const { home, away } = matchup;
+
+            // Cannot play twice on same day
+            if (playedToday.has(home) || playedToday.has(away)) {
+              continue;
+            }
+
+            const pairKey = getPairKey(home, away);
+
+            let score = 0;
+
+            // Prefer template order: earlier items are better
+            score += i * 100;
+
+            // Prefer teams with fewer weekly games
+            score += (weeklyGameCounts[home] + weeklyGameCounts[away]) * 1000;
+
+            // Prefer teams with fewer season games
+            score += (seasonGameCounts[home] + seasonGameCounts[away]) * 100;
+
+            // Avoid 3rd straight home or away if possible
+            const nextHomeStreak = consecutiveHome[home] + 1;
+            const nextAwayStreak = consecutiveAway[away] + 1;
+
+            if (nextHomeStreak >= 3) score += 5000;
+            if (nextAwayStreak >= 3) score += 5000;
+            if (nextHomeStreak >= 4) score += 20000;
+            if (nextAwayStreak >= 4) score += 20000;
+
+            // Balance total home/away counts
+            score += Math.abs((homeCounts[home] + 1) - awayCounts[home]) * 40;
+            score += Math.abs(homeCounts[away] - (awayCounts[away] + 1)) * 40;
+
+            // Strongly avoid immediate rematch from each team's previous game
+            if (lastOpponent[home] === away || lastOpponent[away] === home) {
+              score += 12000;
+            }
+
+            scoredCandidates.push({
+              matchup,
+              index: i,
+              score
+            });
+          }
+
+          if (scoredCandidates.length > 0) {
+            scoredCandidates.sort((a, b) => a.score - b.score);
+            selectedMatchup = scoredCandidates[0].matchup;
+            selectedIndex = scoredCandidates[0].index;
+          }
+
+          if (!selectedMatchup) {
+            unscheduledSlots.push(
+              `${divisionName} - Week ${week} - ${slot.dateStr} ${slot.time} ${slot.field} (no legal template matchup available)`
+            );
+            continue;
+          }
+
+          // Remove selected matchup from queue
+          templateQueue.splice(selectedIndex, 1);
+
+          const homeTeam = teams[selectedMatchup.home];
+          const awayTeam = teams[selectedMatchup.away];
+          const endTime = calculateEndTime(slot.time);
+
+          games.push({
+            SortOrder: sortOrder++,
+            RoundNo: week,
+            HomeTeam: homeTeam.name,
+            AwayTeam: awayTeam.name,
+            MatchDate: slot.dateStr,
+            StartTime: slot.time,
+            EndTime: endTime,
+            Location: 'Sayreville Little League',
+            Field: slot.field,
+            Division: divisionName
+          });
+
+          // Update trackers
+          playedToday.add(selectedMatchup.home);
+          playedToday.add(selectedMatchup.away);
+
+          weeklyGameCounts[selectedMatchup.home]++;
+          weeklyGameCounts[selectedMatchup.away]++;
+
+          seasonGameCounts[selectedMatchup.home]++;
+          seasonGameCounts[selectedMatchup.away]++;
+
+          homeCounts[selectedMatchup.home]++;
+          awayCounts[selectedMatchup.away]++;
+
+          consecutiveHome[selectedMatchup.home]++;
+          consecutiveAway[selectedMatchup.home] = 0;
+
+          consecutiveAway[selectedMatchup.away]++;
+          consecutiveHome[selectedMatchup.away] = 0;
+
+          lastOpponent[selectedMatchup.home] = selectedMatchup.away;
+          lastOpponent[selectedMatchup.away] = selectedMatchup.home;
         }
-        
-        weekOffset++;
-        console.log(`Week ${week} completed: ${gamesScheduledThisWeek} games scheduled`);
+
+        console.log(`  Weekly game counts:`);
+        teams.forEach((team, idx) => {
+          console.log(
+            `    ${team.name}: ${weeklyGameCounts[idx]} games | Home ${homeCounts[idx]} | Away ${awayCounts[idx]}`
+          );
+        });
       }
 
-      console.log(`Completed ${divisionName}`);
+      console.log(`\nFinal game counts for ${divisionName}:`);
+      teams.forEach((team, idx) => {
+        console.log(
+          `  ${team.name}: ${seasonGameCounts[idx]} games | Home ${homeCounts[idx]} | Away ${awayCounts[idx]}`
+        );
+      });
+
+      const minCount = Math.min(...seasonGameCounts);
+      const maxCount = Math.max(...seasonGameCounts);
+
+      console.log(`  Min: ${minCount}, Max: ${maxCount}, Difference: ${maxCount - minCount}`);
+      console.log(`  Expected per team: ${expectedGamesPerTeam}`);
+
+      Object.entries(slotsByDay).forEach(([day, slots]) => {
+        const maxGamesPossibleThatDay = Math.floor(teamCount / 2);
+        if (slots.length > maxGamesPossibleThatDay) {
+          console.warn(
+            `${divisionName}: ${day} has ${slots.length} slot(s), but with ${teamCount} teams you can only schedule ${maxGamesPossibleThatDay} game(s) that day without a same-day doubleheader.`
+          );
+        }
+      });
     });
 
     setGeneratedGames(games);
-    
-    // Check and report any back-to-back issues
-    const backToBackTeams = {};
-    const gameMap = {};
+
+    const finalGameCounts = {};
     games.forEach(game => {
-      if (!gameMap[game.MatchDate]) gameMap[game.MatchDate] = [];
+      finalGameCounts[game.HomeTeam] = (finalGameCounts[game.HomeTeam] || 0) + 1;
+      finalGameCounts[game.AwayTeam] = (finalGameCounts[game.AwayTeam] || 0) + 1;
+    });
+
+    const countsList = Object.entries(finalGameCounts)
+      .sort((a, b) => b[1] - a[1])
+      .map(([team, count]) => `${team}: ${count} games`)
+      .join('\n');
+
+    const counts = Object.values(finalGameCounts);
+    const minGames = counts.length ? Math.min(...counts) : 0;
+    const maxGames = counts.length ? Math.max(...counts) : 0;
+    const difference = maxGames - minGames;
+
+    const sameDayIssues = [];
+    const gameMap = {};
+
+    games.forEach(game => {
+      if (!gameMap[game.MatchDate]) {
+        gameMap[game.MatchDate] = [];
+      }
       gameMap[game.MatchDate].push(game);
     });
-    
-    const dates = Object.keys(gameMap).sort();
-    for (let i = 1; i < dates.length; i++) {
-      const prevGames = gameMap[dates[i-1]];
-      const currGames = gameMap[dates[i]];
-      prevGames.forEach(prevGame => {
-        currGames.forEach(currGame => {
-          if (prevGame.HomeTeam === currGame.HomeTeam || 
-              prevGame.HomeTeam === currGame.AwayTeam ||
-              prevGame.AwayTeam === currGame.HomeTeam ||
-              prevGame.AwayTeam === currGame.AwayTeam) {
-            const team = prevGame.HomeTeam === currGame.HomeTeam || prevGame.HomeTeam === currGame.AwayTeam 
-              ? prevGame.HomeTeam : prevGame.AwayTeam;
-            backToBackTeams[team] = (backToBackTeams[team] || 0) + 1;
-          }
-        });
+
+    Object.entries(gameMap).forEach(([date, dayGames]) => {
+      const teamCounts = {};
+      dayGames.forEach(game => {
+        teamCounts[game.HomeTeam] = (teamCounts[game.HomeTeam] || 0) + 1;
+        teamCounts[game.AwayTeam] = (teamCounts[game.AwayTeam] || 0) + 1;
       });
-    }
-    
-    const backToBackSummary = Object.entries(backToBackTeams)
-      .sort((a, b) => b[1] - a[1])
-      .map(([team, count]) => `${team}: ${count}`)
-      .join(', ');
-    
+
+      Object.entries(teamCounts).forEach(([team, count]) => {
+        if (count > 1) {
+          sameDayIssues.push(`${team} played ${count} times on ${date}`);
+        }
+      });
+    });
+
+    const unscheduledMessage =
+      unscheduledSlots.length > 0
+        ? `\n\n⚠️ ${unscheduledSlots.length} slot(s) could not be scheduled.\n\nExamples:\n${unscheduledSlots.slice(0, 10).join('\n')}${unscheduledSlots.length > 10 ? '\n...' : ''}`
+        : '';
+
     alert(
-      `Schedule generated successfully! Created ${games.length} games for ${seasonWeeks} weeks. (${isTestMode ? 'TEST MODE' : 'Live Mode'})\n\n` +
-      `Back-to-back games summary (teams playing consecutive days):\n${backToBackSummary || 'None!'}`
+      `Schedule generated successfully! Created ${games.length} games for ${seasonWeeks} weeks.\n\n` +
+      `Game Count Summary:\n${countsList}\n\n` +
+      `Min: ${minGames} games | Max: ${maxGames} games | Difference: ${difference} games\n\n` +
+      `${sameDayIssues.length > 0 ? '⚠️ Same-day double games detected:\n' + sameDayIssues.join('\n') : '✓ No same-day double games!'}${unscheduledMessage}`
     );
   } catch (error) {
     console.error('Error generating games:', error);

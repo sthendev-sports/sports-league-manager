@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
-import { Copy, Download, Filter } from 'lucide-react';
+import { Copy, Download, Filter, Mail, ClipboardList } from 'lucide-react';
 import api from '../services/api'; 
 
 const VOLUNTEER_ROLE_OPTIONS = [
@@ -38,10 +38,11 @@ function downloadCsv(filename, rows) {
   URL.revokeObjectURL(url);
 }
 
-// Updated tab order
+// Updated tab order with new tab
 const Tabs = {
   GUARDIANS: 'Guardians',
   WORKBOND_INCOMPLETE: 'Workbond Incomplete',
+  INCOMPLETE_BY_TEAM: 'Missing Workbond Check by Team',
   ASSIGNED_VOLUNTEERS: 'Assigned Volunteers',
   UNASSIGNED_VOLUNTEERS: 'Unassigned Volunteers',
 };
@@ -51,6 +52,7 @@ export default function MailingList() {
 
   const [seasons, setSeasons] = useState([]);
   const [divisions, setDivisions] = useState([]);
+  const [teams, setTeams] = useState([]);
 
   const divisionNameById = useMemo(() => {
     const m = new Map();
@@ -63,6 +65,7 @@ export default function MailingList() {
 
   const [selectedSeasonId, setSelectedSeasonId] = useState(null);
   const [selectedDivisionId, setSelectedDivisionId] = useState('all');
+  const [selectedTeamId, setSelectedTeamId] = useState('all');
   const [selectedVolunteerRole, setSelectedVolunteerRole] = useState('All Roles');
   const [selectedWorkbondCheck, setSelectedWorkbondCheck] = useState('All');
 
@@ -76,31 +79,52 @@ export default function MailingList() {
   const [boardMembers, setBoardMembers] = useState([]);
   
   // Load board members
-const loadBoardMembers = async () => {
-  try {
-    const token = localStorage.getItem('slm_token');
-    const response = await fetch('/api/board-members', {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
+  const loadBoardMembers = async () => {
+    try {
+      const token = localStorage.getItem('slm_token');
+      const response = await fetch('/api/board-members', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        const boardMembersData = Array.isArray(data) ? data : (data.data || []);
+        const activeBoardMembers = boardMembersData.filter(bm => 
+          bm.is_active === true && bm.family_id
+        );
+        setBoardMembers(activeBoardMembers);
+        console.log('Loaded board members:', activeBoardMembers.length);
       }
-    });
-    
-    if (response.ok) {
-      const data = await response.json();
-      // Handle both array and {data: []} response formats
-      const boardMembersData = Array.isArray(data) ? data : (data.data || []);
-      // Filter to active board members with family_ids
-      const activeBoardMembers = boardMembersData.filter(bm => 
-        bm.is_active === true && bm.family_id
-      );
-      setBoardMembers(activeBoardMembers);
-      console.log('Loaded board members:', activeBoardMembers.length);
+    } catch (error) {
+      console.error('Error loading board members:', error);
     }
-  } catch (error) {
-    console.error('Error loading board members:', error);
-  }
-};
+  };
+
+  // Load teams for the selected season
+  const loadTeams = async (seasonId) => {
+    try {
+      const token = localStorage.getItem('slm_token');
+      const response = await fetch(`/api/teams?season_id=${seasonId}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        const teamsData = Array.isArray(data) ? data : (data.data || []);
+        setTeams(teamsData);
+        console.log('Loaded teams:', teamsData.length);
+      }
+    } catch (error) {
+      console.error('Error loading teams:', error);
+      setTeams([]);
+    }
+  };
 
   // -------------------- LOAD SEASONS (default active) --------------------
   useEffect(() => {
@@ -138,6 +162,9 @@ const loadBoardMembers = async () => {
         if (!mounted) return;
         setDivisions(Array.isArray(data) ? data : []);
         setSelectedDivisionId('all');
+        setSelectedTeamId('all');
+        
+        await loadTeams(selectedSeasonId);
       } catch (e) {
         console.error('Error loading divisions:', e);
         if (!mounted) return;
@@ -151,12 +178,13 @@ const loadBoardMembers = async () => {
 
   // Update the season dropdown handler to properly reset
   const handleSeasonChange = (seasonId) => {
-    // Clear all data and reset filters
     setPlayers([]);
     setVolunteers([]);
     setWorkbondSummary([]);
-    setDivisions([]);  // Also clear divisions
+    setDivisions([]);
+    setTeams([]);
     setSelectedDivisionId('all');
+    setSelectedTeamId('all');
     setSelectedVolunteerRole('All Roles');
     setSelectedWorkbondCheck('All');
     setSelectedSeasonId(seasonId);
@@ -176,13 +204,10 @@ const loadBoardMembers = async () => {
         setLoading(true);
         setError('');
         
-        // Clear data
         setPlayers([]);
         setVolunteers([]);
         setWorkbondSummary([]);
         
-        // 1. Fetch players
-        console.log('Fetching players...');
         const playersRes = await api.get('/players', {
           params: { season_id: selectedSeasonId }
         });
@@ -201,12 +226,9 @@ const loadBoardMembers = async () => {
           return;
         }
         
-        // 2. Get family IDs
         const activeFamilyIds = [...new Set(activePlayers.map(p => p.family_id).filter(Boolean))];
         console.log(`Found ${activeFamilyIds.length} unique family IDs`);
         
-        // 3. Fetch all other data in parallel
-        console.log('Fetching parallel data...');
         const [volunteersRes, workbondRes, workbondBatchRes] = await Promise.allSettled([
           api.get('/volunteers', { params: { season_id: selectedSeasonId } }),
           api.get('/workbond/summary', { params: { season_id: selectedSeasonId } }),
@@ -218,7 +240,6 @@ const loadBoardMembers = async () => {
         await loadBoardMembers();
         if (!mounted) return;
         
-        // 4. Process workbond data
         const familyWorkbondMap = new Map();
         
         if (workbondBatchRes.status === 'fulfilled' && 
@@ -238,7 +259,6 @@ const loadBoardMembers = async () => {
           });
         }
         
-        // 5. Enhance players
         const enhancedPlayers = activePlayers.map(player => {
           const familyId = player.family_id;
           const seasonWorkbond = familyWorkbondMap.get(familyId);
@@ -250,7 +270,6 @@ const loadBoardMembers = async () => {
             enhancedFamily.work_bond_check_status = seasonWorkbond.notes;
             enhancedFamily.is_exempt = seasonWorkbond.isExempt;
           } else {
-            // No season-specific record
             enhancedFamily.work_bond_check_received = false;
             enhancedFamily.work_bond_check_status = '';
             enhancedFamily.is_exempt = false;
@@ -262,7 +281,6 @@ const loadBoardMembers = async () => {
           };
         });
         
-        // 6. Set state
         if (mounted) {
           setPlayers(enhancedPlayers);
           setVolunteers(
@@ -279,7 +297,6 @@ const loadBoardMembers = async () => {
           console.log(`=== DATA LOADED FOR SEASON ${selectedSeasonId} ===`);
           console.log(`Players: ${enhancedPlayers.length}`);
           console.log(`Volunteers: ${volunteersRes.status === 'fulfilled' ? volunteersRes.value.data?.length || 0 : 0}`);
-          console.log(`Workbond Summary: ${workbondRes.status === 'fulfilled' ? workbondRes.value.data?.length || 0 : 0}`);
         }
         
       } catch (error) {
@@ -298,32 +315,6 @@ const loadBoardMembers = async () => {
       mounted = false;
     };
   }, [selectedSeasonId]);
-
-  const debugData = () => {
-    console.log('=== DEBUG DATA ===');
-    console.log('Selected Season ID:', selectedSeasonId);
-    console.log('Total Players:', players.length);
-    
-    // Sample first 5 players with workbond info
-    players.slice(0, 5).forEach((p, i) => {
-      console.log(`Player ${i+1}:`, {
-        name: `${p.first_name} ${p.last_name}`,
-        season_id: p.season_id,
-        family_id: p.family_id,
-        workbond_received: p.family?.work_bond_check_received,
-        workbond_status: p.family?.work_bond_check_status,
-        is_exempt: p.family?.is_exempt
-      });
-    });
-    
-    // Check workbond sources
-    const withSeasonWorkbond = players.filter(p => 
-      p.family?.work_bond_check_status && 
-      !p.family?.work_bond_check_status.includes('Legacy')
-    ).length;
-    
-    console.log(`Players with season-specific workbond: ${withSeasonWorkbond}/${players.length}`);
-  };
 
   // -------------------- DERIVED: FAMILY IDS PARTICIPATING IN FILTER --------------------
   const filteredFamilyIds = useMemo(() => {
@@ -348,10 +339,8 @@ const loadBoardMembers = async () => {
     };
 
     for (const p of players) {
-      // Skip withdrawn players (already filtered, but double-check)
       if (String(p.status || '').toLowerCase() === 'withdrawn') continue;
       
-      // Display division uses program_title first (your schema)
       const divName =
         (p?.program_title || '').trim() ||
         divisionNameById.get(String(p?.division_id || '')) ||
@@ -359,7 +348,6 @@ const loadBoardMembers = async () => {
 
       if (!divName) continue;
 
-      // Add under multiple possible family identifiers
       add(p?.family_id, divName);
       add(p?.family?.id, divName);
       add(p?.family?.family_id, divName);
@@ -375,7 +363,6 @@ const loadBoardMembers = async () => {
     return Array.from(set).join('; ');
   };
 
-  // -------------------- NEW: division filter should match program_title --------------------
   const norm = (v) => String(v || '').trim().toLowerCase();
 
   const selectedDivisionName = useMemo(() => {
@@ -383,7 +370,6 @@ const loadBoardMembers = async () => {
     return norm(divisionNameById.get(String(selectedDivisionId)) || '');
   }, [selectedDivisionId, divisionNameById]);
 
-  // familyId -> Set(normalized program_title)
   const familyProgramTitlesById = useMemo(() => {
     const map = new Map();
 
@@ -396,10 +382,9 @@ const loadBoardMembers = async () => {
     };
 
     for (const p of players) {
-      // Skip withdrawn players
       if (String(p.status || '').toLowerCase() === 'withdrawn') continue;
       
-      const title = p?.program_title; // source of truth for division text
+      const title = p?.program_title;
       if (!title) continue;
       add(p?.family_id, title);
       add(p?.family?.id, title);
@@ -417,21 +402,18 @@ const loadBoardMembers = async () => {
     if (!set) return false;
     if (!selectedDivisionName) return false;
 
-    // Exact match on normalized strings
     if (set.has(selectedDivisionName)) return true;
 
-    // Fallback: if program_title contains the division name or vice versa (handles minor naming variations)
     for (const t of set) {
       if (t.includes(selectedDivisionName) || selectedDivisionName.includes(t)) return true;
     }
     return false;
   };
 
-  // -------------------- DERIVED: guardian names per family (from players -> family) --------------------
+  // -------------------- DERIVED: guardian names per family --------------------
   const familyGuardiansById = useMemo(() => {
     const map = new Map();
     for (const p of players) {
-      // Skip withdrawn players
       if (String(p.status || '').toLowerCase() === 'withdrawn') continue;
       
       const fam = p?.family;
@@ -462,8 +444,6 @@ const loadBoardMembers = async () => {
   const volunteerRolesByFamily = useMemo(() => {
     const map = new Map();
     for (const v of volunteers) {
-      // Skip volunteers associated with families that only have withdrawn players
-      // We'll check this by seeing if the family is in filteredFamilyIds
       const familyId = String(v.family_id || '');
       if (!filteredFamilyIds.has(familyId)) continue;
       
@@ -473,52 +453,155 @@ const loadBoardMembers = async () => {
     return map;
   }, [volunteers, filteredFamilyIds]);
 
-  // -------------------- NEW: Map to track which volunteers are assigned to which divisions --------------------
-  const assignedVolunteerDivisionsByEmail = useMemo(() => {
-    const map = new Map(); // email -> Set of division IDs they're assigned to
+  // -------------------- Map players by team --------------------
+  const playersByTeam = useMemo(() => {
+    const map = new Map();
     
-    for (const v of volunteers || []) {
-      if (!v?.email) continue;
+    for (const p of players) {
+      if (String(p.status || '').toLowerCase() === 'withdrawn') continue;
       
-      // Check if this volunteer has an assigned role (Manager, Assistant Coach, Team Parent)
-      if (['Manager', 'Assistant Coach', 'Team Parent'].includes(v.role)) {
-        const email = v.email.toLowerCase().trim();
-        if (!map.has(email)) {
-          map.set(email, new Set());
+      const teamId = p.team_id;
+      if (!teamId) continue;
+      
+      if (!map.has(teamId)) {
+        map.set(teamId, []);
+      }
+      map.get(teamId).push(p);
+    }
+    
+    return map;
+  }, [players]);
+
+  // -------------------- Get managers for each team --------------------
+  const teamManagers = useMemo(() => {
+    const map = new Map();
+    
+    for (const v of volunteers) {
+      if (v.role === 'Manager' && v.team_id) {
+        if (!map.has(v.team_id)) {
+          map.set(v.team_id, []);
         }
-        
-        // Add the division they're assigned to
-        if (v.division_id) {
-          map.get(email).add(String(v.division_id));
-        }
+        map.get(v.team_id).push({
+          name: v.name,
+          email: v.email,
+          phone: v.phone
+        });
       }
     }
     
     return map;
   }, [volunteers]);
 
-  // -------------------- NEW: Map to track all divisions a volunteer signed up for --------------------
-  const volunteerSignupDivisionsByEmail = useMemo(() => {
-    const map = new Map(); // email -> Set of division names they signed up for
+  // -------------------- NEW TAB: Incomplete Workbond by Team --------------------
+  const incompleteWorkbondByTeamRows = useMemo(() => {
+    const teamsMap = new Map();
     
-    for (const v of volunteers || []) {
-      if (!v?.email) continue;
+    // First, identify families with incomplete workbond
+    const incompleteFamilies = new Set();
+    
+    for (const p of players) {
+      if (String(p.status || '').toLowerCase() === 'withdrawn') continue;
       
-      const email = v.email.toLowerCase().trim();
-      if (!map.has(email)) {
-        map.set(email, new Set());
-      }
+      const fam = p.family;
+      if (!fam?.id) continue;
       
-      // Add the division name from this volunteer record
-      if (v.division?.name) {
-        map.get(email).add(v.division.name);
-      } else if (v.division_id && divisionNameById.has(String(v.division_id))) {
-        map.get(email).add(divisionNameById.get(String(v.division_id)));
+      const famId = String(fam.id);
+      const checkReceived = !!fam.work_bond_check_received;
+      const workbondNotes = fam.work_bond_check_status || '';
+      
+      const hasBoardMember = boardMembers.some(bm => 
+        String(bm.family_id).trim() === String(fam.id || fam.family_id || '').trim()
+      );
+      
+      const isExempt = hasBoardMember || workbondNotes.toLowerCase().includes('exempt');
+      
+      if (!checkReceived && !isExempt) {
+        incompleteFamilies.add(famId);
       }
     }
     
-    return map;
-  }, [volunteers, divisionNameById]);
+    // Now group by team
+    for (const p of players) {
+      if (String(p.status || '').toLowerCase() === 'withdrawn') continue;
+      
+      const teamId = p.team_id;
+      if (!teamId) continue;
+      
+      if (selectedTeamId !== 'all' && String(teamId) !== String(selectedTeamId)) continue;
+      
+      const fam = p.family;
+      if (!fam?.id) continue;
+      
+      const famId = String(fam.id);
+      
+      if (!incompleteFamilies.has(famId)) continue;
+      
+      if (selectedDivisionId !== 'all' && !familyMatchesSelectedDivision(famId)) continue;
+      
+      if (!teamsMap.has(teamId)) {
+        const team = teams.find(t => String(t.id) === String(teamId));
+        const managers = teamManagers.get(teamId) || [];
+        teamsMap.set(teamId, {
+          team: team || { id: teamId, name: 'Unknown Team', division_id: p.division_id },
+          incompleteFamilies: new Map(),
+          managers: managers
+        });
+      }
+      
+      const teamData = teamsMap.get(teamId);
+      
+      if (!teamData.incompleteFamilies.has(famId)) {
+        const familyPlayers = playersByTeam.get(teamId)?.filter(player => 
+          String(player.family_id) === famId || String(player.family?.id) === famId
+        ) || [];
+        
+        const guardians = getFamilyGuardianText(famId);
+        const primaryEmail = fam.primary_contact_email || '';
+        const parent2Email = fam.parent2_email || '';
+        const primaryPhone = fam.primary_contact_phone || '';
+        const parent2Phone = fam.parent2_phone || '';
+        const phoneNumbers = [primaryPhone, parent2Phone].filter(Boolean);
+        const combinedPhones = phoneNumbers.join(', ');
+        
+        teamData.incompleteFamilies.set(famId, {
+          family_id: famId,
+          guardians: guardians,
+          primary_email: primaryEmail,
+          parent2_email: parent2Email,
+          phone: combinedPhones,
+          players: familyPlayers.map(player => `${player.first_name} ${player.last_name}`).join(', '),
+          player_count: familyPlayers.length
+        });
+      }
+    }
+    
+    const rows = [];
+    for (const [teamId, teamData] of teamsMap.entries()) {
+      for (const [familyId, familyData] of teamData.incompleteFamilies.entries()) {
+        rows.push({
+          team_id: teamId,
+          team_name: teamData.team?.name || 'Unknown Team',
+          division: divisionNameById.get(String(teamData.team?.division_id)) || '',
+          family_id: familyId,
+          guardians: familyData.guardians,
+          primary_email: familyData.primary_email,
+          parent2_email: familyData.parent2_email,
+          phone: familyData.phone,
+          players: familyData.players,
+          player_count: familyData.player_count,
+          managers: teamData.managers
+        });
+      }
+    }
+    
+    rows.sort((a, b) => {
+      if (a.team_name < b.team_name) return -1;
+      if (a.team_name > b.team_name) return 1;
+      return String(a.guardians || '').localeCompare(String(b.guardians || ''));
+    });
+    
+    return rows;
+  }, [players, teams, teamManagers, playersByTeam, boardMembers, selectedDivisionId, selectedTeamId, familyMatchesSelectedDivision, getFamilyGuardianText, divisionNameById]);
 
   // -------------------- TAB 1: GUARDIANS --------------------
   const guardianRows = useMemo(() => {
@@ -526,9 +609,7 @@ const loadBoardMembers = async () => {
     const seen = new Set();
 
     for (const p of players) {
-      // DOUBLE CHECK: Ensure player belongs to selected season
       if (String(p.season_id) !== String(selectedSeasonId)) {
-        console.warn(`Player ${p.id} has season_id ${p.season_id}, expected ${selectedSeasonId}`);
         continue;
       }
       
@@ -539,7 +620,6 @@ const loadBoardMembers = async () => {
       
       const famId = String(fam.id);
       
-      // Division filter
       if (selectedDivisionId !== 'all' && !familyMatchesSelectedDivision(famId)) continue;
 
       const famVols = volunteerRolesByFamily.get(famId) || [];
@@ -558,26 +638,20 @@ const loadBoardMembers = async () => {
         continue;
       }
 
-      // UPDATED: Get workbond status from enhanced family object
       const checkReceived = !!fam.work_bond_check_received;
-const workbondNotes = fam.work_bond_check_status || '';
+      const workbondNotes = fam.work_bond_check_status || '';
 
-// Check if this family has a board member (direct from boardMembers table)
-const hasBoardMember = boardMembers.some(bm => 
-  String(bm.family_id).trim() === String(fam.id || fam.family_id || '').trim()
-);
+      const hasBoardMember = boardMembers.some(bm => 
+        String(bm.family_id).trim() === String(fam.id || fam.family_id || '').trim()
+      );
 
-// Check if they're exempt (either board member OR notes contain "Exempt")
-const isExempt = hasBoardMember || workbondNotes.toLowerCase().includes('exempt');
+      const isExempt = hasBoardMember || workbondNotes.toLowerCase().includes('exempt');
 
-// Apply workbond filter
-if (selectedWorkbondCheck === 'Received') {
-  // Show only if received AND not exempt
-  if (!checkReceived || isExempt) continue;
-} else if (selectedWorkbondCheck === 'Not Received') {
-  // Show only if not received AND not exempt
-  if (checkReceived || isExempt) continue;
-}
+      if (selectedWorkbondCheck === 'Received') {
+        if (!checkReceived || isExempt) continue;
+      } else if (selectedWorkbondCheck === 'Not Received') {
+        if (checkReceived || isExempt) continue;
+      }
 
       const guardians = [
         {
@@ -614,7 +688,6 @@ if (selectedWorkbondCheck === 'Received') {
       }
     }
 
-    // stable sort by guardian last name, then first name, then email
     rows.sort((a, b) => {
       const al = getLastName(a.guardian_name);
       const bl = getLastName(b.guardian_name);
@@ -641,7 +714,7 @@ if (selectedWorkbondCheck === 'Received') {
     selectedWorkbondCheck,
     familyMatchesSelectedDivision,
     getFamilyDivisionText,
-	boardMembers
+    boardMembers
   ]);
 
   // -------------------- TAB 2: WORKBOND INCOMPLETE --------------------
@@ -658,7 +731,6 @@ if (selectedWorkbondCheck === 'Received') {
           return false;
         }
 
-        // ✅ Division filter by program_title (matches what we display)
         if (selectedDivisionId !== 'all' && !familyMatchesSelectedDivision(f.family_id)) return false;
 
         const status = String(f.status || '').toLowerCase();
@@ -691,13 +763,11 @@ if (selectedWorkbondCheck === 'Received') {
       .filter((v) => {
         if (!v?.family_id) return false;
         
-        // Skip volunteers from families with only withdrawn players
         const familyId = String(v.family_id);
         if (!filteredFamilyIds.has(familyId)) return false;
         
         if (!['Manager', 'Assistant Coach', 'Team Parent'].includes(v.role)) return false;
         if (selectedVolunteerRole !== 'All Roles' && v.role !== selectedVolunteerRole) return false;
-        // If division filter is set, match volunteer.division_id OR team.division? (not always present)
         if (selectedDivisionId !== 'all') {
           return String(v.division_id || '') === String(selectedDivisionId);
         }
@@ -729,13 +799,11 @@ if (selectedWorkbondCheck === 'Received') {
 
   // -------------------- TAB 4: UNASSIGNED VOLUNTEERS --------------------
   const unassignedVolunteerRows = useMemo(() => {
-    // Group volunteers by email to see all their signups
-    const volunteersByEmail = new Map(); // email -> array of volunteer records
+    const volunteersByEmail = new Map();
     
     for (const v of volunteers || []) {
       if (!v?.email || !v?.family_id) continue;
       
-      // Skip volunteers from families with only withdrawn players
       const familyId = String(v.family_id);
       if (!filteredFamilyIds.has(familyId)) continue;
       
@@ -750,23 +818,18 @@ if (selectedWorkbondCheck === 'Received') {
     const seen = new Set();
     
     for (const [email, volunteerRecords] of volunteersByEmail.entries()) {
-      // Check if this person has ANY assigned roles (Manager, Assistant Coach, Team Parent)
       const hasAssignedRole = volunteerRecords.some(v => 
         ['Manager', 'Assistant Coach', 'Team Parent'].includes(v.role)
       );
       
-      // Skip if they have any assigned role - they're not unassigned
       if (hasAssignedRole) continue;
       
-      // Get all divisions they signed up for (from all their Parent role records)
       const signedUpDivisions = new Set();
       let primaryRecord = null;
-      let allDivisionsList = [];
       
       for (const v of volunteerRecords) {
-        if (!primaryRecord) primaryRecord = v; // Use first record for base info
+        if (!primaryRecord) primaryRecord = v;
         
-        // Get division name from this record
         let divisionName = v.division?.name || '';
         if (!divisionName && v.division_id) {
           divisionName = divisionNameById.get(String(v.division_id)) || '';
@@ -774,27 +837,20 @@ if (selectedWorkbondCheck === 'Received') {
         
         if (divisionName) {
           signedUpDivisions.add(divisionName);
-          allDivisionsList.push({
-            name: divisionName,
-            id: v.division_id
-          });
         }
       }
       
-      // Apply division filter if needed
       if (selectedDivisionId !== 'all') {
         const selectedDivName = divisionNameById.get(String(selectedDivisionId));
         if (!selectedDivName || !signedUpDivisions.has(selectedDivName)) {
-          continue; // Skip if this person didn't sign up for the selected division
+          continue;
         }
       }
       
-      // Create a unique key for this person
       const personKey = `${email}-${primaryRecord?.family_id}`;
       if (seen.has(personKey)) continue;
       seen.add(personKey);
       
-      // Get all divisions as a sorted string
       const divisionsList = Array.from(signedUpDivisions).sort().join('; ');
       
       rows.push({
@@ -803,14 +859,13 @@ if (selectedWorkbondCheck === 'Received') {
         phone: primaryRecord?.phone || '',
         role: 'Parent (Unassigned)',
         family_id: primaryRecord?.family_id,
-        divisions: divisionsList, // All divisions they signed up for
+        divisions: divisionsList,
         division_count: signedUpDivisions.size,
         created_at: primaryRecord?.created_at || '',
         is_approved: primaryRecord?.is_approved || false,
       });
     }
 
-    // Sort by name
     rows.sort((a, b) => {
       const al = getLastName(a.name);
       const bl = getLastName(b.name);
@@ -831,11 +886,21 @@ if (selectedWorkbondCheck === 'Received') {
         .flatMap((r) => [r.primary_email, r.parent2_email])
         .filter(Boolean);
     }
+    if (activeTab === Tabs.INCOMPLETE_BY_TEAM) {
+      const managerEmails = new Set();
+      incompleteWorkbondByTeamRows.forEach((r) => {
+        r.managers.forEach((manager) => {
+          if (manager.email) {
+            managerEmails.add(manager.email);
+          }
+        });
+      });
+      emails = Array.from(managerEmails);
+    }
     if (activeTab === Tabs.ASSIGNED_VOLUNTEERS) emails = assignedVolunteerRows.map((r) => r.email).filter(Boolean);
     if (activeTab === Tabs.UNASSIGNED_VOLUNTEERS) {
       emails = unassignedVolunteerRows.map((r) => r.email).filter(Boolean);
     }
-    // unique, keep stable order
     const seen = new Set();
     return emails.filter((e) => {
       const k = String(e).trim().toLowerCase();
@@ -843,7 +908,154 @@ if (selectedWorkbondCheck === 'Received') {
       seen.add(k);
       return true;
     });
-  }, [activeTab, guardianRows, workbondIncompleteRows, assignedVolunteerRows, unassignedVolunteerRows]);
+  }, [activeTab, guardianRows, workbondIncompleteRows, incompleteWorkbondByTeamRows, assignedVolunteerRows, unassignedVolunteerRows]);
+
+  // Function to copy tabular data as formatted text
+  const copyDataAsText = () => {
+    if (activeTab === Tabs.INCOMPLETE_BY_TEAM) {
+      if (incompleteWorkbondByTeamRows.length === 0) {
+        alert('No data to copy.');
+        return;
+      }
+      
+      let text = '';
+      
+      incompleteWorkbondByTeamRows.forEach((row, index) => {
+        text += `GUARDIANS: ${row.guardians}\n`;
+        text += `PLAYERS: ${row.players}\n`;
+        text += `EMAILS: ${row.primary_email}${row.parent2_email ? `, ${row.parent2_email}` : ''}\n`;
+        text += `PHONE: ${row.phone || 'N/A'}\n`;
+        
+        if (index < incompleteWorkbondByTeamRows.length - 1) {
+          text += '\n' + '-'.repeat(40) + '\n\n';
+        }
+      });
+      
+      navigator.clipboard.writeText(text).then(() => {
+        alert(`Copied data for ${incompleteWorkbondByTeamRows.length} families to clipboard.`);
+      }).catch(() => {
+        alert('Failed to copy data to clipboard.');
+      });
+    } else if (activeTab === Tabs.GUARDIANS) {
+      if (guardianRows.length === 0) {
+        alert('No data to copy.');
+        return;
+      }
+      
+      const familiesMap = new Map();
+      guardianRows.forEach(row => {
+        const familyKey = row.family_uuid;
+        if (!familiesMap.has(familyKey)) {
+          familiesMap.set(familyKey, {
+            guardians: row.guardian_name,
+            players: [],
+            emails: [],
+            phone: row.guardian_phone || ''
+          });
+        }
+        const family = familiesMap.get(familyKey);
+        if (!family.emails.includes(row.guardian_email)) {
+          family.emails.push(row.guardian_email);
+        }
+      });
+      
+      let text = '';
+      let index = 0;
+      for (const [_, family] of familiesMap) {
+        text += `GUARDIANS: ${family.guardians}\n`;
+        text += `PLAYERS: ${family.players.join(', ') || 'N/A'}\n`;
+        text += `EMAILS: ${family.emails.join(', ')}\n`;
+        text += `PHONE: ${family.phone || 'N/A'}\n`;
+        
+        if (index < familiesMap.size - 1) {
+          text += '\n' + '-'.repeat(40) + '\n\n';
+        }
+        index++;
+      }
+      
+      navigator.clipboard.writeText(text).then(() => {
+        alert(`Copied data for ${familiesMap.size} families to clipboard.`);
+      }).catch(() => {
+        alert('Failed to copy data to clipboard.');
+      });
+    } else if (activeTab === Tabs.WORKBOND_INCOMPLETE) {
+      if (workbondIncompleteRows.length === 0) {
+        alert('No data to copy.');
+        return;
+      }
+      
+      let text = '';
+      
+      workbondIncompleteRows.forEach((row, index) => {
+        const emails = [row.primary_email, row.parent2_email].filter(Boolean);
+        text += `GUARDIANS: ${row.guardians}\n`;
+        text += `PLAYERS: N/A\n`;
+        text += `EMAILS: ${emails.join(', ')}\n`;
+        text += `PHONE: N/A\n`;
+        
+        if (index < workbondIncompleteRows.length - 1) {
+          text += '\n' + '-'.repeat(40) + '\n\n';
+        }
+      });
+      
+      navigator.clipboard.writeText(text).then(() => {
+        alert(`Copied data for ${workbondIncompleteRows.length} families to clipboard.`);
+      }).catch(() => {
+        alert('Failed to copy data to clipboard.');
+      });
+    } else if (activeTab === Tabs.ASSIGNED_VOLUNTEERS) {
+      if (assignedVolunteerRows.length === 0) {
+        alert('No data to copy.');
+        return;
+      }
+      
+      let text = '';
+      
+      assignedVolunteerRows.forEach((row, index) => {
+        text += `NAME: ${row.name}\n`;
+        text += `ROLE: ${row.role}\n`;
+        text += `EMAIL: ${row.email}\n`;
+        text += `PHONE: ${row.phone || 'N/A'}\n`;
+        text += `TEAM: ${row.team || 'N/A'}\n`;
+        text += `DIVISION: ${row.division || 'N/A'}\n`;
+        
+        if (index < assignedVolunteerRows.length - 1) {
+          text += '\n' + '-'.repeat(40) + '\n\n';
+        }
+      });
+      
+      navigator.clipboard.writeText(text).then(() => {
+        alert(`Copied data for ${assignedVolunteerRows.length} volunteers to clipboard.`);
+      }).catch(() => {
+        alert('Failed to copy data to clipboard.');
+      });
+    } else if (activeTab === Tabs.UNASSIGNED_VOLUNTEERS) {
+      if (unassignedVolunteerRows.length === 0) {
+        alert('No data to copy.');
+        return;
+      }
+      
+      let text = '';
+      
+      unassignedVolunteerRows.forEach((row, index) => {
+        text += `NAME: ${row.name}\n`;
+        text += `EMAIL: ${row.email}\n`;
+        text += `PHONE: ${row.phone || 'N/A'}\n`;
+        text += `DIVISIONS: ${row.divisions || 'N/A'}\n`;
+        text += `STATUS: ${row.is_approved ? 'Approved' : 'Pending'}\n`;
+        
+        if (index < unassignedVolunteerRows.length - 1) {
+          text += '\n' + '-'.repeat(40) + '\n\n';
+        }
+      });
+      
+      navigator.clipboard.writeText(text).then(() => {
+        alert(`Copied data for ${unassignedVolunteerRows.length} volunteers to clipboard.`);
+      }).catch(() => {
+        alert('Failed to copy data to clipboard.');
+      });
+    }
+  };
 
   const handleCopyEmails = async () => {
     try {
@@ -916,6 +1128,36 @@ if (selectedWorkbondCheck === 'Received') {
       return;
     }
     
+    if (activeTab === Tabs.INCOMPLETE_BY_TEAM) {
+      downloadCsv('incomplete_workbond_by_team.csv', [
+        [
+          'Team',
+          'Division',
+          'Guardians',
+          'Players',
+          'Primary Email',
+          'Parent 2 Email',
+          'Phone',
+          'Manager Name',
+          'Manager Email',
+          'Manager Phone'
+        ],
+        ...incompleteWorkbondByTeamRows.map((r) => [
+          r.team_name || '',
+          r.division || '',
+          r.guardians || '—',
+          r.players || '—',
+          r.primary_email || '—',
+          r.parent2_email || '—',
+          r.phone || '—',
+          r.managers.map(m => m.name).join('; ') || '—',
+          r.managers.map(m => m.email).join('; ') || '—',
+          r.managers.map(m => m.phone).join('; ') || '—',
+        ]),
+      ]);
+      return;
+    }
+    
     if (activeTab === Tabs.ASSIGNED_VOLUNTEERS) {
       downloadCsv('assigned_volunteers.csv', [
         [
@@ -963,6 +1205,7 @@ if (selectedWorkbondCheck === 'Received') {
   // -------------------- UI --------------------
   const seasonOptions = seasons || [];
   const divisionOptions = divisions || [];
+  const teamOptions = teams || [];
 
   return (
     <div>
@@ -982,10 +1225,23 @@ if (selectedWorkbondCheck === 'Received') {
             onClick={handleCopyEmails}
             className="inline-flex items-center px-3 py-2 rounded-lg bg-white border border-gray-200 text-sm text-gray-700 hover:bg-gray-50"
             disabled={currentEmails.length === 0}
-            title="Copy all emails from the current tab"
+            title={activeTab === Tabs.INCOMPLETE_BY_TEAM ? "Copy manager emails" : "Copy all emails from the current tab"}
           >
             <Copy className="h-4 w-4 mr-2" />
-            Copy Emails
+            {activeTab === Tabs.INCOMPLETE_BY_TEAM ? "Copy Manager Emails" : "Copy Emails"}
+          </button>
+          <button
+            onClick={copyDataAsText}
+            className="inline-flex items-center px-3 py-2 rounded-lg bg-blue-50 border border-blue-200 text-sm text-blue-700 hover:bg-blue-100"
+            disabled={(activeTab === Tabs.INCOMPLETE_BY_TEAM && incompleteWorkbondByTeamRows.length === 0) ||
+                      (activeTab === Tabs.GUARDIANS && guardianRows.length === 0) ||
+                      (activeTab === Tabs.WORKBOND_INCOMPLETE && workbondIncompleteRows.length === 0) ||
+                      (activeTab === Tabs.ASSIGNED_VOLUNTEERS && assignedVolunteerRows.length === 0) ||
+                      (activeTab === Tabs.UNASSIGNED_VOLUNTEERS && unassignedVolunteerRows.length === 0)}
+            title="Copy the data as formatted text for email"
+          >
+            <ClipboardList className="h-4 w-4 mr-2" />
+            Copy Data
           </button>
           <button
             onClick={handleExportCsv}
@@ -1003,14 +1259,8 @@ if (selectedWorkbondCheck === 'Received') {
               console.log('Selected Season:', selectedSeasonId);
               console.log('Players count:', players.length);
               console.log('Volunteers count:', volunteers.length);
-              console.log('Workbond Summary count:', workbondSummary.length);
-              console.log('Unassigned Volunteers count:', unassignedVolunteerRows.length);
-              
-              // Show sample of unassigned volunteers with their divisions
-              console.log('Sample unassigned volunteers:');
-              unassignedVolunteerRows.slice(0, 5).forEach((v, i) => {
-                console.log(`${i+1}. ${v.name} - Divisions: ${v.divisions}`);
-              });
+              console.log('Teams count:', teams.length);
+              console.log('Incomplete by team rows:', incompleteWorkbondByTeamRows.length);
             }}
             className="inline-flex items-center px-3 py-2 rounded-lg bg-yellow-100 border border-yellow-300 text-sm text-yellow-800 hover:bg-yellow-200"
           >
@@ -1024,7 +1274,7 @@ if (selectedWorkbondCheck === 'Received') {
         <div className="flex items-center gap-2 mb-3 text-sm font-medium text-gray-700">
           <Filter className="h-4 w-4" /> Filters
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">Season</label>
             <select
@@ -1047,6 +1297,7 @@ if (selectedWorkbondCheck === 'Received') {
               value={selectedDivisionId}
               onChange={(e) => {
                 setSelectedDivisionId(e.target.value);
+                setSelectedTeamId('all');
               }}
               disabled={!selectedSeasonId || loading}
             >
@@ -1057,6 +1308,26 @@ if (selectedWorkbondCheck === 'Received') {
                 </option>
               ))}
             </select>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Team</label>
+            <select
+              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+              value={selectedTeamId}
+              onChange={(e) => setSelectedTeamId(e.target.value)}
+              disabled={!selectedSeasonId || loading || activeTab !== Tabs.INCOMPLETE_BY_TEAM}
+            >
+              <option value="all">All Teams</option>
+              {teamOptions.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
+            </select>
+            <p className="text-[11px] text-gray-500 mt-1">
+              Applies to Incomplete Workbond by Team tab
+            </p>
           </div>
 
           <div>
@@ -1105,7 +1376,7 @@ if (selectedWorkbondCheck === 'Received') {
         </div>
       </div>
 
-      {/* Tabs - Updated order */}
+      {/* Tabs */}
       <div className="mt-6">
         <div className="flex gap-2 flex-wrap">
           {Object.values(Tabs).map((t) => (
@@ -1227,6 +1498,68 @@ if (selectedWorkbondCheck === 'Received') {
                               <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
                                 {r.status}
                               </span>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {activeTab === Tabs.INCOMPLETE_BY_TEAM && (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-sm">
+                    <thead className="bg-gray-50 border-b border-gray-200">
+                      <tr>
+                        <th className="text-left px-4 py-3 font-semibold text-gray-700">Team</th>
+                        <th className="text-left px-4 py-3 font-semibold text-gray-700">Division</th>
+                        <th className="text-left px-4 py-3 font-semibold text-gray-700">Guardians</th>
+                        <th className="text-left px-4 py-3 font-semibold text-gray-700">Players</th>
+                        <th className="text-left px-4 py-3 font-semibold text-gray-700">Emails</th>
+                        <th className="text-left px-4 py-3 font-semibold text-gray-700">Manager(s)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {incompleteWorkbondByTeamRows.length === 0 ? (
+                        <tr>
+                          <td className="px-4 py-4 text-gray-500" colSpan={6}>
+                            No families with incomplete workbond found.
+                          </td>
+                        </tr>
+                      ) : (
+                        incompleteWorkbondByTeamRows.map((r, idx) => (
+                          <tr key={`${r.team_id}-${r.family_id}-${idx}`} className="hover:bg-gray-50">
+                            <td className="px-4 py-3 font-medium text-gray-900">{r.team_name}</td>
+                            <td className="px-4 py-3 text-gray-600">{r.division || '—'}</td>
+                            <td className="px-4 py-3 text-gray-900">{r.guardians || '—'}</td>
+                            <td className="px-4 py-3 text-gray-700">
+                              <div className="max-w-xs">
+                                <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 mr-1">
+                                  {r.player_count} {r.player_count === 1 ? 'player' : 'players'}
+                                </span>
+                                <div className="text-xs text-gray-600 mt-1">
+                                  {r.players}
+                                </div>
+                              </div>
+                            </td>
+                            <td className="px-4 py-3">
+                              <div className="space-y-1">
+                                {r.primary_email && <div className="text-sm">{r.primary_email}</div>}
+                                {r.parent2_email && <div className="text-sm text-gray-600">{r.parent2_email}</div>}
+                              </div>
+                            </td>
+                            <td className="px-4 py-3">
+                              {r.managers.length > 0 ? (
+                                r.managers.map((manager, i) => (
+                                  <div key={i} className="text-sm mb-1">
+                                    <div className="font-medium">{manager.name}</div>
+                                    <div className="text-xs text-gray-600">{manager.email}</div>
+                                  </div>
+                                ))
+                              ) : (
+                                <span className="text-gray-400">No manager assigned</span>
+                              )}
                             </td>
                           </tr>
                         ))

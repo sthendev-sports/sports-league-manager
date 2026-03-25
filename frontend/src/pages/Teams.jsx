@@ -14,6 +14,7 @@ const Teams = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [expandedTeam, setExpandedTeam] = useState(null);
+  const [selectedTeam, setSelectedTeam] = useState('');
   
   // Form states
   const [showTeamForm, setShowTeamForm] = useState(false);
@@ -29,7 +30,7 @@ const Teams = () => {
 
   useEffect(() => {
     loadData();
-  }, [selectedSeason, selectedDivision]);
+  }, [selectedSeason, selectedDivision, selectedTeam]);
 
   const loadData = async () => {
     try {
@@ -59,6 +60,9 @@ const Teams = () => {
         filteredTeams = filteredTeams.filter(team => team.division_id === selectedDivision);
       }
       
+	  if (selectedTeam) {
+		filteredTeams = filteredTeams.filter(team => team.id === selectedTeam);
+	  }
       console.log('Filtered teams:', filteredTeams);
       
       setTeams(filteredTeams);
@@ -808,6 +812,34 @@ const Teams = () => {
                 ))}
               </select>
             </div>
+			 {/* Team Filter */}
+    <div>
+      <label className="block text-sm font-medium text-gray-700 mb-1">
+        Team
+      </label>
+      <select
+        value={selectedTeam}
+        onChange={(e) => setSelectedTeam(e.target.value)}
+        className="block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md"
+      >
+        <option value="">All Teams</option>
+        {teams
+          .filter(team => {
+            // Only show teams that match current season/division filters
+            let match = true;
+            if (selectedSeason && team.season_id !== selectedSeason) match = false;
+            if (selectedDivision && team.division_id !== selectedDivision) match = false;
+            return match;
+          })
+          .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+          .map(team => (
+            <option key={team.id} value={team.id}>
+              {team.name} ({team.division?.name || getDivisionName(team.division_id)})
+            </option>
+          ))
+        }
+      </select>
+	   </div>
 
             {/* Summary */}
             <div className="flex items-center">

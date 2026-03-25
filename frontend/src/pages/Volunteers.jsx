@@ -201,7 +201,31 @@ const [selectedInterestedRole, setSelectedInterestedRole] = useState('');
       console.error('Error loading volunteer trainings:', error);
     }
   };
-
+const handleBulkAssignTrainings = async () => {
+  if (!selectedSeason) {
+    alert('Please select a season first');
+    return;
+  }
+  
+  if (!confirm('This will assign required trainings to all volunteers with Manager, Coach, Assistant Coach, or Team Parent roles. Continue?')) {
+    return;
+  }
+  
+  try {
+    const response = await authFetch('/api/volunteers/bulk-assign-trainings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ season_id: selectedSeason })
+    });
+    
+    const result = await response.json();
+    alert(result.message);
+    await loadVolunteers(); // Refresh the list
+  } catch (error) {
+    console.error('Error bulk assigning trainings:', error);
+    alert('Failed to assign trainings: ' + error.message);
+  }
+};
   const loadDivisions = async () => {
     try {
       console.log('Loading divisions for season:', selectedSeason);
@@ -1383,7 +1407,13 @@ const exportVolunteersToCSV = () => {
                   <Plus className="h-4 w-4 mr-2" />
                   Add Volunteer
                 </button>
-
+<button
+  onClick={handleBulkAssignTrainings}
+  className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+>
+  <Upload className="h-4 w-4 mr-2" />
+  Assign Required Trainings
+</button>
                 <button
                   onClick={testVolunteerAPI}
                   className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-green-600 hover:bg-green-700"

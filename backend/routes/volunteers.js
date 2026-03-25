@@ -7,7 +7,84 @@ const { permissionEnforcer } = require('../middleware/permissionEnforcer');
 // Apply permission enforcer to ALL volunteer routes
 router.use(permissionEnforcer);
 
-
+/**
+ * Auto-assign required trainings to a volunteer based on their role
+ * Assigns ALL required trainings (is_required = true) to volunteers with eligible roles
+ */
+async function autoAssignTrainingsForVolunteer(volunteerId, role, seasonId) {
+  try {
+    // Define which roles should get trainings
+    const eligibleRoles = ['Manager', 'Coach', 'Assistant Coach', 'Team Parent'];
+    
+    // Only assign trainings to eligible roles
+    if (!eligibleRoles.includes(role)) {
+      console.log(`Role ${role} not eligible for auto-training assignments`);
+      return;
+    }
+    
+    // Fetch ALL required trainings that are for volunteers (category = 'volunteer' or 'both')
+    const { data: trainings, error: trainingError } = await supabase
+      .from('trainings')
+      .select('id, name, category')
+      .eq('is_required', true)
+      .in('category', ['volunteers only', 'volunteers', 'both']);
+    
+    if (trainingError) {
+      console.error('Error fetching required trainings:', trainingError);
+      return;
+    }
+    
+    if (!trainings || trainings.length === 0) {
+      console.log('No required volunteer trainings found in the database');
+      return;
+    }
+    
+    console.log(`Found ${trainings.length} required trainings to assign:`);
+    trainings.forEach(t => console.log(`  - ${t.name} (${t.category})`));
+    
+    // Check existing assignments for this volunteer
+    const { data: existing, error: existingError } = await supabase
+      .from('volunteer_trainings')
+      .select('training_id')
+      .eq('volunteer_id', volunteerId);
+    
+    if (existingError) {
+      console.error('Error checking existing trainings:', existingError);
+      return;
+    }
+    
+    const existingTrainingIds = new Set(existing.map(e => e.training_id));
+    
+    // Create new training assignments for trainings not already assigned
+    const newAssignments = trainings
+      .filter(t => !existingTrainingIds.has(t.id))
+      .map(training => ({
+        volunteer_id: volunteerId,
+        training_id: training.id,
+        status: 'pending',
+        completed_date: null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }));
+    
+    if (newAssignments.length > 0) {
+      const { error: insertError } = await supabase
+        .from('volunteer_trainings')
+        .insert(newAssignments);
+      
+      if (insertError) {
+        console.error('Error auto-assigning trainings:', insertError);
+      } else {
+        console.log(`✅ Auto-assigned ${newAssignments.length} trainings to volunteer ${volunteerId} (Role: ${role})`);
+        newAssignments.forEach(a => console.log(`   - Assigned training ID: ${a.training_id}`));
+      }
+    } else {
+      console.log(`Volunteer ${volunteerId} already has all required trainings assigned`);
+    }
+  } catch (error) {
+    console.error('Error in autoAssignTrainingsForVolunteer:', error);
+  }
+}
 /**
  * GET /api/volunteers
  * Optional query params:
@@ -124,9 +201,159 @@ router.post('/', async (req, res) => {
 
     if (error) throw error;
 
+    // Auto-assign trainings based on role
+    if (data.id && data.role && ['Manager', 'Coach', 'Assistant Coach', 'Team Parent'].includes(data.role)) {
+      await autoAssignTrainingsForVolunteer(data.id, data.role, data.season_id);
+    }
+
     res.status(201).json(data);
   } catch (error) {
     console.error('Error creating volunteer:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * POST /api/volunteers/bulk-assign-trainings
+ * Assign required trainings to all volunteers with eligible roles
+ */
+router.post('/bulk-assign-trainings', async (req, res) => {
+  try {
+    const { season_id } = req.body;
+    
+    if (!season_id) {
+      return res.status(400).json({ error: 'season_id is required' });
+    }
+    
+    // First, get all required trainings for volunteers
+    const { data: requiredTrainings, error: trainingsError } = await supabase
+      .from('trainings')
+      .select('id, name, category')
+      .eq('is_required', true)
+      .in('category', ['volunteers only', 'volunteers', 'both']);
+    
+    if (trainingsError) {
+      console.error('Error fetching trainings:', trainingsError);
+      return res.status(500).json({ error: 'Failed to fetch trainings' });
+    }
+    
+    if (!requiredTrainings || requiredTrainings.length === 0) {
+      return res.status(400).json({ 
+        error: 'No required trainings found for volunteers. Please create required trainings with category "volunteer" or "both".' 
+      });
+    }
+    
+    console.log(`Found ${requiredTrainings.length} required trainings:`);
+    requiredTrainings.forEach(t => console.log(`  - ${t.name} (${t.category})`));
+    
+    const eligibleRoles = ['Manager', 'Coach', 'Assistant Coach', 'Team Parent'];
+    
+    // Get all volunteers with eligible roles
+    const { data: volunteers, error: volunteerError } = await supabase
+      .from('volunteers')
+      .select('id, role, name, email')
+      .eq('season_id', season_id)
+      .in('role', eligibleRoles);
+    
+    if (volunteerError) throw volunteerError;
+    
+    console.log(`Found ${volunteers?.length || 0} volunteers with eligible roles`);
+    
+    let assignedCount = 0;
+    let errorCount = 0;
+    let alreadyCompleteCount = 0;
+    const assignmentDetails = [];
+    
+    for (const volunteer of volunteers) {
+      try {
+        // Check existing assignments
+        const { data: existing, error: existingError } = await supabase
+          .from('volunteer_trainings')
+          .select('training_id, status')
+          .eq('volunteer_id', volunteer.id);
+        
+        if (existingError) {
+          console.error(`Error checking existing trainings for ${volunteer.name}:`, existingError);
+          errorCount++;
+          continue;
+        }
+        
+        const existingIds = new Set(existing?.map(e => e.training_id) || []);
+        
+        // Find which trainings need to be assigned
+        const trainingsToAssign = requiredTrainings
+          .filter(t => !existingIds.has(t.id))
+          .map(training => ({
+            volunteer_id: volunteer.id,
+            training_id: training.id,
+            status: 'pending',
+            completed_date: null,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          }));
+        
+        if (trainingsToAssign.length > 0) {
+          const { error: insertError } = await supabase
+            .from('volunteer_trainings')
+            .insert(trainingsToAssign);
+          
+          if (insertError) {
+            errorCount++;
+            console.error(`❌ Failed to assign trainings to ${volunteer.name}:`, insertError);
+            assignmentDetails.push({
+              name: volunteer.name,
+              role: volunteer.role,
+              status: 'failed',
+              error: insertError.message
+            });
+          } else {
+            assignedCount++;
+            console.log(`✅ Assigned ${trainingsToAssign.length} training(s) to ${volunteer.name} (${volunteer.role})`);
+            assignmentDetails.push({
+              name: volunteer.name,
+              role: volunteer.role,
+              status: 'success',
+              trainings_assigned: trainingsToAssign.length,
+              training_names: trainingsToAssign.map(t => {
+                const training = requiredTrainings.find(rt => rt.id === t.training_id);
+                return training?.name || 'Unknown';
+              })
+            });
+          }
+        } else {
+          alreadyCompleteCount++;
+          console.log(`⏭️ Volunteer ${volunteer.name} already has all required trainings assigned`);
+          assignmentDetails.push({
+            name: volunteer.name,
+            role: volunteer.role,
+            status: 'already_complete',
+            trainings_assigned: 0
+          });
+        }
+      } catch (error) {
+        errorCount++;
+        console.error(`❌ Error processing volunteer ${volunteer.name}:`, error);
+        assignmentDetails.push({
+          name: volunteer.name,
+          role: volunteer.role,
+          status: 'failed',
+          error: error.message
+        });
+      }
+    }
+    
+    res.json({
+      success: true,
+      message: `Assigned trainings to ${assignedCount} volunteers (${alreadyCompleteCount} already had them, ${errorCount} errors)`,
+      assigned: assignedCount,
+      already_complete: alreadyCompleteCount,
+      errors: errorCount,
+      details: assignmentDetails,
+      total_volunteers: volunteers?.length || 0,
+      required_trainings: requiredTrainings.map(t => ({ id: t.id, name: t.name, category: t.category }))
+    });
+  } catch (error) {
+    console.error('Error in bulk-assign-trainings:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -142,6 +369,15 @@ router.put('/:id', async (req, res) => {
 
     console.log(`Updating volunteer ${id}:`, volunteerData);
 
+    // Get existing volunteer to check if role changed
+    const { data: existingVolunteer, error: fetchError } = await supabase
+      .from('volunteers')
+      .select('role, season_id')
+      .eq('id', id)
+      .single();
+
+    if (fetchError) throw fetchError;
+
     // Clean the data - remove training-related fields that shouldn't be in volunteers table
     const { trainings, trainings_summary, division, season, team, ...dataToUpdate } = volunteerData;
 
@@ -153,6 +389,13 @@ router.put('/:id', async (req, res) => {
       .single();
 
     if (error) throw error;
+
+    // Auto-assign trainings if role changed to an eligible role
+    if (volunteerData.role && 
+        volunteerData.role !== existingVolunteer.role &&
+        ['Manager', 'Coach', 'Assistant Coach', 'Team Parent'].includes(volunteerData.role)) {
+      await autoAssignTrainingsForVolunteer(id, volunteerData.role, existingVolunteer.season_id);
+    }
 
     // Return simple success response
     res.json({

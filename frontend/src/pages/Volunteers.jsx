@@ -516,57 +516,54 @@ const handleBulkAssignTrainings = async () => {
   };
 
   const handleVolunteerTrainingChange = async (trainingId, completed, date) => {
-    try {
-      const response = await authFetch(`/api/trainings/volunteer/${editingVolunteer.id}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          trainings: availableVolunteerTrainings.map(training => {
-            const existing = volunteerTrainings.find(t => t.training_id === training.id);
-            if (training.id === trainingId) {
-              return {
-                training_id: trainingId,
-                completed_date: completed ? (date || new Date().toISOString().split('T')[0]) : null,
-                status: completed ? 'completed' : 'pending'
-              };
-            }
-            return existing ? {
-              training_id: existing.training_id,
-              completed_date: existing.completed_date,
-              status: existing.status
-            } : {
-              training_id: training.id,
-              completed_date: null,
-              status: 'pending'
+  try {
+    const response = await authFetch(`/api/trainings/volunteer/${editingVolunteer.id}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        trainings: availableVolunteerTrainings.map(training => {
+          const existing = volunteerTrainings.find(t => t.training_id === training.id);
+          if (training.id === trainingId) {
+            return {
+              training_id: trainingId,
+              completed_date: completed ? (date || new Date().toISOString().split('T')[0]) : null,
+              status: completed ? 'completed' : 'pending'
             };
-          })
+          }
+          return existing ? {
+            training_id: existing.training_id,
+            completed_date: existing.completed_date,
+            status: existing.status
+          } : {
+            training_id: training.id,
+            completed_date: null,
+            status: 'pending'
+          };
         })
-      });
+      })
+    });
 
-      if (!response.ok) {
-        throw new Error(await buildAuthErrorMessage(response, 'Failed to update training'));
-      }
+    if (!response.ok) {
+      throw new Error(await buildAuthErrorMessage(response, 'Failed to update training'));
+    }
 
-      const updatedTrainings = await response.json();
-      setVolunteerTrainings(updatedTrainings);
-    } catch (error) {
-  console.error('Error updating volunteer training:', error);
-  
-  // Use the shared helper function
-  const errorMessage = getPermissionErrorMessage(
-    error,
-    'Your role does not have permission to update volunteer trainings.'
-  );
-  
-  // Show popup alert
-  alert(errorMessage);
-  
-  // Also show in the UI error area
-  setError(errorMessage);
-}
-  };
+    const updatedTrainings = await response.json();
+    setVolunteerTrainings(updatedTrainings);
+    
+    // Reload volunteer data to show updated status
+    await loadVolunteers();
+  } catch (error) {
+    console.error('Error updating volunteer training:', error);
+    const errorMessage = getPermissionErrorMessage(
+      error,
+      'Your role does not have permission to update volunteer trainings.'
+    );
+    alert(errorMessage);
+    setError(errorMessage);
+  }
+};
 
   const handleDeleteVolunteer = async (volunteerId) => {
     if (!confirm('Are you sure you want to delete this volunteer?')) return;

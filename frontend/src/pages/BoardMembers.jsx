@@ -29,6 +29,27 @@ const [formData, setFormData] = useState({
   notes: ''
 });
 
+const handleBulkAssignTrainings = async () => {
+  if (!confirm('This will assign required trainings to all active board members. Continue?')) {
+    return;
+  }
+  
+  try {
+    const response = await fetch('/api/board-members/bulk-assign-trainings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ only_active: true })
+    });
+    
+    const result = await response.json();
+    alert(result.message);
+    await loadBoardMembers(); // Refresh the list
+  } catch (error) {
+    console.error('Error bulk assigning trainings:', error);
+    alert('Failed to assign trainings: ' + error.message);
+  }
+};
+
 //Training States
 
 const [boardMemberTrainings, setBoardMemberTrainings] = useState([]);
@@ -419,6 +440,13 @@ const result = response.data;
               <Upload className="h-4 w-4 mr-2" />
               Import
             </button>
+			<button
+  onClick={handleBulkAssignTrainings}
+  className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+>
+  <Upload className="h-4 w-4 mr-2" />
+  Assign Required Trainings
+</button>
             <button
               onClick={handleResetCompliance}
               className="inline-flex items-center px-4 py-2 border border-red-300 rounded-md shadow-sm text-sm font-medium text-red-700 bg-white hover:bg-red-50"

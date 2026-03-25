@@ -12,6 +12,27 @@ const TeamUniforms = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  // Custom size order from smallest to largest
+  const getSizeOrder = (size) => {
+    const sizeOrderMap = {
+      'Youth X-Small': 1,
+      'Youth Small': 2,
+      'Youth Medium': 3,
+      'Youth Large': 4,
+      'Youth X-Large': 5,
+      'Adult Small': 6,
+      'Adult Medium': 7,
+      'Adult Large': 8,
+      'Adult X-Large': 9
+    };
+    return sizeOrderMap[size] || 999; // Unknown sizes go to the end
+  };
+
+  // Sort sizes array by custom order
+  const sortSizes = (sizes) => {
+    return [...sizes].sort((a, b) => getSizeOrder(a) - getSizeOrder(b));
+  };
+
   useEffect(() => {
     loadSeasons();
   }, []);
@@ -68,10 +89,10 @@ const TeamUniforms = () => {
     // Filter to only active players (exclude withdrawn)
     const activePlayers = (players || []).filter(p => p.status !== 'withdrawn');
     
-    // Get unique pants sizes from active players
-    const allPantsSizes = Array.from(
-      new Set(activePlayers.map(p => p.uniform_pants_size).filter(Boolean))
-    ).sort();
+    // Get unique pants sizes from active players and sort by custom order
+    const allPantsSizes = sortSizes(
+      Array.from(new Set(activePlayers.map(p => p.uniform_pants_size).filter(Boolean)))
+    );
 
     // Count pants by size for all active players
     const pantsCountsBySize = allPantsSizes.reduce((acc, size) => {
@@ -91,10 +112,10 @@ const TeamUniforms = () => {
     // Only count drafted players (players assigned to a team)
     const draftedPlayers = (players || []).filter(p => p.team_id && p.status !== 'withdrawn');
     
-    // Get all unique shirt sizes
-    const shirtSizes = Array.from(
-      new Set(draftedPlayers.map(p => p.uniform_shirt_size).filter(Boolean))
-    ).sort();
+    // Get all unique shirt sizes and sort by custom order
+    const shirtSizes = sortSizes(
+      Array.from(new Set(draftedPlayers.map(p => p.uniform_shirt_size).filter(Boolean)))
+    );
 
     // Custom division display order
     const divisionOrder = [
@@ -182,13 +203,14 @@ const TeamUniforms = () => {
     const draftedPlayers = (filteredPlayers || []).filter(p => p.team_id);
 
     // Build size columns dynamically from the CURRENT season's drafted player data
-    const shirtSizes = Array.from(
-      new Set(draftedPlayers.map(p => p.uniform_shirt_size).filter(Boolean))
-    ).sort();
+    // Sort sizes by custom order
+    const shirtSizes = sortSizes(
+      Array.from(new Set(draftedPlayers.map(p => p.uniform_shirt_size).filter(Boolean)))
+    );
 
-    const pantsSizes = Array.from(
-      new Set(draftedPlayers.map(p => p.uniform_pants_size).filter(Boolean))
-    ).sort();
+    const pantsSizes = sortSizes(
+      Array.from(new Set(draftedPlayers.map(p => p.uniform_pants_size).filter(Boolean)))
+    );
 
     // Overall shirt counts by size (using filtered players)
     const overallShirtCounts = shirtSizes.reduce((acc, size) => {

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Edit, Trash2, Save, Users, Shield, AlertCircle, Mail, Phone, ChevronDown, ChevronUp, Download } from 'lucide-react'; // Added Download import
+import { Plus, Edit, Trash2, Save, Users, Shield, AlertCircle, Mail, Phone, ChevronDown, ChevronUp, Download } from 'lucide-react';
 import Modal from '../components/Modal';
 import api, { teamsAPI, divisionsAPI, seasonsAPI } from '../services/api';
 import { getPermissionErrorMessage } from '../utils/permissionHelpers';
@@ -15,6 +15,7 @@ const Teams = () => {
   const [error, setError] = useState(null);
   const [expandedTeam, setExpandedTeam] = useState(null);
   const [selectedTeam, setSelectedTeam] = useState('');
+  const [boardMembers, setBoardMembers] = useState([]); // ADDED: Board members state
   
   // Form states
   const [showTeamForm, setShowTeamForm] = useState(false);
@@ -28,8 +29,206 @@ const Teams = () => {
   const [customColor, setCustomColor] = useState('');
   const [usingCustomColor, setUsingCustomColor] = useState(false);
 
+  // Helper function to get uniform shirt size from multiple possible field names
+  const getUniformShirtSize = (player) => {
+    const possibleFields = [
+      player.uniform_shirt_size,
+      player.uniform_shirt,
+      player.shirt_size,
+      player.shirt
+    ];
+    
+    for (const field of possibleFields) {
+      if (field && field !== 'N/A' && field !== '' && field !== 'None') {
+        return field;
+      }
+    }
+    return 'N/A';
+  };
+
+  // Helper function to get uniform pants size from multiple possible field names
+  const getUniformPantsSize = (player) => {
+    const possibleFields = [
+      player.uniform_pant_size,
+      player.uniform_pants_size,
+      player.uniform_pants,
+      player.pants_size,
+      player.pant_size,
+      player.pants
+    ];
+    
+    for (const field of possibleFields) {
+      if (field && field !== 'N/A' && field !== '' && field !== 'None') {
+        return field;
+      }
+    }
+    return 'N/A';
+  };
+
+  // Helper function to get uniform shirt color
+  const getUniformShirtColor = (player) => {
+    return player.uniform_shirt_color || '';
+  };
+
+  // Helper function to get uniform pants color
+  const getUniformPantsColor = (player) => {
+    return player.uniform_pant_color || '';
+  };
+
+  // Helper function to get payment status display
+  const getPaymentStatus = (player) => {
+    if (player.payment_received === true) {
+      return { label: 'Paid', className: 'bg-green-100 text-green-800' };
+    } else if (player.payment_received === false) {
+      return { label: 'Pending', className: 'bg-red-100 text-red-800' };
+    }
+    return { label: 'Unknown', className: 'bg-gray-100 text-gray-800' };
+  };
+
+  // Helper function to get workbond check status display - MATCHES PLAYERS.JSX LOGIC
+  const getWorkbondStatus = (player) => {
+    // First, check if this family has any board members
+    const hasBoardMember = boardMembers.some(bm => bm.family_id === player.family_id);
+    
+    // If board member family, show EXEMPT regardless of workbond status
+    if (hasBoardMember) {
+      return { 
+        label: 'Board Member - Exempt', 
+        className: 'bg-purple-100 text-purple-800',
+        notes: player.season_workbond?.notes || ''
+      };
+    }
+    
+    // Check if workbond data exists
+    if (player.season_workbond) {
+      // Check if notes contain "Exempt" (case insensitive)
+      const notes = player.season_workbond.notes || '';
+      if (notes.toLowerCase().includes('exempt')) {
+        return { 
+          label: 'Exempt', 
+          className: 'bg-purple-100 text-purple-800',
+          notes: notes
+        };
+      }
+      
+      // Check if received is true
+      if (player.season_workbond.received === true) {
+        return { 
+          label: 'Received', 
+          className: 'bg-green-100 text-green-800',
+          notes: notes
+        };
+      }
+      
+      // Has notes but not received
+      if (notes && notes.trim() !== '') {
+        return { 
+          label: 'Not Received', 
+          className: 'bg-yellow-100 text-yellow-800',
+          notes: notes
+        };
+      }
+      
+      // No notes and not received
+      return { 
+        label: 'Not Received', 
+        className: 'bg-yellow-100 text-yellow-800',
+        notes: ''
+      };
+    }
+    
+    return { label: 'Not Received', className: 'bg-yellow-100 text-yellow-800', notes: '' };
+  };
+
+  // ADDED: Function to load board members
+  const loadBoardMembers = async () => {
+    try {
+      console.log('Loading board members...');
+      const token = localStorage.getItem('slm_token');
+      const response = await fetch('/api/board-members', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (response.ok) {
+        const responseData = await response.json();
+        let boardMembersData = [];
+        
+        if (Array.isArray(responseData)) {
+          boardMembersData = responseData;
+        } else if (responseData.data && Array.isArray(responseData.data)) {
+          boardMembersData = responseData.data;
+        }
+        
+        // Filter to only active board members with family_ids
+        const activeBoardMembers = boardMembersData.filter(bm => 
+          bm.is_active === true && bm.family_id
+        );
+        
+        console.log('Active board members with family_ids:', activeBoardMembers.length);
+        setBoardMembers(activeBoardMembers);
+      }
+    } catch (error) {
+      console.error('Error loading board members:', error);
+    }
+  };
+
+  // ADDED: Function to fetch workbond data for players
+  const enhancePlayersWithWorkbond = async (playersData, seasonId) => {
+    if (!playersData || playersData.length === 0 || !seasonId) return playersData;
+    
+    try {
+      // Get family IDs from players
+      const familyIds = playersData.map(p => p.family_id).filter(Boolean);
+      if (familyIds.length === 0) return playersData;
+      
+      // Fetch workbond data
+      const token = localStorage.getItem('slm_token');
+      const response = await fetch(`/api/family-season-workbond/batch`, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ 
+          family_ids: familyIds,
+          season_id: seasonId 
+        })
+      });
+      
+      if (!response.ok) {
+        console.error('Failed to fetch workbond data');
+        return playersData;
+      }
+      
+      const workbondRecords = await response.json();
+      
+      // Create lookup map
+      const workbondMap = new Map();
+      workbondRecords.forEach(record => {
+        workbondMap.set(record.family_id, record);
+      });
+      
+      // Enhance players with workbond data
+      return playersData.map(player => ({
+        ...player,
+        season_workbond: workbondMap.get(player.family_id) || {
+          received: false,
+          notes: ''
+        }
+      }));
+      
+    } catch (error) {
+      console.error('Error enhancing players with workbond:', error);
+      return playersData;
+    }
+  };
+
   useEffect(() => {
     loadData();
+    loadBoardMembers(); // Load board members
   }, [selectedSeason, selectedDivision, selectedTeam]);
 
   const loadData = async () => {
@@ -45,9 +244,24 @@ const Teams = () => {
         seasonsAPI.getAll(),
       ]);
 
-      const teamsData = Array.isArray(teamsRes.data) ? teamsRes.data : [];
+      let teamsData = Array.isArray(teamsRes.data) ? teamsRes.data : [];
       const divisionsData = Array.isArray(divisionsRes.data) ? divisionsRes.data : [];
       const seasonsData = Array.isArray(seasonsRes.data) ? seasonsRes.data : [];
+      
+      // If a season is selected, enhance players with workbond data for that season
+      if (selectedSeason) {
+        // Enhance each team's players with workbond data
+        const enhancedTeams = await Promise.all(
+          teamsData.map(async (team) => {
+            if (team.players && team.players.length > 0) {
+              const enhancedPlayers = await enhancePlayersWithWorkbond(team.players, selectedSeason);
+              return { ...team, players: enhancedPlayers };
+            }
+            return team;
+          })
+        );
+        teamsData = enhancedTeams;
+      }
       
       // Filter teams by selected season and division if applicable
       let filteredTeams = teamsData;
@@ -85,7 +299,7 @@ const Teams = () => {
     }
   };
 
-     const generateSCImportFile = () => {
+  const generateSCImportFile = () => {
     try {
       console.log('Generating SC Team Import File...');
       
@@ -536,7 +750,11 @@ const Teams = () => {
                         <h4 className="text-lg font-medium text-gray-900 mb-4">Players ({team.player_count || 0})</h4>
                         {team.players && team.players.length > 0 ? (
                           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                            {team.players.map(player => (
+                            {team.players.map(player => {
+                              const paymentStatus = getPaymentStatus(player);
+                              const workbondStatus = getWorkbondStatus(player);
+                              
+                              return (
                               <div key={player.id} className="bg-white border border-gray-200 rounded-lg p-4">
                                 {/* Player Basic Info */}
                                 <div className="mb-3">
@@ -558,7 +776,7 @@ const Teams = () => {
                                   </div>
                                 </div>
 
-                                {/* Player Attributes */}
+                                {/* Player Attributes - UPDATED with correct field names */}
                                 <div className="grid grid-cols-2 gap-2 text-xs mb-3">
                                   <div className="space-y-1">
                                     <p className="text-gray-500">Program</p>
@@ -567,20 +785,27 @@ const Teams = () => {
                                   <div className="space-y-1">
                                     <p className="text-gray-500">Travel</p>
                                     <p className="font-medium text-gray-900">
-                                      {player.travel_player === 'Yes' ? 'Travel Player' : 'Rec Only'}
+                                      {player.travel_player === 'Yes' || player.is_travel_player === true ? 'Travel Player' : 'Rec Only'}
                                     </p>
                                   </div>
                                   <div className="space-y-1">
                                     <p className="text-gray-500">Payment Status</p>
-                                    <p className="font-medium text-gray-900">
-                                      {player.payment_status || 'Unknown'}
+                                    <p className="font-medium">
+                                      <span className={`inline-flex items-center px-2 py-0.5 text-xs rounded-full ${paymentStatus.className}`}>
+                                        {paymentStatus.label}
+                                      </span>
                                     </p>
                                   </div>
                                   <div className="space-y-1">
                                     <p className="text-gray-500">Workbond Check</p>
-                                    <p className="font-medium text-gray-900">
-                                      {player.workbond_check_status || 'Unknown'}
-                                    </p>
+                                    <div>
+                                      <span className={`inline-flex items-center px-2 py-0.5 text-xs rounded-full ${workbondStatus.className}`}>
+                                        {workbondStatus.label}
+                                      </span>
+                                      {workbondStatus.notes && (
+                                        <p className="text-xs text-gray-500 mt-1">{workbondStatus.notes}</p>
+                                      )}
+                                    </div>
                                   </div>
                                 </div>
 
@@ -589,22 +814,22 @@ const Teams = () => {
                                   <div className="space-y-1">
                                     <p className="text-gray-500">Shirt</p>
                                     <p className="font-medium text-gray-900">
-                                      {player.uniform_shirt_size || 'N/A'}{' '}
-                                      {player.uniform_shirt_color ? `(${player.uniform_shirt_color})` : ''}
+                                      {getUniformShirtSize(player)}{' '}
+                                      {getUniformShirtColor(player) ? `(${getUniformShirtColor(player)})` : ''}
                                     </p>
                                   </div>
                                   <div className="space-y-1">
                                     <p className="text-gray-500">Pants</p>
                                     <p className="font-medium text-gray-900">
-                                      {player.uniform_pant_size || 'N/A'}{' '}
-                                      {player.uniform_pant_color ? `(${player.uniform_pant_color})` : ''}
+                                      {getUniformPantsSize(player)}{' '}
+                                      {getUniformPantsColor(player) ? `(${getUniformPantsColor(player)})` : ''}
                                     </p>
                                   </div>
                                 </div>
 
                                 {/* Medical & Notes */}
                                 <div className="text-xs space-y-1">
-                                  {player.medical_conditions && (
+                                  {player.medical_conditions && player.medical_conditions !== 'None' && player.medical_conditions !== 'none' && (
                                     <div>
                                       <p className="text-gray-500">Medical Conditions</p>
                                       <p className="text-gray-900">{player.medical_conditions}</p>
@@ -665,7 +890,8 @@ const Teams = () => {
                                   </div>
                                 )}
                               </div>
-                            ))}
+                            );
+                            })}
                           </div>
                         ) : (
                           <p className="text-sm text-gray-500">No players assigned to this team.</p>

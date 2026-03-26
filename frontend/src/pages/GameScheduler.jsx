@@ -454,22 +454,30 @@ const GameScheduler = () => {
     setNewTimeForm({ day: 'Monday', time: '18:00:00' });
   };
 
-  // Add field with modal
+  // Add field with modal - FIXED: Only add slots for existing day/time combinations that already have slots
   const handleAddField = () => {
     if (!newFieldName.trim()) {
       alert('Please enter a field name');
       return;
     }
 
-    const newSlots = getScheduledDays().map(day => 
-      getUniqueTimes().map(time => ({
+    // Get existing day/time combinations that have at least one slot
+    const existingCombinations = new Set();
+    scheduleConfig.forEach(slot => {
+      existingCombinations.add(`${slot.day}-${slot.time}`);
+    });
+
+    // Create new slots for each existing day/time combination
+    const newSlots = Array.from(existingCombinations).map(combo => {
+      const [day, time] = combo.split('-');
+      return {
         id: `${day}-${time}-${newFieldName}`,
         day,
         time,
         field: newFieldName,
         division: ''
-      }))
-    ).flat();
+      };
+    });
     
     setScheduleConfig(prev => [...prev, ...newSlots]);
     setShowAddFieldModal(false);
@@ -1826,7 +1834,7 @@ const GameScheduler = () => {
                   <th className="border border-gray-300 px-4 py-2">EndTime</th>
                   <th className="border border-gray-300 px-4 py-2">Location</th>
                   <th className="border border-gray-300 px-4 py-2">Field</th>
-                </tr>
+                 </tr>
               </thead>
               <tbody>
                 {generatedGames.map(game => (

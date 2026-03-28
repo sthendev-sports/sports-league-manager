@@ -14,6 +14,17 @@ const DIVISION_SORT_ORDER = [
   'Challenger Division'
 ];
 
+const authFetch = (url, options = {}) => {
+  const token = localStorage.getItem('slm_token');
+  
+  return fetch(url, {
+    ...options,
+    headers: {
+      ...(options.headers || {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+};
 const sortDivisionName = (a, b) => {
   const ai = DIVISION_SORT_ORDER.indexOf(a);
   const bi = DIVISION_SORT_ORDER.indexOf(b);
@@ -79,29 +90,36 @@ useEffect(() => {
 }, [selectedDivision, selectedTeam]);
 
   const loadVolunteers = async () => {
-    try {
-      setLoading(true);
+  try {
+    setLoading(true);
 
-      const params = {};
-      if (selectedDivision) params.division_id = selectedDivision;
-      if (selectedSeason) params.season_id = selectedSeason;
+    const params = {};
+    if (selectedDivision) params.division_id = selectedDivision;
+    if (selectedSeason) params.season_id = selectedSeason;
 
-      const response = await api.get('/volunteers', { params });
-      let data = Array.isArray(response.data) ? response.data : [];
-
-      // Keep existing behavior: team filter is applied client-side
-      if (selectedTeam) {
-        data = data.filter(volunteer => volunteer.team_id === selectedTeam);
-      }
-
-      setVolunteers(data || []);
-    } catch (error) {
-      console.error('Error loading volunteers:', error);
-      setVolunteers([]);
-    } finally {
-      setLoading(false);
+    // Build URL with query params
+    let url = '/api/volunteers';
+    const queryParams = new URLSearchParams(params).toString();
+    if (queryParams) {
+      url += `?${queryParams}`;
     }
-  };
+    
+    const response = await authFetch(url); // Change this line
+    let data = Array.isArray(response.data) ? response.data : await response.json();
+
+    // Keep existing behavior: team filter is applied client-side
+    if (selectedTeam) {
+      data = data.filter(volunteer => volunteer.team_id === selectedTeam);
+    }
+
+    setVolunteers(data || []);
+  } catch (error) {
+    console.error('Error loading volunteers:', error);
+    setVolunteers([]);
+  } finally {
+    setLoading(false);
+  }
+};
 
    const loadDivisions = async () => {
     try {
@@ -124,40 +142,40 @@ useEffect(() => {
   };
 
   const loadTeams = async () => {
-    try {
-      // For teams, we need to filter by season through the API
-      // or we can get all teams and filter client-side
-      const response = await fetch('/api/teams');
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: Failed to load teams`);
-      }
-      const allTeams = await response.json();
-      
-      // Filter teams by selected season if a season is selected
-      let filteredTeams = allTeams || [];
-      if (selectedSeason) {
-        filteredTeams = filteredTeams.filter(team => 
-          team.season_id === selectedSeason
-        );
-      }
-      
-      setTeams(filteredTeams);
-    } catch (error) {
-      console.error('Error loading teams:', error);
-      setTeams([]);
+  try {
+    console.log('Loading teams for season:', selectedSeason);
+    
+    let url = '/api/teams';
+    if (selectedSeason) {
+      url += `?season_id=${selectedSeason}`;
     }
-  };
+    
+    console.log('Fetching teams from:', url);
+    const response = await authFetch(url); // Change this line
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: Failed to load teams`);
+    }
+    const teamsData = await response.json();
+    
+    console.log('Teams data received:', teamsData);
+    setTeams(teamsData || []);
+  } catch (error) {
+    console.error('Error loading teams:', error);
+    setTeams([]);
+  }
+};
 
   const loadSeasons = async () => {
-    try {
-      const response = await seasonsAPI.getAll();
-      const data = response.data;
-      setSeasons(Array.isArray(data) ? data : []);
-      if (Array.isArray(data) && data.length > 0) setSelectedSeason(data[0].id);
-    } catch (error) {
-      console.error('Error loading seasons:', error);
-    }
-  };
+  try {
+    const response = await authFetch('/api/seasons'); // Change this line
+    const data = await response.json();
+    setSeasons(Array.isArray(data) ? data : []);
+    if (Array.isArray(data) && data.length > 0) setSelectedSeason(data[0].id);
+  } catch (error) {
+    console.error('Error loading seasons:', error);
+  }
+};
 
   const loadAvailableTrainings = async () => {
     try {

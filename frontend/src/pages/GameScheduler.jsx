@@ -18,6 +18,10 @@ const GameScheduler = () => {
   });
   const [loadingStats, setLoadingStats] = useState(false);
 
+  // Game Duration Configuration per Division
+  const [divisionDurations, setDivisionDurations] = useState({});
+  const [showDurationModal, setShowDurationModal] = useState(false);
+
   // Test Mode State
   const [isTestMode, setIsTestMode] = useState(false);
   const [testDivisionConfig, setTestDivisionConfig] = useState([]);
@@ -38,11 +42,15 @@ const GameScheduler = () => {
   const [newFieldName, setNewFieldName] = useState('');
   const [editingSlot, setEditingSlot] = useState(null);
   const [editForm, setEditForm] = useState({ day: '', time: '' });
+  const [durationForm, setDurationForm] = useState({ divisionId: '', durationHours: 2 });
 
   // Days of week
   const daysOfWeek = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
   const defaultTimes = ['17:45:00', '19:45:00'];
   const defaultFields = ['Field #1', 'Field #2', 'Field #3'];
+
+  // Default game duration in minutes (2 hours)
+  const DEFAULT_GAME_DURATION_MINUTES = 120;
 
   // Slot templates from Excel - UPDATED 12-team template for complete round-robin
   const slotTemplates = {
@@ -287,6 +295,53 @@ const GameScheduler = () => {
     return `${year}-${month}-${day}`;
   };
 
+  // Helper function to parse time string to minutes since midnight
+  const timeToMinutes = (timeStr) => {
+    const [hours, minutes] = timeStr.split(':').map(Number);
+    return hours * 60 + minutes;
+  };
+
+  // Helper function to convert minutes to time string (HH:MM:SS)
+  const minutesToTime = (minutes) => {
+    const hours = Math.floor(minutes / 60);
+    const mins = minutes % 60;
+    return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:00`;
+  };
+
+  // Calculate end time based on next game on same field or division duration
+  const calculateEndTimeWithContext = (startTime, field, dateStr, divisionName, allGamesForDate, gameIndex, divisionDurationMinutes = null) => {
+    // First, check if there's a division-specific duration set
+    let durationMinutes = divisionDurationMinutes || DEFAULT_GAME_DURATION_MINUTES;
+    
+    // Get all games on the same field for the same date
+    const gamesOnSameField = allGamesForDate
+      .filter(g => g.Field === field)
+      .sort((a, b) => a.StartTime.localeCompare(b.StartTime));
+    
+    // Find this game's position in the list
+    const currentGameIndex = gamesOnSameField.findIndex(g => g.StartTime === startTime);
+    
+    // If there's a next game on the same field, end time should be the next game's start time
+    if (currentGameIndex !== -1 && currentGameIndex + 1 < gamesOnSameField.length) {
+      const nextGameStartTime = gamesOnSameField[currentGameIndex + 1].StartTime;
+      const startMinutes = timeToMinutes(startTime);
+      const nextStartMinutes = timeToMinutes(nextGameStartTime);
+      
+      // Calculate the duration between games
+      const gapMinutes = nextStartMinutes - startMinutes;
+      
+      // If the gap is less than the default duration, use the gap (back-to-back games)
+      if (gapMinutes < durationMinutes) {
+        return nextGameStartTime; // End when next game starts
+      }
+    }
+    
+    // If no next game or gap is larger than default, use the configured duration
+    const startMinutes = timeToMinutes(startTime);
+    const endMinutes = startMinutes + durationMinutes;
+    return minutesToTime(endMinutes);
+  };
+
   // Load dashboard stats for registration counts
   const loadDashboardStats = async (seasonId) => {
     if (!seasonId) return;
@@ -311,6 +366,7 @@ const GameScheduler = () => {
   useEffect(() => {
     const savedTestMode = localStorage.getItem('gameSchedulerTestMode');
     const savedTestConfig = localStorage.getItem('gameSchedulerTestConfig');
+    const savedDivisionDurations = localStorage.getItem('gameSchedulerDivisionDurations');
     
     if (savedTestMode) {
       setIsTestMode(savedTestMode === 'true');
@@ -323,6 +379,13 @@ const GameScheduler = () => {
         console.error('Error loading test config:', e);
       }
     }
+    if (savedDivisionDurations) {
+      try {
+        setDivisionDurations(JSON.parse(savedDivisionDurations));
+      } catch (e) {
+        console.error('Error loading division durations:', e);
+      }
+    }
   }, []);
 
   useEffect(() => {
@@ -330,7 +393,8 @@ const GameScheduler = () => {
     if (testDivisionConfig.length > 0) {
       localStorage.setItem('gameSchedulerTestConfig', JSON.stringify(testDivisionConfig));
     }
-  }, [isTestMode, testDivisionConfig]);
+    localStorage.setItem('gameSchedulerDivisionDurations', JSON.stringify(divisionDurations));
+  }, [isTestMode, testDivisionConfig, divisionDurations]);
 
   // Load ALL data including saved configuration
   useEffect(() => {
@@ -554,6 +618,23 @@ const GameScheduler = () => {
     
     const division = dashboardStats.divisions.find(d => d.name === divisionName);
     return division?.current || 0;
+  };
+
+  // Get division duration
+  const getDivisionDuration = (divisionName) => {
+    const division = divisions.find(d => d.name === divisionName);
+    if (division && divisionDurations[division.id]) {
+      return divisionDurations[division.id];
+    }
+    return DEFAULT_GAME_DURATION_MINUTES;
+  };
+
+  // Set division duration
+  const setDivisionDuration = (divisionId, durationHours) => {
+    setDivisionDurations(prev => ({
+      ...prev,
+      [divisionId]: durationHours * 60 // Store in minutes
+    }));
   };
 
   // Calculate game counts per team
@@ -807,9 +888,13 @@ const GameScheduler = () => {
 
     const getPairKey = (a, b) => [Math.min(a, b), Math.max(a, b)].join('-');
 
+    // Store games for each date to calculate end times later
+    const gamesByDate = {};
+
     Object.entries(teamsByDivision).forEach(([divisionName, divisionTeams]) => {
       const teamCount = divisionTeams.length;
       const divisionSlots = scheduleConfig.filter(slot => slot.division === divisionName);
+      const divisionDurationMinutes = getDivisionDuration(divisionName);
 
       if (divisionSlots.length === 0) {
         console.log(`No slots assigned for ${divisionName}, skipping`);
@@ -837,6 +922,7 @@ const GameScheduler = () => {
       console.log(`  Total weeks: ${seasonWeeks}`);
       console.log(`  Expected games per team: ${expectedGamesPerTeam}`);
       console.log(`  Template games per cycle: ${template.length}`);
+      console.log(`  Game Duration: ${divisionDurationMinutes / 60} hours`);
 
       // Group slots by day
       const slotsByDay = {};
@@ -1014,20 +1100,27 @@ const GameScheduler = () => {
 
           const homeTeam = teams[selectedMatchup.home];
           const awayTeam = teams[selectedMatchup.away];
-          const endTime = calculateEndTime(slot.time);
 
-          games.push({
+          const game = {
             SortOrder: sortOrder++,
             RoundNo: week,
             HomeTeam: homeTeam.name,
             AwayTeam: awayTeam.name,
             MatchDate: slot.dateStr,
             StartTime: slot.time,
-            EndTime: endTime,
+            EndTime: slot.time, // Placeholder, will calculate after all games are created
             Location: 'Sayreville Little League',
             Field: slot.field,
             Division: divisionName
-          });
+          };
+
+          games.push(game);
+
+          // Group by date for end time calculation
+          if (!gamesByDate[slot.dateStr]) {
+            gamesByDate[slot.dateStr] = [];
+          }
+          gamesByDate[slot.dateStr].push(game);
 
           // Update trackers
           playedToday.add(selectedMatchup.home);
@@ -1079,6 +1172,51 @@ const GameScheduler = () => {
           console.warn(
             `${divisionName}: ${day} has ${slots.length} slot(s), but with ${teamCount} teams you can only schedule ${maxGamesPossibleThatDay} game(s) that day without a same-day doubleheader.`
           );
+        }
+      });
+    });
+
+    // Calculate end times for all games based on consecutive games on same field
+    Object.values(gamesByDate).forEach(dateGames => {
+      // Sort games by start time for each field
+      const gamesByField = {};
+      dateGames.forEach(game => {
+        if (!gamesByField[game.Field]) {
+          gamesByField[game.Field] = [];
+        }
+        gamesByField[game.Field].push(game);
+      });
+
+      // Sort each field's games by start time
+      Object.values(gamesByField).forEach(fieldGames => {
+        fieldGames.sort((a, b) => a.StartTime.localeCompare(b.StartTime));
+        
+        // Calculate end times
+        for (let i = 0; i < fieldGames.length; i++) {
+          const game = fieldGames[i];
+          const divisionDuration = getDivisionDuration(game.Division);
+          
+          // Check if there's a next game on the same field
+          if (i + 1 < fieldGames.length) {
+            const nextGame = fieldGames[i + 1];
+            const startMinutes = timeToMinutes(game.StartTime);
+            const nextStartMinutes = timeToMinutes(nextGame.StartTime);
+            const gapMinutes = nextStartMinutes - startMinutes;
+            
+            // If the gap is less than or equal to the division duration, use the next start time as end time
+            if (gapMinutes <= divisionDuration) {
+              game.EndTime = nextGame.StartTime;
+            } else {
+              // Otherwise use the division duration
+              const endMinutes = startMinutes + divisionDuration;
+              game.EndTime = minutesToTime(endMinutes);
+            }
+          } else {
+            // Last game on field - use division duration
+            const startMinutes = timeToMinutes(game.StartTime);
+            const endMinutes = startMinutes + divisionDuration;
+            game.EndTime = minutesToTime(endMinutes);
+          }
         }
       });
     });
@@ -1153,12 +1291,6 @@ const GameScheduler = () => {
     return 'TBD';
   };
 
-  const calculateEndTime = (startTime) => {
-    const [hours, minutes] = startTime.split(':').map(Number);
-    const endHours = hours + 2;
-    return `${endHours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:00`;
-  };
-
   // Function to reset ALL configuration
   const resetAllConfiguration = () => {
     if (window.confirm('Are you sure you want to reset ALL configuration? This will clear everything.')) {
@@ -1168,6 +1300,7 @@ const GameScheduler = () => {
       localStorage.removeItem('gameSchedulerSelectedSeason');
       localStorage.removeItem('gameSchedulerTestMode');
       localStorage.removeItem('gameSchedulerTestConfig');
+      localStorage.removeItem('gameSchedulerDivisionDurations');
       
       setSeasonStartDate('');
       setSeasonWeeks(10);
@@ -1175,6 +1308,7 @@ const GameScheduler = () => {
       setIsTestMode(false);
       setTestDivisionConfig([]);
       setIsTestConfigSaved(false);
+      setDivisionDurations({});
       initializeScheduleConfig();
       
       alert('All configuration reset successfully');
@@ -1191,6 +1325,7 @@ const GameScheduler = () => {
       isTestMode,
       testDivisionConfig,
       isTestConfigSaved,
+      divisionDurations,
       exportDate: new Date().toISOString()
     };
     
@@ -1218,6 +1353,7 @@ const GameScheduler = () => {
         if (configData.isTestMode !== undefined) setIsTestMode(configData.isTestMode);
         if (configData.testDivisionConfig) setTestDivisionConfig(configData.testDivisionConfig);
         if (configData.isTestConfigSaved) setIsTestConfigSaved(configData.isTestConfigSaved);
+        if (configData.divisionDurations) setDivisionDurations(configData.divisionDurations);
         alert('Schedule configuration imported successfully!');
       } catch (error) {
         alert('Error importing configuration: ' + error.message);
@@ -1246,6 +1382,27 @@ const GameScheduler = () => {
     window.URL.revokeObjectURL(url);
   };
 
+  // Open duration configuration modal
+  const openDurationModal = () => {
+    setDurationForm({ divisionId: '', durationHours: 2 });
+    setShowDurationModal(true);
+  };
+
+  // Save division duration
+  const saveDivisionDuration = () => {
+    if (!durationForm.divisionId) {
+      alert('Please select a division');
+      return;
+    }
+    if (durationForm.durationHours < 0.5 || durationForm.durationHours > 4) {
+      alert('Duration must be between 0.5 and 4 hours');
+      return;
+    }
+    setDivisionDuration(durationForm.divisionId, durationForm.durationHours);
+    setShowDurationModal(false);
+    alert(`Game duration for ${divisions.find(d => d.id === durationForm.divisionId)?.name} set to ${durationForm.durationHours} hours`);
+  };
+
   // Modal footers
   const AddTimeModalFooter = (
     <div className="flex justify-end space-x-3">
@@ -1272,6 +1429,13 @@ const GameScheduler = () => {
     <div className="flex justify-end space-x-3">
       <button onClick={() => setShowTestConfigModal(false)} className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50">Cancel</button>
       <button onClick={saveTestConfig} className="px-4 py-2 bg-purple-600 text-white rounded-md text-sm font-medium hover:bg-purple-700">Save Test Configuration</button>
+    </div>
+  );
+
+  const DurationModalFooter = (
+    <div className="flex justify-end space-x-3">
+      <button onClick={() => setShowDurationModal(false)} className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50">Cancel</button>
+      <button onClick={saveDivisionDuration} className="px-4 py-2 bg-green-600 text-white rounded-md text-sm font-medium hover:bg-green-700">Save Duration</button>
     </div>
   );
 
@@ -1394,6 +1558,36 @@ const GameScheduler = () => {
         </div>
       </div>
 
+      {/* Game Duration Configuration */}
+      <div className="bg-white shadow rounded-lg p-6 mb-6">
+        <div className="flex justify-between items-center mb-4">
+          <h2 className="text-xl font-semibold">Game Duration Settings</h2>
+          <button
+            onClick={openDurationModal}
+            className="inline-flex items-center px-3 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+          >
+            <Clock className="h-4 w-4 mr-1" />
+            Configure Division Durations
+          </button>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+          {divisions.map(division => {
+            const durationMinutes = divisionDurations[division.id] || DEFAULT_GAME_DURATION_MINUTES;
+            return (
+              <div key={division.id} className="flex items-center justify-between bg-gray-50 p-3 rounded-lg border border-gray-200">
+                <span className="font-medium text-gray-700">{division.name}</span>
+                <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-bold bg-green-100 text-green-800">
+                  {durationMinutes / 60} {durationMinutes / 60 === 1 ? 'hour' : 'hours'}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+        <p className="text-xs text-gray-500 mt-3">
+          Default: 2 hours. When games are back-to-back on the same field, the end time will automatically adjust to the next game's start time.
+        </p>
+      </div>
+
       {/* Division Assignment Table */}
       <div className="bg-white shadow rounded-lg p-6 mb-6">
         <div className="flex justify-between items-center mb-4">
@@ -1446,7 +1640,7 @@ const GameScheduler = () => {
           </div>
         </div>
 
-{/* Field Management */}
+        {/* Field Management */}
         <div className="mb-4">
           <h3 className="text-lg font-medium text-gray-900 mb-2">Division Assignments</h3>
           <div className="flex flex-wrap gap-2">
@@ -1535,60 +1729,58 @@ const GameScheduler = () => {
         </div>
       </div>
 
-        {/* Division Schedule Summary */}
-        <div className="mb-6 p-4 bg-gray-50 rounded-lg">
-          <h3 className="text-lg font-medium text-gray-900 mb-3 flex items-center">
-            <CalendarRange className="h-5 w-5 mr-2 text-green-600" />
-            Division Schedule Summary
-          </h3>
-          <div className="space-y-4">
-            {Object.entries(divisionScheduleSummary)
-              .sort(([aName], [bName]) => {
-                const order = [
-                  'T-Ball Division',
-                  'Baseball - Coach Pitch Division',
-                  'Baseball - Rookies Division',
-                  'Baseball - Minors Division',
-                  'Baseball - Majors Division',
-                  'Softball - Rookies Division (Coach Pitch)',
-                  'Softball - Minors Division',
-                  'Softball - Majors Division',
-                  'Challenger Division'
-                ];
-                return order.indexOf(aName) - order.indexOf(bName);
-              })
-              .map(([divisionName, days]) => (
-                <div key={divisionName} className="bg-white rounded-lg p-4 border border-gray-200">
-                  <h4 className="font-semibold text-gray-800 mb-2">{divisionName}</h4>
-                  <div className="space-y-2">
-                    {Object.entries(days)
-                      .sort(([aDay], [bDay]) => daysOfWeek.indexOf(aDay) - daysOfWeek.indexOf(bDay))
-                      .map(([day, times]) => (
-                        <div key={day} className="flex items-start">
-                          <span className="w-24 text-sm font-medium text-gray-600">{day.substring(0,3)} |</span>
-                          <div className="flex-1 flex flex-wrap gap-2">
-                            {Object.entries(times)
-                              .sort(([aTime], [bTime]) => aTime.localeCompare(bTime))
-                              .map(([time, fields]) => (
-                                <div key={time} className="flex items-center flex-wrap">
-                                  <span className="text-sm font-medium text-gray-700 mr-1">
-                                    {time.substring(0,5)}
-                                  </span>
-                                  <span className="text-sm text-gray-500 mr-2">
-                                    ({fields.join(', ')})|
-                                  </span>
-                                </div>
-                              ))}
-                          </div>
+      {/* Division Schedule Summary */}
+      <div className="mb-6 p-4 bg-gray-50 rounded-lg">
+        <h3 className="text-lg font-medium text-gray-900 mb-3 flex items-center">
+          <CalendarRange className="h-5 w-5 mr-2 text-green-600" />
+          Division Schedule Summary
+        </h3>
+        <div className="space-y-4">
+          {Object.entries(divisionScheduleSummary)
+            .sort(([aName], [bName]) => {
+              const order = [
+                'T-Ball Division',
+                'Baseball - Coach Pitch Division',
+                'Baseball - Rookies Division',
+                'Baseball - Minors Division',
+                'Baseball - Majors Division',
+                'Softball - Rookies Division (Coach Pitch)',
+                'Softball - Minors Division',
+                'Softball - Majors Division',
+                'Challenger Division'
+              ];
+              return order.indexOf(aName) - order.indexOf(bName);
+            })
+            .map(([divisionName, days]) => (
+              <div key={divisionName} className="bg-white rounded-lg p-4 border border-gray-200">
+                <h4 className="font-semibold text-gray-800 mb-2">{divisionName}</h4>
+                <div className="space-y-2">
+                  {Object.entries(days)
+                    .sort(([aDay], [bDay]) => daysOfWeek.indexOf(aDay) - daysOfWeek.indexOf(bDay))
+                    .map(([day, times]) => (
+                      <div key={day} className="flex items-start">
+                        <span className="w-24 text-sm font-medium text-gray-600">{day.substring(0,3)} |</span>
+                        <div className="flex-1 flex flex-wrap gap-2">
+                          {Object.entries(times)
+                            .sort(([aTime], [bTime]) => aTime.localeCompare(bTime))
+                            .map(([time, fields]) => (
+                              <div key={time} className="flex items-center flex-wrap">
+                                <span className="text-sm font-medium text-gray-700 mr-1">
+                                  {time.substring(0,5)}
+                                </span>
+                                <span className="text-sm text-gray-500 mr-2">
+                                  ({fields.join(', ')})|
+                                </span>
+                              </div>
+                            ))}
                         </div>
-                      ))}
-                  </div>
+                      </div>
+                    ))}
                 </div>
-              ))}
-          </div>
+              </div>
+            ))}
         </div>
-
-        
+      </div>
 
       {/* Add Time Modal */}
       <Modal isOpen={showAddTimeModal} onClose={() => setShowAddTimeModal(false)} title="Add New Time Slot" footer={AddTimeModalFooter}>
@@ -1641,6 +1833,49 @@ const GameScheduler = () => {
               className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
             />
           </div>
+        </div>
+      </Modal>
+
+      {/* Duration Config Modal */}
+      <Modal isOpen={showDurationModal} onClose={() => setShowDurationModal(false)} title="Configure Game Duration by Division" footer={DurationModalFooter}>
+        <div className="space-y-4">
+          <p className="text-sm text-gray-600">
+            Set how long each game should be for each division. When games are back-to-back on the same field, the end time will automatically adjust to the next game's start time.
+          </p>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Select Division</label>
+            <select
+              value={durationForm.divisionId}
+              onChange={(e) => setDurationForm({ ...durationForm, divisionId: e.target.value })}
+              className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-green-500 focus:border-green-500"
+            >
+              <option value="">Select a division</option>
+              {divisions.map(division => (
+                <option key={division.id} value={division.id}>{division.name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Game Duration (hours)</label>
+            <input
+              type="number"
+              value={durationForm.durationHours}
+              onChange={(e) => setDurationForm({ ...durationForm, durationHours: parseFloat(e.target.value) })}
+              step="0.5"
+              min="0.5"
+              max="4"
+              className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-green-500 focus:border-green-500"
+            />
+            <p className="text-xs text-gray-500 mt-1">Choose between 0.5 and 4 hours (default: 2 hours)</p>
+          </div>
+          {durationForm.divisionId && (
+            <div className="p-3 bg-green-50 rounded-lg">
+              <p className="text-sm text-green-800">
+                {divisions.find(d => d.id === durationForm.divisionId)?.name} games will be scheduled for {durationForm.durationHours} hour{durationForm.durationHours !== 1 ? 's' : ''}.
+                If another game is scheduled on the same field immediately after, the end time will be the start time of the next game.
+              </p>
+            </div>
+          )}
         </div>
       </Modal>
 
@@ -1834,7 +2069,7 @@ const GameScheduler = () => {
                   <th className="border border-gray-300 px-4 py-2">EndTime</th>
                   <th className="border border-gray-300 px-4 py-2">Location</th>
                   <th className="border border-gray-300 px-4 py-2">Field</th>
-                 </tr>
+                </tr>
               </thead>
               <tbody>
                 {generatedGames.map(game => (

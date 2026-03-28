@@ -1373,122 +1373,139 @@ const getFilteredSponsors = () => {
                     </th>
                   </tr>
                 </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {filteredSponsors.map((sponsor) => (
-                    <tr key={sponsor.id} className={sponsor.is_active ? '' : 'bg-gray-50'}>
-                      <td className="px-6 py-4">
-                        <div className="text-sm font-medium text-gray-900">
-                          {sponsor.company_name}
-                        </div>
-                        {sponsor.notes && (
-                          <div className="text-xs text-gray-500 mt-1">{sponsor.notes}</div>
-                        )}
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="text-sm text-gray-900">{sponsor.contact_name}</div>
-                        {sponsor.email && (
-                          <div className="text-xs text-gray-500 flex items-center mt-1">
-                            <Mail className="h-3 w-3 mr-1" />
-                            {sponsor.email}
-                          </div>
-                        )}
-                        {sponsor.phone && (
-                          <div className="text-xs text-gray-500 flex items-center mt-1">
-                            <Phone className="h-3 w-3 mr-1" />
-                            {sponsor.phone}
-                          </div>
-                        )}
-                      </td>
-                      <td className="px-6 py-4">
-                        {sponsor.contacted_this_season ? (
-                          <span className="inline-flex items-center px-2 py-1 text-xs bg-green-100 text-green-800 rounded-full">
-                            <CheckCircle className="h-3 w-3 mr-1" />
-                            Contacted
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center px-2 py-1 text-xs bg-yellow-100 text-yellow-800 rounded-full">
-                            <XCircle className="h-3 w-3 mr-1" />
-                            Not Contacted
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-6 py-4">
-  <div className="text-sm">
-    <div className="flex flex-col gap-1">
-      {sponsor.locations && Array.isArray(sponsor.locations) && sponsor.locations.map((loc, idx) => (
-        <span key={idx} className="inline-flex items-center px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded">
-          {loc.field} - {loc.location} (${loc.price})
-        </span>
-      ))}
-    </div>
-  </div>
-</td>
-                      <td className="px-6 py-4">
-                        <div className="text-sm font-medium text-gray-900">
-                          ${sponsor.total_amount || 0}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="space-y-1">
-                          {sponsor.is_new_sponsor && (
-                            <span className="inline-flex items-center px-2 py-1 text-xs bg-purple-100 text-purple-800 rounded-full">
-                              New
-                            </span>
-                          )}
-                          {sponsor.is_returning && (
-                            <span className="inline-flex items-center px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded-full">
-                              Returning
-                            </span>
-                          )}
-                          {sponsor.purchased_new_sign && (
-                            <span className="inline-flex items-center px-2 py-1 text-xs bg-green-100 text-green-800 rounded-full">
-                              New Sign
-                            </span>
-                          )}
-                          {sponsor.upgraded_location && (
-                            <span className="inline-flex items-center px-2 py-1 text-xs bg-yellow-100 text-yellow-800 rounded-full">
-                              Upgraded
-                            </span>
-                          )}
-                          {sponsor.downgraded_location && (
-                            <span className="inline-flex items-center px-2 py-1 text-xs bg-orange-100 text-orange-800 rounded-full">
-                              Downgraded
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4">
-                        {sponsor.has_paid ? (
-                          <span className="inline-flex items-center px-2 py-1 text-xs bg-green-100 text-green-800 rounded-full">
-                            Paid
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center px-2 py-1 text-xs bg-red-100 text-red-800 rounded-full">
-                            Unpaid
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-6 py-4 text-sm font-medium">
-                        {canEdit && (
-                          <button
-                            onClick={() => handleEdit(sponsor)}
-                            className="text-blue-600 hover:text-blue-900 mr-4"
-                          >
-                            Edit
-                          </button>
-                        )}
-                        {canDelete && (
-                          <button
-                            onClick={() => handleDelete(sponsor.id)}
-                            className="text-red-600 hover:text-red-900"
-                          >
-                            Delete
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
+                <tbody>
+  {filteredSponsors.map((sponsor, index) => (
+    <React.Fragment key={sponsor.id}>
+      {/* Sponsor row */}
+      <tr style={{ backgroundColor: sponsor.is_active ? 'white' : '#f9fafb' }}>
+        <td className="px-6 py-4">
+          <div className="text-sm font-medium text-gray-900">
+            {sponsor.company_name}
+          </div>
+          {sponsor.notes && (
+            <div className="text-xs text-gray-500 mt-1">{sponsor.notes}</div>
+          )}
+        </td>
+        <td className="px-6 py-4">
+          <div className="text-sm text-gray-900">{sponsor.contact_name}</div>
+          {sponsor.email && (
+            <div className="text-xs text-gray-500 flex items-center mt-1">
+              <Mail className="h-3 w-3 mr-1" />
+              {sponsor.email}
+            </div>
+          )}
+          {sponsor.phone && (
+            <div className="text-xs text-gray-500 flex items-center mt-1">
+              <Phone className="h-3 w-3 mr-1" />
+              {sponsor.phone}
+            </div>
+          )}
+        </td>
+        <td className="px-6 py-4">
+          {sponsor.contacted_this_season ? (
+            <span className="inline-flex items-center px-2 py-1 text-xs bg-green-100 text-green-800 rounded-full">
+              <CheckCircle className="h-3 w-3 mr-1" />
+              Contacted
+            </span>
+          ) : (
+            <span className="inline-flex items-center px-2 py-1 text-xs bg-yellow-100 text-yellow-800 rounded-full">
+              <XCircle className="h-3 w-3 mr-1" />
+              Not Contacted
+            </span>
+          )}
+        </td>
+        <td className="px-6 py-4">
+          <div className="text-sm">
+            <div className="flex flex-col gap-1">
+              {sponsor.locations && Array.isArray(sponsor.locations) && sponsor.locations.map((loc, idx) => (
+                <span key={idx} className="inline-flex items-center px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded">
+                  {loc.field} - {loc.location} (${loc.price})
+                </span>
+              ))}
+            </div>
+          </div>
+        </td>
+        <td className="px-6 py-4">
+          <div className="text-sm font-medium text-gray-900">
+            ${sponsor.total_amount || 0}
+          </div>
+        </td>
+        <td className="px-6 py-4">
+          <div className="space-y-1">
+            {sponsor.is_new_sponsor && (
+              <span className="inline-flex items-center px-2 py-1 text-xs bg-purple-100 text-purple-800 rounded-full">
+                New
+              </span>
+            )}
+            {sponsor.is_returning && (
+              <span className="inline-flex items-center px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded-full">
+                Returning
+              </span>
+            )}
+            {sponsor.purchased_new_sign && (
+              <span className="inline-flex items-center px-2 py-1 text-xs bg-green-100 text-green-800 rounded-full">
+                New Sign
+              </span>
+            )}
+            {sponsor.upgraded_location && (
+              <span className="inline-flex items-center px-2 py-1 text-xs bg-yellow-100 text-yellow-800 rounded-full">
+                Upgraded
+              </span>
+            )}
+            {sponsor.downgraded_location && (
+              <span className="inline-flex items-center px-2 py-1 text-xs bg-orange-100 text-orange-800 rounded-full">
+                Downgraded
+              </span>
+            )}
+          </div>
+        </td>
+        <td className="px-6 py-4">
+          {sponsor.has_paid ? (
+            <span className="inline-flex items-center px-2 py-1 text-xs bg-green-100 text-green-800 rounded-full">
+              Paid
+            </span>
+          ) : (
+            <span className="inline-flex items-center px-2 py-1 text-xs bg-red-100 text-red-800 rounded-full">
+              Unpaid
+            </span>
+          )}
+        </td>
+        <td className="px-6 py-4 text-sm font-medium">
+          {canEdit && (
+            <button
+              onClick={() => handleEdit(sponsor)}
+              className="text-blue-600 hover:text-blue-900 mr-4"
+            >
+              Edit
+            </button>
+          )}
+          {canDelete && (
+            <button
+              onClick={() => handleDelete(sponsor.id)}
+              className="text-red-600 hover:text-red-900"
+            >
+              Delete
+            </button>
+          )}
+        </td>
+      </tr>
+      
+      {/* Separator row - only add between sponsors, not after the last one */}
+      {index < filteredSponsors.length - 1 && (
+        <tr>
+          <td colSpan={8} style={{ 
+            padding: 0, 
+            height: '8px', 
+            backgroundColor: '#e5e7eb',
+            borderBottom: 'none'
+          }}>
+            &nbsp;
+          </td>
+        </tr>
+      )}
+    </React.Fragment>
+  ))}
+</tbody>
               </table>
 
               {filteredSponsors.length === 0 && (

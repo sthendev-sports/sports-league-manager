@@ -19,6 +19,9 @@ const TeamUniforms = () => {
   const [printTeamFilter, setPrintTeamFilter] = useState('');
   const [printData, setPrintData] = useState(null);
   const [printLoading, setPrintLoading] = useState(false);
+  
+  // Board members state for workbond exemption
+  const [boardMembers, setBoardMembers] = useState([]);
 
   // Custom size order from smallest to largest
   const getSizeOrder = (size) => {
@@ -43,13 +46,47 @@ const TeamUniforms = () => {
 
   useEffect(() => {
     loadSeasons();
+    loadBoardMembers();
   }, []);
 
   useEffect(() => {
     if (selectedSeason) {
       loadData();
+      loadBoardMembers();
     }
   }, [selectedSeason]);
+
+  // Function to load board members
+  const loadBoardMembers = async () => {
+    try {
+      const token = localStorage.getItem('slm_token');
+      const response = await fetch('/api/board-members', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (response.ok) {
+        const responseData = await response.json();
+        let boardMembersData = [];
+        
+        if (Array.isArray(responseData)) {
+          boardMembersData = responseData;
+        } else if (responseData.data && Array.isArray(responseData.data)) {
+          boardMembersData = responseData.data;
+        }
+        
+        const activeBoardMembers = boardMembersData.filter(bm => 
+          bm.is_active === true && bm.family_id
+        );
+        
+        setBoardMembers(activeBoardMembers);
+      }
+    } catch (error) {
+      console.error('Error loading board members:', error);
+    }
+  };
 
   const loadSeasons = async () => {
     try {
@@ -84,6 +121,29 @@ const TeamUniforms = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  // Helper function to get workbond status
+  const getWorkbondStatus = (player) => {
+    // Check if this family has any board members
+    const hasBoardMember = boardMembers.some(bm => bm.family_id === player.family_id);
+    
+    // If board member family, they are exempt
+    if (hasBoardMember) {
+      return 'Exempt';
+    }
+    
+    // Check workbond status
+    if (player.season_workbond?.notes) {
+      const notes = player.season_workbond.notes.toLowerCase();
+      if (notes.includes('exempt')) {
+        return 'Exempt';
+      } else if (player.season_workbond.received) {
+        return 'Received';
+      }
+    }
+    
+    return 'Not Received';
   };
 
   // Get unique colors from actual teams
@@ -475,7 +535,8 @@ const TeamUniforms = () => {
           id: player.id,
           name: `${player.first_name || ''} ${player.last_name || ''}`.trim() || 'Unknown Player',
           shirtSize: player.uniform_shirt_size || 'Not Assigned',
-          pantsSize: player.uniform_pants_size || 'Not Assigned'
+          pantsSize: player.uniform_pants_size || 'Not Assigned',
+          workbondStatus: getWorkbondStatus(player)
         });
       }
     });
@@ -552,8 +613,20 @@ const TeamUniforms = () => {
     return filteredTeams;
   };
 
-  // Function to generate HTML for a single team
+  // Function to generate HTML for a single team - UPDATED with workbond column
   const generateTeamHTML = (team, index, totalTeams, seasonName) => {
+    // Function to get badge color based on workbond status
+    const getWorkbondBadgeStyle = (status) => {
+      switch(status) {
+        case 'Received':
+          return 'style="background-color: #d1fae5; color: #065f46; padding: 4px 8px; border-radius: 9999px; font-size: 12px; font-weight: 500; display: inline-block;"';
+        case 'Exempt':
+          return 'style="background-color: #fef3c7; color: #92400e; padding: 4px 8px; border-radius: 9999px; font-size: 12px; font-weight: 500; display: inline-block;"';
+        default:
+          return 'style="background-color: #fee2e2; color: #991b1b; padding: 4px 8px; border-radius: 9999px; font-size: 12px; font-weight: 500; display: inline-block;"';
+      }
+    };
+    
     return `
       <div class="team-page" style="page-break-after: ${index < totalTeams - 1 ? 'always' : 'auto'};">
         <div class="team-header">
@@ -572,6 +645,7 @@ const TeamUniforms = () => {
               <th>Player Name</th>
               <th>Uniform Shirt Size</th>
               <th>Uniform Pant Size</th>
+              <th>Workbond Status</th>
             </tr>
           </thead>
           <tbody>
@@ -581,11 +655,12 @@ const TeamUniforms = () => {
                 <td>${player.name}</td>
                 <td>${player.shirtSize}</td>
                 <td>${player.pantsSize}</td>
+                <td><span ${getWorkbondBadgeStyle(player.workbondStatus)}>${player.workbondStatus}</span></td>
               </tr>
             `).join('')}
             ${team.players.length === 0 ? `
               <tr>
-                <td colspan="4" style="text-align: center;">No players assigned to this team.</td>
+                <td colspan="5" style="text-align: center;">No players assigned to this team.</td>
               </tr>
             ` : ''}
           </tbody>
@@ -888,7 +963,7 @@ const TeamUniforms = () => {
               <tr className="bg-gray-100">
                 <th className="border border-gray-300 p-2 text-left">Pants Size</th>
                 <th className="border border-gray-300 p-2 text-center">Count</th>
-                </tr>
+               </tr>
             </thead>
             <tbody>
               {allPantsSizes.map(size => (
@@ -925,7 +1000,7 @@ const TeamUniforms = () => {
                   <th key={size} className="border border-gray-300 p-2 text-center">{size}</th>
                 ))}
                 <th className="border border-gray-300 p-2 text-center">Total</th>
-               </tr>
+              </tr>
             </thead>
             <tbody>
               {divisionShirtDetails.map((division, index) => (
@@ -1232,7 +1307,7 @@ const TeamUniforms = () => {
               </div>
             </div>
             
-            {/* Team Preview Cards */}
+            {/* Team Preview Cards - Updated with workbond column */}
             <div className="text-sm font-medium text-gray-700 mb-2">
               Preview (first {Math.min(3, getFilteredTeams().length)} of {getFilteredTeams().length} {getFilteredTeams().length === 1 ? 'team' : 'teams'}):
             </div>
@@ -1252,6 +1327,7 @@ const TeamUniforms = () => {
                           <th className="px-2 py-1 text-left">Player Name</th>
                           <th className="px-2 py-1 text-left">Shirt</th>
                           <th className="px-2 py-1 text-left">Pant</th>
+                          <th className="px-2 py-1 text-left">Workbond</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1261,11 +1337,20 @@ const TeamUniforms = () => {
                             <td className="px-2 py-1">{player.name}</td>
                             <td className="px-2 py-1">{player.shirtSize}</td>
                             <td className="px-2 py-1">{player.pantsSize}</td>
+                            <td className="px-2 py-1">
+                              <span className={`inline-flex items-center px-2 py-0.5 text-xs rounded-full font-medium ${
+                                player.workbondStatus === 'Received' ? 'bg-green-100 text-green-800' :
+                                player.workbondStatus === 'Exempt' ? 'bg-yellow-100 text-yellow-800' :
+                                'bg-red-100 text-red-800'
+                              }`}>
+                                {player.workbondStatus}
+                              </span>
+                            </td>
                           </tr>
                         ))}
                         {team.players.length > 5 && (
                           <tr className="border-t">
-                            <td colSpan="4" className="px-2 py-1 text-gray-500 text-center">
+                            <td colSpan="5" className="px-2 py-1 text-gray-500 text-center">
                               ... and {team.players.length - 5} more players
                             </td>
                           </tr>

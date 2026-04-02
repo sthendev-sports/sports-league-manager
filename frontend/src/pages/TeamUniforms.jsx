@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { playersAPI, teamsAPI, divisionsAPI, seasonsAPI } from '../services/api';
+import Modal from '../components/Modal'; // Import the Modal component
 
 const TeamUniforms = () => {
   const [divisions, setDivisions] = useState([]);
@@ -11,6 +12,13 @@ const TeamUniforms = () => {
   const [selectedSeason, setSelectedSeason] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  
+  // Print modal state - using the same pattern as Draft page
+  const [showPrintModal, setShowPrintModal] = useState(false);
+  const [printDivisionFilter, setPrintDivisionFilter] = useState('');
+  const [printTeamFilter, setPrintTeamFilter] = useState('');
+  const [printData, setPrintData] = useState(null);
+  const [printLoading, setPrintLoading] = useState(false);
 
   // Custom size order from smallest to largest
   const getSizeOrder = (size) => {
@@ -427,6 +435,321 @@ const TeamUniforms = () => {
     document.body.removeChild(link);
   };
 
+  // Function to load print data - groups players by team
+  const loadPrintData = () => {
+    setPrintLoading(true);
+    
+    // Get all active players (not withdrawn and assigned to a team)
+    const activePlayers = (players || []).filter(p => p.status !== 'withdrawn' && p.team_id);
+    
+    // Create a map for quick team and division lookup
+    const teamMap = new Map();
+    teams.forEach(team => {
+      const division = divisions.find(d => d.id === team.division_id);
+      teamMap.set(team.id, {
+        teamName: team.name,
+        teamColor: team.color,
+        divisionName: division?.name || 'N/A',
+        divisionId: team.division_id
+      });
+    });
+    
+    // Group players by team
+    const playersByTeam = new Map();
+    
+    activePlayers.forEach(player => {
+      const teamInfo = teamMap.get(player.team_id);
+      if (teamInfo) {
+        if (!playersByTeam.has(player.team_id)) {
+          playersByTeam.set(player.team_id, {
+            teamId: player.team_id,
+            teamName: teamInfo.teamName,
+            teamColor: teamInfo.teamColor,
+            divisionName: teamInfo.divisionName,
+            divisionId: teamInfo.divisionId,
+            players: []
+          });
+        }
+        
+        playersByTeam.get(player.team_id).players.push({
+          id: player.id,
+          name: `${player.first_name || ''} ${player.last_name || ''}`.trim() || 'Unknown Player',
+          shirtSize: player.uniform_shirt_size || 'Not Assigned',
+          pantsSize: player.uniform_pants_size || 'Not Assigned'
+        });
+      }
+    });
+    
+    // Convert map to array and sort by division order, then team name
+    const teamsArray = Array.from(playersByTeam.values());
+    
+    // Custom division display order
+    const divisionOrder = [
+      'T-Ball Division',
+      'Baseball - Coach Pitch Division',
+      'Baseball - Rookies Division',
+      'Baseball - Minors Division',
+      'Baseball - Majors Division',
+      'Softball - Rookies Division (Coach Pitch)',
+      'Softball - Minors Division',
+      'Softball - Majors Division',
+      'Challenger Division'
+    ];
+    
+    const divisionRankMap = new Map(divisionOrder.map((name, idx) => [name, idx]));
+    const getDivisionRank = (name) => (divisionRankMap.has(name) ? divisionRankMap.get(name) : 999);
+    
+    teamsArray.sort((a, b) => {
+      const d = getDivisionRank(a.divisionName) - getDivisionRank(b.divisionName);
+      if (d !== 0) return d;
+      return (a.teamName || '').localeCompare(b.teamName || '');
+    });
+    
+    // Sort players within each team by name
+    teamsArray.forEach(team => {
+      team.players.sort((a, b) => a.name.localeCompare(b.name));
+    });
+    
+    const seasonName = seasons.find(s => s.id === selectedSeason)?.name || 'Unknown Season';
+    
+    setPrintData({
+      teams: teamsArray,
+      seasonName: seasonName,
+      totalTeams: teamsArray.length,
+      totalPlayers: activePlayers.length
+    });
+    
+    setPrintLoading(false);
+  };
+
+  // Function to open print modal
+  const handlePrintClick = () => {
+    setPrintDivisionFilter('');
+    setPrintTeamFilter('');
+    setPrintData(null);
+    setShowPrintModal(true);
+  };
+
+  // Function to generate preview
+  const handleGeneratePreview = () => {
+    loadPrintData();
+  };
+
+  // Function to get filtered teams for printing
+  const getFilteredTeams = () => {
+    if (!printData) return [];
+    
+    let filteredTeams = [...printData.teams];
+    
+    if (printDivisionFilter) {
+      filteredTeams = filteredTeams.filter(team => team.divisionName === printDivisionFilter);
+    }
+    
+    if (printTeamFilter) {
+      filteredTeams = filteredTeams.filter(team => team.teamName === printTeamFilter);
+    }
+    
+    return filteredTeams;
+  };
+
+  // Function to generate HTML for a single team
+  const generateTeamHTML = (team, index, totalTeams, seasonName) => {
+    return `
+      <div class="team-page" style="page-break-after: ${index < totalTeams - 1 ? 'always' : 'auto'};">
+        <div class="team-header">
+          <h1>Uniform Order Roster</h1>
+          <div class="header-info">
+            <p><strong>Season:</strong> ${seasonName}</p>
+            <p><strong>Division:</strong> ${team.divisionName}</p>
+            <p><strong>Team:</strong> ${team.teamName} ${team.teamColor ? `(${team.teamColor})` : ''}</p>
+          </div>
+        </div>
+        
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Player Name</th>
+              <th>Uniform Shirt Size</th>
+              <th>Uniform Pant Size</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${team.players.map((player, playerIndex) => `
+              <tr>
+                <td>${playerIndex + 1}</td>
+                <td>${player.name}</td>
+                <td>${player.shirtSize}</td>
+                <td>${player.pantsSize}</td>
+              </tr>
+            `).join('')}
+            ${team.players.length === 0 ? `
+              <tr>
+                <td colspan="4" style="text-align: center;">No players assigned to this team.</td>
+              </tr>
+            ` : ''}
+          </tbody>
+        </table>
+        
+        <div class="footer">
+          <p>Total Players: ${team.players.length}</p>
+        </div>
+      </div>
+    `;
+  };
+
+  // Function to handle printing with multiple pages
+  const handlePrint = () => {
+    if (!printData) return;
+    
+    const filteredTeams = getFilteredTeams();
+    const seasonName = printData.seasonName;
+    
+    if (filteredTeams.length === 0) {
+      alert('No teams found for the selected filters.');
+      return;
+    }
+    
+    const printWindow = window.open('', '_blank');
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Uniform Order Roster - ${seasonName}</title>
+          <style>
+            * {
+              margin: 0;
+              padding: 0;
+              box-sizing: border-box;
+            }
+            
+            body {
+              font-family: Arial, sans-serif;
+              margin: 0;
+              padding: 20px;
+              background: white;
+            }
+            
+            .team-page {
+              margin-bottom: 20px;
+              page-break-after: always;
+            }
+            
+            .team-page:last-child {
+              page-break-after: auto;
+            }
+            
+            .team-header {
+              margin-bottom: 30px;
+              text-align: center;
+            }
+            
+            h1 {
+              text-align: center;
+              margin-bottom: 10px;
+              color: #333;
+              font-size: 24px;
+            }
+            
+            .header-info {
+              text-align: center;
+              margin-bottom: 20px;
+              color: #555;
+              line-height: 1.6;
+            }
+            
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-top: 20px;
+            }
+            
+            th, td {
+              border: 1px solid #ddd;
+              padding: 10px;
+              text-align: left;
+            }
+            
+            th {
+              background-color: #4CAF50;
+              color: white;
+              font-weight: bold;
+            }
+            
+            tr:nth-child(even) {
+              background-color: #f9f9f9;
+            }
+            
+            .footer {
+              margin-top: 30px;
+              text-align: center;
+              font-size: 12px;
+              color: #777;
+            }
+            
+            @media print {
+              body {
+                margin: 0;
+                padding: 0;
+              }
+              
+              .team-page {
+                page-break-after: always;
+              }
+              
+              .team-page:last-child {
+                page-break-after: auto;
+              }
+              
+              th {
+                background-color: #4CAF50;
+                color: white;
+              }
+              
+              .no-print {
+                display: none;
+              }
+            }
+          </style>
+        </head>
+        <body>
+          ${filteredTeams.map((team, index) => generateTeamHTML(team, index, filteredTeams.length, seasonName)).join('')}
+          
+          <div class="no-print" style="text-align: center; margin-top: 20px; position: fixed; bottom: 20px; left: 0; right: 0; background: white; padding: 10px; z-index: 1000;">
+            <button onclick="window.print();" style="padding: 10px 20px; margin: 10px; font-size: 16px; cursor: pointer;">Print</button>
+            <button onclick="window.close();" style="padding: 10px 20px; margin: 10px; font-size: 16px; cursor: pointer;">Close</button>
+          </div>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+  };
+
+  // Get unique divisions for print filter
+  const getUniqueDivisionsForPrint = () => {
+    if (!printData) return [];
+    const divisionsSet = new Set(printData.teams.map(team => team.divisionName));
+    return Array.from(divisionsSet).sort();
+  };
+
+  // Get unique teams for print filter based on selected division
+  const getUniqueTeamsForPrint = () => {
+    if (!printData) return [];
+    let filteredTeams = printData.teams;
+    if (printDivisionFilter) {
+      filteredTeams = filteredTeams.filter(team => team.divisionName === printDivisionFilter);
+    }
+    const teamsSet = new Set(filteredTeams.map(team => team.teamName));
+    return Array.from(teamsSet).sort();
+  };
+
+  // Get preview data (first few teams for preview)
+  const getPreviewTeams = () => {
+    if (!printData) return [];
+    let filteredTeams = getFilteredTeams();
+    return filteredTeams.slice(0, 3); // Show first 3 teams in preview
+  };
+
   if (loading) {
     return (
       <div className="flex justify-center items-center h-64">
@@ -457,16 +780,29 @@ const TeamUniforms = () => {
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-3xl font-bold">Team Uniforms</h1>
         
-        {/* Export CSV Button */}
-        <button
-          onClick={exportToCSV}
-          className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
-        >
-          <svg className="h-4 w-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-          </svg>
-          Export to CSV
-        </button>
+        <div className="flex space-x-3">
+          {/* Print Roster Button */}
+          <button
+            onClick={handlePrintClick}
+            className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+          >
+            <svg className="h-4 w-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+            </svg>
+            Print Roster
+          </button>
+          
+          {/* Export CSV Button */}
+          <button
+            onClick={exportToCSV}
+            className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
+          >
+            <svg className="h-4 w-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            Export to CSV
+          </button>
+        </div>
       </div>
       
       {/* Season Filter */}
@@ -552,7 +888,7 @@ const TeamUniforms = () => {
               <tr className="bg-gray-100">
                 <th className="border border-gray-300 p-2 text-left">Pants Size</th>
                 <th className="border border-gray-300 p-2 text-center">Count</th>
-              </tr>
+                </tr>
             </thead>
             <tbody>
               {allPantsSizes.map(size => (
@@ -589,7 +925,7 @@ const TeamUniforms = () => {
                   <th key={size} className="border border-gray-300 p-2 text-center">{size}</th>
                 ))}
                 <th className="border border-gray-300 p-2 text-center">Total</th>
-              </tr>
+               </tr>
             </thead>
             <tbody>
               {divisionShirtDetails.map((division, index) => (
@@ -788,6 +1124,180 @@ const TeamUniforms = () => {
           </div>
         </div>
       </div>
+
+      {/* Print Modal - Using the same Modal component as Draft page */}
+      <Modal
+        isOpen={showPrintModal}
+        onClose={() => {
+          setShowPrintModal(false);
+          setPrintData(null);
+          setPrintDivisionFilter('');
+          setPrintTeamFilter('');
+        }}
+        title="Print Uniform Roster"
+        footer={
+          <div className="flex justify-end gap-2">
+            <button
+              onClick={() => {
+                setShowPrintModal(false);
+                setPrintData(null);
+                setPrintDivisionFilter('');
+                setPrintTeamFilter('');
+              }}
+              className="px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300"
+            >
+              Cancel
+            </button>
+            {!printData && (
+              <button
+                onClick={handleGeneratePreview}
+                disabled={printLoading}
+                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400"
+              >
+                {printLoading ? 'Loading...' : 'Preview Roster'}
+              </button>
+            )}
+            {printData && (
+              <button
+                onClick={handlePrint}
+                className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"
+              >
+                Print Roster ({getFilteredTeams().length} {getFilteredTeams().length === 1 ? 'team' : 'teams'})
+              </button>
+            )}
+          </div>
+        }
+      >
+        {!printData ? (
+          <div className="space-y-4">
+            <div className="text-sm text-gray-600 mb-4">
+              Generate a printable roster with player names and uniform sizes. Each team will print on a separate page.
+            </div>
+            <div className="bg-blue-50 border border-blue-200 rounded-md p-4">
+              <p className="text-blue-800 text-sm">
+                Click "Preview Roster" to load all players grouped by team.
+                You can then filter by division and/or team before printing.
+                Each team will appear on its own page when printed.
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <div className="text-sm text-gray-600 mb-4">
+              Preview for <span className="font-semibold">{printData.seasonName}</span>
+              <br />
+              Total: <span className="font-semibold">{printData.totalTeams}</span> teams, <span className="font-semibold">{printData.totalPlayers}</span> players
+            </div>
+            
+            {/* Division and Team Filters */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Filter by Division
+                </label>
+                <select
+                  value={printDivisionFilter}
+                  onChange={(e) => {
+                    setPrintDivisionFilter(e.target.value);
+                    setPrintTeamFilter('');
+                  }}
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+                >
+                  <option value="">All Divisions</option>
+                  {getUniqueDivisionsForPrint().map(division => (
+                    <option key={division} value={division}>
+                      {division}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Filter by Team
+                </label>
+                <select
+                  value={printTeamFilter}
+                  onChange={(e) => setPrintTeamFilter(e.target.value)}
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+                  disabled={!printDivisionFilter && getUniqueTeamsForPrint().length === 0}
+                >
+                  <option value="">All Teams</option>
+                  {getUniqueTeamsForPrint().map(team => (
+                    <option key={team} value={team}>
+                      {team}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            
+            {/* Team Preview Cards */}
+            <div className="text-sm font-medium text-gray-700 mb-2">
+              Preview (first {Math.min(3, getFilteredTeams().length)} of {getFilteredTeams().length} {getFilteredTeams().length === 1 ? 'team' : 'teams'}):
+            </div>
+            
+            <div className="space-y-4 max-h-96 overflow-y-auto">
+              {getPreviewTeams().map((team, idx) => (
+                <div key={team.teamId} className="border border-gray-200 rounded-md p-3 bg-gray-50">
+                  <div className="font-semibold text-blue-700 mb-2">
+                    {team.divisionName} - {team.teamName} {team.teamColor ? `(${team.teamColor})` : ''}
+                    <span className="text-gray-500 text-sm ml-2">({team.players.length} players)</span>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-gray-100">
+                          <th className="px-2 py-1 text-left">#</th>
+                          <th className="px-2 py-1 text-left">Player Name</th>
+                          <th className="px-2 py-1 text-left">Shirt</th>
+                          <th className="px-2 py-1 text-left">Pant</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {team.players.slice(0, 5).map((player, pIdx) => (
+                          <tr key={player.id} className="border-t">
+                            <td className="px-2 py-1">{pIdx + 1}</td>
+                            <td className="px-2 py-1">{player.name}</td>
+                            <td className="px-2 py-1">{player.shirtSize}</td>
+                            <td className="px-2 py-1">{player.pantsSize}</td>
+                          </tr>
+                        ))}
+                        {team.players.length > 5 && (
+                          <tr className="border-t">
+                            <td colSpan="4" className="px-2 py-1 text-gray-500 text-center">
+                              ... and {team.players.length - 5} more players
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ))}
+            </div>
+            
+            {getFilteredTeams().length === 0 && (
+              <div className="text-center py-8 text-gray-500">
+                No teams found for the selected filters.
+              </div>
+            )}
+            
+            <div className="flex justify-between items-center pt-4 border-t border-gray-200">
+              <div className="text-sm text-gray-600">
+                {getFilteredTeams().length === 0 ? (
+                  <span>No teams match your filters</span>
+                ) : (
+                  <span>
+                    Will print <span className="font-semibold">{getFilteredTeams().length}</span> {getFilteredTeams().length === 1 ? 'team' : 'teams'} 
+                    on <span className="font-semibold">{getFilteredTeams().length}</span> {getFilteredTeams().length === 1 ? 'page' : 'pages'}
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 };

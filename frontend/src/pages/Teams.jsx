@@ -562,6 +562,46 @@ const Teams = () => {
     return divisions.filter(division => division.season_id === selectedSeason);
   };
 
+  // Helper function to check if a division is Challenger division
+  const isChallengerDivision = (divisionId) => {
+    const division = divisions.find(d => d.id === divisionId);
+    if (!division) return false;
+    const divisionName = division.name.toLowerCase();
+    return divisionName === 'challenger' || divisionName.includes('challenger');
+  };
+
+  // Helper function to check if a team has players (rostered)
+  const teamHasPlayers = (team) => {
+    if (Array.isArray(team.players)) return team.players.length > 0;
+    const cnt =
+      typeof team.player_count === 'number'
+        ? team.player_count
+        : parseInt(team.player_count || '0', 10);
+    return Number.isFinite(cnt) && cnt > 0;
+  };
+
+  // Calculate rostered teams count (teams with players, excluding Challenger division)
+  const getRosteredTeamsCount = () => {
+    return teams.filter(team => {
+      const hasPlayers = teamHasPlayers(team);
+      const isChallenger = isChallengerDivision(team.division_id);
+      return hasPlayers && !isChallenger;
+    }).length;
+  };
+
+  // Calculate total players count (only from rostered, non-Challenger teams)
+  const getRosteredPlayersCount = () => {
+    let totalPlayers = 0;
+    teams.forEach(team => {
+      const hasPlayers = teamHasPlayers(team);
+      const isChallenger = isChallengerDivision(team.division_id);
+      if (hasPlayers && !isChallenger) {
+        totalPlayers += (team.player_count || team.players?.length || 0);
+      }
+    });
+    return totalPlayers;
+  };
+
   const getRoleBadgeColor = (role) => {
     const colors = {
       'Manager': 'bg-blue-100 text-blue-800',
@@ -903,15 +943,6 @@ const Teams = () => {
               </div>
   );
 
-  const teamHasPlayers = (team) => {
-    if (Array.isArray(team.players)) return team.players.length > 0;
-    const cnt =
-      typeof team.player_count === 'number'
-        ? team.player_count
-        : parseInt(team.player_count || '0', 10);
-    return Number.isFinite(cnt) && cnt > 0;
-  };
-
   const { rosteredGroups, nonRosteredTeams } = React.useMemo(() => {
     const map = new Map();
     const nonRostered = [];
@@ -1079,8 +1110,11 @@ const Teams = () => {
                       Current View Summary
                     </p>
                     <p className="text-sm text-blue-900">
-                      {teams.length} teams,{' '}
-                      {teams.reduce((sum, team) => sum + (team.player_count || 0), 0)} players
+                      {teams.length} total teams,{' '}
+                      {teams.reduce((sum, team) => sum + (team.player_count || 0), 0)} total players
+                    </p>
+                    <p className="text-xs text-blue-700 mt-1">
+                      🏆 Rostered Teams (excl. Challenger): {getRosteredTeamsCount()} teams, {getRosteredPlayersCount()} players
                     </p>
                   </div>
                 </div>

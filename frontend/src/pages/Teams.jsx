@@ -4,7 +4,6 @@ import Modal from '../components/Modal';
 import api, { teamsAPI, divisionsAPI, seasonsAPI } from '../services/api';
 import { getPermissionErrorMessage } from '../utils/permissionHelpers';
 
-
 const Teams = () => {
   const [teams, setTeams] = useState([]);
   const [divisions, setDivisions] = useState([]);
@@ -16,6 +15,10 @@ const Teams = () => {
   const [expandedTeam, setExpandedTeam] = useState(null);
   const [selectedTeam, setSelectedTeam] = useState('');
   const [boardMembers, setBoardMembers] = useState([]); // ADDED: Board members state
+  
+  // Export modal states
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [exportOption, setExportOption] = useState('current'); // 'current' or 'all'
   
   // Form states
   const [showTeamForm, setShowTeamForm] = useState(false);
@@ -296,6 +299,154 @@ const Teams = () => {
       setSeasons([]);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // NEW FUNCTION: Export team data
+  const exportTeamData = () => {
+    try {
+      console.log('Exporting team data...');
+      
+      // Determine which teams to export
+      let teamsToExport = [];
+      
+      if (exportOption === 'current') {
+        // Export currently filtered teams
+        teamsToExport = teams;
+      } else {
+        // Export all teams (with current season filter if applicable)
+        teamsToExport = teams;
+      }
+      
+      if (teamsToExport.length === 0) {
+        alert('No teams found to export. Please check your filters.');
+        return;
+      }
+      
+      console.log(`Exporting ${teamsToExport.length} teams`);
+      
+      // Prepare CSV data
+      const csvData = [];
+      
+      // Add header row
+      csvData.push('Division Name,Team Name,Player Name,Volunteer Name,Volunteer Role');
+      
+      // Define division order for sorting
+      const divisionOrder = [
+        'T-Ball',
+        'Baseball Coach Pitch',
+        'Softball Rookies',
+        'Baseball Rookies',
+        'Baseball Minors',
+        'Softball Minors',
+        'Softball Majors',
+        'Baseball Majors',
+        'Challenger'
+      ];
+      
+      // Sort teams by division order, then alphabetically by team name
+      const sortedTeams = [...teamsToExport].sort((a, b) => {
+        const divisionA = a.division?.name || getDivisionName(a.division_id) || '';
+        const divisionB = b.division?.name || getDivisionName(b.division_id) || '';
+        
+        // Find index in division order
+        let indexA = divisionOrder.findIndex(d => divisionA.toLowerCase().includes(d.toLowerCase()));
+        let indexB = divisionOrder.findIndex(d => divisionB.toLowerCase().includes(d.toLowerCase()));
+        
+        // If not found in order, put at the end
+        if (indexA === -1) indexA = divisionOrder.length;
+        if (indexB === -1) indexB = divisionOrder.length;
+        
+        if (indexA !== indexB) {
+          return indexA - indexB;
+        }
+        
+        // Same division, sort by team name alphabetically
+        return (a.name || '').localeCompare(b.name || '');
+      });
+      
+      // Process each team
+      sortedTeams.forEach(team => {
+        const divisionName = team.division?.name || getDivisionName(team.division_id) || 'Unassigned';
+        const teamName = team.name || 'Unnamed Team';
+        
+        // Get all players for this team
+        const players = team.players || [];
+        
+        // Get all volunteers for this team
+        const volunteers = team.volunteers || [];
+        
+        // If there are no players and no volunteers, still add a row with just division and team
+        if (players.length === 0 && volunteers.length === 0) {
+          const row = [
+            divisionName,
+            teamName,
+            '', // Player Name
+            '', // Volunteer Name
+            ''  // Volunteer Role
+          ].map(field => {
+            if (typeof field === 'string' && (field.includes(',') || field.includes('"') || field.includes('\n'))) {
+              return `"${field.replace(/"/g, '""')}"`;
+            }
+            return field;
+          }).join(',');
+          
+          csvData.push(row);
+        } else {
+          // Get the maximum length between players and volunteers for row generation
+          const maxRows = Math.max(players.length, volunteers.length);
+          
+          for (let i = 0; i < maxRows; i++) {
+            const player = players[i];
+            const volunteer = volunteers[i];
+            
+            const playerName = player ? `${player.first_name || ''} ${player.last_name || ''}`.trim() : '';
+            const volunteerName = volunteer ? volunteer.name || '' : '';
+            const volunteerRole = volunteer ? volunteer.role || 'Parent' : '';
+            
+            const row = [
+              divisionName,
+              teamName,
+              playerName,
+              volunteerName,
+              volunteerRole
+            ].map(field => {
+              if (typeof field === 'string' && (field.includes(',') || field.includes('"') || field.includes('\n'))) {
+                return `"${field.replace(/"/g, '""')}"`;
+              }
+              return field;
+            }).join(',');
+            
+            csvData.push(row);
+          }
+        }
+      });
+      
+      // Create CSV blob
+      const csvContent = csvData.join('\n');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      
+      // Create download link
+      const link = document.createElement('a');
+      const timestamp = new Date().toISOString().split('T')[0];
+      const fileType = exportOption === 'current' ? 'filtered' : 'all';
+      link.setAttribute('href', url);
+      link.setAttribute('download', `team-export-${fileType}-${timestamp}.csv`);
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      console.log(`Export complete! ${sortedTeams.length} teams exported`);
+      alert(`Team data exported successfully! Exported ${sortedTeams.length} teams.`);
+      
+      // Close the modal
+      setShowExportModal(false);
+      
+    } catch (error) {
+      console.error('Error exporting team data:', error);
+      alert('Error exporting team data: ' + error.message);
     }
   };
 
@@ -626,7 +777,51 @@ const Teams = () => {
     setExpandedTeam(expandedTeam === teamId ? null : teamId);
   };
 
-    // Team Modal Footer
+  // Export Modal Footer
+  const ExportModalFooter = (
+    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+      <button
+        onClick={() => setShowExportModal(false)}
+        style={{
+          padding: '10px 20px',
+          fontSize: '14px',
+          fontWeight: '500',
+          color: '#374151',
+          backgroundColor: 'white',
+          border: '1px solid #d1d5db',
+          borderRadius: '6px',
+          cursor: 'pointer'
+        }}
+        onMouseOver={(e) => e.target.style.backgroundColor = '#f9fafb'}
+        onMouseOut={(e) => e.target.style.backgroundColor = 'white'}
+      >
+        Cancel
+      </button>
+      <button
+        onClick={exportTeamData}
+        style={{
+          padding: '10px 20px',
+          fontSize: '14px',
+          fontWeight: '500',
+          color: 'white',
+          backgroundColor: '#2563eb',
+          border: 'none',
+          borderRadius: '6px',
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px'
+        }}
+        onMouseOver={(e) => e.target.style.backgroundColor = '#1d4ed8'}
+        onMouseOut={(e) => e.target.style.backgroundColor = '#2563eb'}
+      >
+        <Download style={{ width: '16px', height: '16px' }} />
+        Export Data
+      </button>
+    </div>
+  );
+
+  // Team Modal Footer
   const TeamModalFooter = (
     <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
       <button
@@ -1013,6 +1208,13 @@ const Teams = () => {
           
          <div className="flex space-x-3">
   <button
+    onClick={() => setShowExportModal(true)}
+    className="inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
+  >
+    <Download className="h-4 w-4 mr-2" />
+    Export Team Data
+  </button>
+  <button
     onClick={generateSCImportFile}
     className="inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
   >
@@ -1208,7 +1410,80 @@ const Teams = () => {
         </div>
       </div>
 
-            {/* Team Modal */}
+      {/* Export Modal */}
+      <Modal
+        isOpen={showExportModal}
+        onClose={() => setShowExportModal(false)}
+        title="Export Team Data"
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          <p style={{ fontSize: '14px', color: '#6b7280', marginBottom: '8px' }}>
+            Choose what data to export:
+          </p>
+          
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
+              <input
+                type="radio"
+                value="current"
+                checked={exportOption === 'current'}
+                onChange={(e) => setExportOption(e.target.value)}
+                style={{ marginRight: '12px', cursor: 'pointer' }}
+              />
+              <div>
+                <span style={{ fontWeight: '500', color: '#374151' }}>Current Filtered View</span>
+                <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '2px' }}>
+                  {selectedTeam ? `Export data for selected team only` : 
+                   selectedDivision ? `Export data for ${getDivisionName(selectedDivision)} division` :
+                   `Export data for all teams matching current filters (${teams.length} teams)`}
+                </p>
+              </div>
+            </label>
+            
+            <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
+              <input
+                type="radio"
+                value="all"
+                checked={exportOption === 'all'}
+                onChange={(e) => setExportOption(e.target.value)}
+                style={{ marginRight: '12px', cursor: 'pointer' }}
+              />
+              <div>
+                <span style={{ fontWeight: '500', color: '#374151' }}>All Teams (No Filters)</span>
+                <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '2px' }}>
+                  Export all teams regardless of current filters
+                </p>
+              </div>
+            </label>
+          </div>
+          
+          <div style={{ 
+            marginTop: '12px', 
+            padding: '12px', 
+            backgroundColor: '#f3f4f6', 
+            borderRadius: '8px',
+            fontSize: '13px',
+            color: '#4b5563'
+          }}>
+            <p style={{ fontWeight: '500', marginBottom: '8px' }}>📋 Export includes:</p>
+            <ul style={{ marginLeft: '20px', listStyle: 'disc' }}>
+              <li>Division Name</li>
+              <li>Team Name</li>
+              <li>Player Names</li>
+              <li>Volunteer Names</li>
+              <li>Volunteer Roles</li>
+            </ul>
+            <p style={{ marginTop: '8px', fontSize: '11px', color: '#6b7280' }}>
+              Data will be sorted by division order (T-Ball, Baseball Coach Pitch, Softball Rookies, etc.) 
+              and then alphabetically by team name.
+            </p>
+          </div>
+          
+          {ExportModalFooter}
+        </div>
+      </Modal>
+
+      {/* Team Modal */}
       <Modal
         isOpen={showTeamForm}
         onClose={resetTeamForm}

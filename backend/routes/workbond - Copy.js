@@ -4,11 +4,12 @@ const supabase = require('../config/database');
 
 /**
  * Key fixes in this version:
- * 1) Deterministic required_shifts
- * 2) Proper error handling for board members table
- * 3) Debug logging to identify issues
- * 4) Safe handling of empty results
- * 5) Batching for large family queries to avoid "fetch failed" errors
+ * 1) Deterministic required_shifts:
+ *    - We read players.division_id directly (and also join divisions for display).
+ *    - We read workbond_requirements.shifts_required.
+ *    - If requirements query fails, we RETURN 500 instead of silently defaulting to 1.
+ * 2) Keeps prior shift log / CRUD endpoints as-is.
+ * 3) FIXED: Board member exemption now checks by email as well as family_id
  */
 
 // -------------------- REQUIREMENTS --------------------
@@ -69,7 +70,7 @@ router.post('/requirements', async (req, res) => {
 
     if (!rows.length) return res.json({ ok: true, saved: 0 });
 
-    // Replace strategy: delete then insert
+    // Replace strategy: delete then insert (avoids needing a UNIQUE constraint)
     const { error: delErr } = await supabase
       .from('workbond_requirements')
       .delete()
@@ -91,7 +92,7 @@ router.post('/requirements', async (req, res) => {
   }
 });
 
-// -------------------- SHIFTS --------------------
+// -------------------- SHIFTS (unchanged from prior) --------------------
 router.get('/shifts', async (req, res) => {
   try {
     const { family_id, season_id, verified } = req.query;
@@ -263,29 +264,16 @@ async function getFamilyExemptionInfo(familyId, seasonId) {
   };
 }
 
-// -------------------- SUMMARY (FIXED WITH BATCHING) --------------------
+// -------------------- SUMMARY --------------------
 router.get('/summary', async (req, res) => {
   try {
     const { season_id } = req.query;
-    console.log('[DEBUG] Season ID:', season_id);
-    
     if (!season_id) return res.status(400).json({ error: 'Season ID is required' });
 
-    // Check if season exists
-    const { data: seasonCheck, error: seasonError } = await supabase
-      .from('seasons')
-      .select('id, name')
-      .eq('id', season_id)
-      .single();
-    
-    if (seasonError) {
-      console.error('[DEBUG] Season not found:', seasonError);
-      return res.status(400).json({ error: `Season ${season_id} not found` });
-    }
-    console.log('[DEBUG] Season found:', seasonCheck.name);
+    // NOTE: families are global across seasons.
+    // We'll load them AFTER we know which families are participating in this season.
 
-    // Get players
-    console.log('[DEBUG] Fetching players...');
+    // Players (include division_id + joined division for label, and program_title for fallback)
     const { data: players, error: playersError } = await supabase
       .from('players')
       .select(`
@@ -300,26 +288,16 @@ router.get('/summary', async (req, res) => {
       `)
       .eq('season_id', season_id);
 
-    if (playersError) {
-      console.error('[DEBUG] Players query error:', playersError);
-      throw playersError;
-    }
-    console.log(`[DEBUG] Found ${players?.length || 0} players`);
+    if (playersError) throw playersError;
 
-    // Get divisions
-    console.log('[DEBUG] Fetching divisions...');
+    // Divisions for program_title -> division_id fallback (same logic as your required-shifts fix)
     const { data: seasonDivisions, error: seasonDivisionsError } = await supabase
       .from('divisions')
       .select('id, name')
       .eq('season_id', season_id);
 
-    if (seasonDivisionsError) {
-      console.error('[DEBUG] Divisions query error:', seasonDivisionsError);
-      throw seasonDivisionsError;
-    }
-    console.log(`[DEBUG] Found ${seasonDivisions?.length || 0} divisions`);
+    if (seasonDivisionsError) throw seasonDivisionsError;
 
-    // Map division names to IDs
     const norm = (s) => String(s || '').trim().toLowerCase();
     const divisionIdByName = new Map(
       (seasonDivisions || [])
@@ -327,7 +305,7 @@ router.get('/summary', async (req, res) => {
         .map(d => [norm(d.name), d.id])
     );
 
-    // Attach resolved division id to players when missing
+    // Attach resolved division id to players when missing (by matching program_title -> divisions.name)
     const playersWithDivision = (players || []).map(p => {
       const existingDivId = p.division_id || (p.division && p.division.id) || null;
       if (existingDivId) return { ...p, __resolved_division_id: existingDivId };
@@ -335,103 +313,55 @@ router.get('/summary', async (req, res) => {
       return { ...p, __resolved_division_id: inferred };
     });
 
-    // Get volunteers
-    console.log('[DEBUG] Fetching volunteers...');
+    // Volunteers (season-wide, used for both display and exemptions)
     const { data: allVolunteers, error: volunteersError } = await supabase
       .from('volunteers')
       .select('id, family_id, role, is_approved, season_id, team_id, name, email')
       .eq('season_id', season_id);
 
-    if (volunteersError) {
-      console.error('[DEBUG] Volunteers query error:', volunteersError);
-      throw volunteersError;
-    }
-    console.log(`[DEBUG] Found ${allVolunteers?.length || 0} volunteers`);
+    if (volunteersError) throw volunteersError;
 
-    // Get shifts
-    console.log('[DEBUG] Fetching shifts...');
+    // Shifts (season-wide)
     const { data: shifts, error: shiftsError } = await supabase
       .from('workbond_shifts')
       .select('id, season_id, family_id, spots_completed')
       .eq('season_id', season_id);
 
-    if (shiftsError) {
-      console.error('[DEBUG] Shifts query error:', shiftsError);
-      throw shiftsError;
-    }
-    console.log(`[DEBUG] Found ${shifts?.length || 0} shifts`);
+    if (shiftsError) throw shiftsError;
 
-    // Get requirements
-    console.log('[DEBUG] Fetching requirements...');
+    // Requirements (season-wide)
     const { data: requirements, error: reqError } = await supabase
       .from('workbond_requirements')
       .select('division_id, shifts_required')
       .eq('season_id', season_id);
 
-    if (reqError) {
-      console.error('[DEBUG] Requirements query error:', reqError);
-      throw reqError;
-    }
-    console.log(`[DEBUG] Found ${requirements?.length || 0} requirements`);
+    if (reqError) throw reqError;
 
     const reqByDivision = new Map(
       (requirements || []).map(r => [String(r.division_id), r.shifts_required])
     );
 
-    // Find participating families
+    // -------------------- Families IN this season --------------------
+    // Only include families that participate in the selected season (players, volunteers, or shifts).
     const participatingFamilyIds = new Set();
     for (const p of (playersWithDivision || [])) if (p?.family_id) participatingFamilyIds.add(String(p.family_id));
     for (const v of (allVolunteers || [])) if (v?.family_id) participatingFamilyIds.add(String(v.family_id));
     for (const s of (shifts || [])) if (s?.family_id) participatingFamilyIds.add(String(s.family_id));
 
     const familyIdList = Array.from(participatingFamilyIds);
-    console.log(`[DEBUG] Found ${familyIdList.length} participating families`);
+    const { data: families, error: familiesError } = familyIdList.length
+      ? await supabase
+          .from('families')
+          .select('id, family_id, primary_contact_name, primary_contact_email, parent2_email')
+          .in('id', familyIdList)
+          .order('primary_contact_name')
+      : { data: [], error: null };
 
-    // If no families, return empty array
-    if (familyIdList.length === 0) {
-      console.log('[DEBUG] No families found, returning empty summary');
-      return res.json([]);
-    }
-    
-    // Split family IDs into batches of 100 (Supabase has a limit)
-    const batchSize = 100;
-    const batches = [];
-    for (let i = 0; i < familyIdList.length; i += batchSize) {
-      batches.push(familyIdList.slice(i, i + batchSize));
-    }
-    console.log(`[DEBUG] Splitting into ${batches.length} batches of up to ${batchSize} families`);
-    
-    // Fetch families in batches
-    let allFamilies = [];
-    for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
-      const batch = batches[batchIndex];
-      console.log(`[DEBUG] Fetching batch ${batchIndex + 1}/${batches.length} (${batch.length} families)...`);
-      
-      const { data: familiesBatch, error: familiesError } = await supabase
-        .from('families')
-        .select('id, family_id, primary_contact_name, primary_contact_email, parent2_email')
-        .in('id', batch)
-        .order('primary_contact_name');
-      
-      if (familiesError) {
-        console.error(`[DEBUG] Families query error in batch ${batchIndex + 1}:`, familiesError);
-        throw familiesError;
-      }
-      
-      if (familiesBatch && familiesBatch.length) {
-        allFamilies = [...allFamilies, ...familiesBatch];
-      }
-    }
-    
-    console.log(`[DEBUG] Total families fetched: ${allFamilies.length}`);
-    
-    // If still no families, return empty array
-    if (allFamilies.length === 0) {
-      console.log('[DEBUG] No families found after batching, returning empty summary');
-      return res.json([]);
-    }
+    if (familiesError) throw familiesError;
 
-    // Group data by family
+    // -------------------- PERFORMANCE: precompute lookups --------------------
+
+    // Group players by family_id (handles either families.id or families.family_id depending on your data)
     const playersByFamily = new Map();
     for (const p of (playersWithDivision || [])) {
       const fid = p.family_id;
@@ -441,6 +371,7 @@ router.get('/summary', async (req, res) => {
       playersByFamily.get(key).push(p);
     }
 
+    // Group volunteers by family_id
     const volunteersByFamily = new Map();
     for (const v of (allVolunteers || [])) {
       const fid = v.family_id;
@@ -450,6 +381,7 @@ router.get('/summary', async (req, res) => {
       volunteersByFamily.get(key).push(v);
     }
 
+    // Sum completed shifts by family_id
     const completedByFamily = new Map();
     for (const s of (shifts || [])) {
       const fid = s.family_id;
@@ -458,46 +390,21 @@ router.get('/summary', async (req, res) => {
       completedByFamily.set(key, (completedByFamily.get(key) || 0) + (s.spots_completed || 0));
     }
 
-    // Get board members (with error handling)
-    console.log('[DEBUG] Fetching board members...');
-    let boardRolesByFamily = new Map();
-    let boardRolesByEmail = new Map();
+    // FIXED: Load board members with email and create maps by family_id AND email
+    const { data: boardMembers, error: boardMembersError } = await supabase
+      .from('board_members')
+      .select('family_id, role, email')
+      .eq('is_active', true);
 
-    try {
-      const { data: boardMembersData, error: boardMembersError } = await supabase
-        .from('board_members')
-        .select('family_id, role, email, is_active')
-        .eq('is_active', true);
+    if (boardMembersError) throw boardMembersError;
 
-      if (boardMembersError) {
-        console.warn('[DEBUG] Board members query warning:', boardMembersError.message);
-      } else if (boardMembersData) {
-        console.log(`[DEBUG] Found ${boardMembersData.length} active board members`);
-        
-        for (const b of boardMembersData) {
-          if (b.family_id) {
-            const key = String(b.family_id);
-            if (!boardRolesByFamily.has(key)) boardRolesByFamily.set(key, new Set());
-            if (b.role) boardRolesByFamily.get(key).add(b.role);
-          }
-          if (b.email) {
-            const emailKey = b.email.toLowerCase().trim();
-            if (!boardRolesByEmail.has(emailKey)) boardRolesByEmail.set(emailKey, new Set());
-            if (b.role) boardRolesByEmail.get(emailKey).add(b.role);
-          }
-        }
-      }
-    } catch (boardErr) {
-      console.warn('[DEBUG] Error accessing board_members:', boardErr.message);
-      // Continue without board member exemptions
-    }
-
-    // Volunteer exemption roles
     const exemptRoles = new Set(['Manager', 'Assistant Coach', 'Team Parent', 'Coach']);
+
     const volunteerExemptRolesByFamily = new Map();
     for (const v of (allVolunteers || [])) {
       const fid = v.family_id;
       if (!fid) continue;
+      // match prior behavior: exemption requires team_id and role in list
       if (!v.team_id) continue;
       if (!exemptRoles.has(v.role)) continue;
 
@@ -506,11 +413,27 @@ router.get('/summary', async (req, res) => {
       volunteerExemptRolesByFamily.get(key).add(v.role);
     }
 
-    // Function to get exemption info
+    // Create two maps for board members: one by family_id, one by email
+    const boardRolesByFamily = new Map();
+    const boardRolesByEmail = new Map();
+    for (const b of (boardMembers || [])) {
+      if (b.family_id) {
+        const key = String(b.family_id);
+        if (!boardRolesByFamily.has(key)) boardRolesByFamily.set(key, new Set());
+        if (b.role) boardRolesByFamily.get(key).add(b.role);
+      }
+      if (b.email) {
+        const emailKey = b.email.toLowerCase().trim();
+        if (!boardRolesByEmail.has(emailKey)) boardRolesByEmail.set(emailKey, new Set());
+        if (b.role) boardRolesByEmail.get(emailKey).add(b.role);
+      }
+    }
+
+    // NEW: Function to get exemption info checking both family_id and email
     function getExemptionForFamily(family) {
       const reasons = [];
 
-      // Volunteer exemption
+      // Volunteer exemption (check by family_id)
       const familyIdKeys = [String(family.id), String(family.family_id)].filter(Boolean);
       const vRoles = new Set();
       for (const k of familyIdKeys) {
@@ -519,14 +442,16 @@ router.get('/summary', async (req, res) => {
       }
       if (vRoles.size) reasons.push(`Volunteer role: ${Array.from(vRoles).join(', ')}`);
 
-      // Board member exemption
+      // Board member exemption (check by family_id AND email)
       const bRoles = new Set();
       
+      // Check by family_id
       for (const k of familyIdKeys) {
         const set = boardRolesByFamily.get(k);
         if (set) for (const r of set) bRoles.add(r);
       }
       
+      // Check by email (primary and parent2)
       const emails = [
         family.primary_contact_email,
         family.parent2_email
@@ -540,6 +465,7 @@ router.get('/summary', async (req, res) => {
       if (bRoles.size) {
         reasons.push(`Board Member: ${Array.from(bRoles).join(', ')}`);
       } else {
+        // If there is an active board member row with empty role, still exempt
         for (const k of familyIdKeys) {
           if (boardRolesByFamily.has(k) && boardRolesByFamily.get(k).size === 0) {
             reasons.push('Board Member');
@@ -557,105 +483,107 @@ router.get('/summary', async (req, res) => {
       return { is_exempt: reasons.length > 0, exempt_reason: reasons.join(' | ') };
     }
 
-    // Build summary
-    const summary = [];
+    // -------------------- Build summary --------------------
+const summary = [];
 
-    for (const family of (allFamilies || [])) {
-      const familyPlayers =
-        playersByFamily.get(String(family.id)) ||
-        playersByFamily.get(String(family.family_id)) ||
-        [];
+for (const family of (families || [])) {
+  const familyPlayers =
+    playersByFamily.get(String(family.id)) ||
+    playersByFamily.get(String(family.family_id)) ||
+    [];
 
-      const familyVolunteers =
-        volunteersByFamily.get(String(family.id)) ||
-        volunteersByFamily.get(String(family.family_id)) ||
-        [];
+  const familyVolunteers =
+    volunteersByFamily.get(String(family.id)) ||
+    volunteersByFamily.get(String(family.family_id)) ||
+    [];
 
-      // Calculate required shifts
-      let requiredShifts = 1;
+  // required shifts = max requirement across the player's divisions (default 1 if no requirement exists)
+  let requiredShifts = 1;
 
-      const divIds = (familyPlayers || [])
-        .map(p => p.__resolved_division_id || (p.division && p.division.id) || null)
-        .filter(Boolean)
-        .map(x => String(x));
+  const divIds = (familyPlayers || [])
+    .map(p => p.__resolved_division_id || (p.division && p.division.id) || null)
+    .filter(Boolean)
+    .map(x => String(x));
 
-      const reqVals = divIds
-        .map(divId => reqByDivision.get(divId))
-        .filter(v => v !== null && v !== undefined)
-        .map(v => Number(v))
-        .filter(v => !Number.isNaN(v));
+  const reqVals = divIds
+    .map(divId => reqByDivision.get(divId))
+    .filter(v => v !== null && v !== undefined)
+    .map(v => Number(v))
+    .filter(v => !Number.isNaN(v));
 
-      if (reqVals.length) requiredShifts = Math.max(...reqVals);
+  if (reqVals.length) requiredShifts = Math.max(...reqVals);
 
-      const completedShifts =
-        completedByFamily.get(String(family.id)) ??
-        completedByFamily.get(String(family.family_id)) ??
-        0;
+  const completedShifts =
+    completedByFamily.get(String(family.id)) ??
+    completedByFamily.get(String(family.family_id)) ??
+    0;
 
-      const exInfo = getExemptionForFamily(family);
-      const finalRequiredShifts = exInfo.is_exempt ? 0 : requiredShifts;
-      const remainingShifts = Math.max(0, finalRequiredShifts - completedShifts);
+  // FIXED: Use the new function that checks both family_id and email
+  const exInfo = getExemptionForFamily(family);
+  const finalRequiredShifts = exInfo.is_exempt ? 0 : requiredShifts;
+  const remainingShifts = Math.max(0, finalRequiredShifts - completedShifts);
 
-      // Get unique volunteer emails
-      const familyGuardianEmails = [
-        family.primary_contact_email,
-        family.parent2_email
-      ].filter(Boolean).map(e => e.toLowerCase().trim());
-      
-      const volunteerEmails = (familyVolunteers || [])
-        .map(v => v.email)
-        .filter(Boolean)
-        .map(e => e.toLowerCase().trim())
-        .filter(email => !familyGuardianEmails.includes(email))
-        .filter((email, index, self) => self.indexOf(email) === index);
+  const status = exInfo.is_exempt
+    ? 'exempt'
+    : remainingShifts === 0
+      ? 'completed'
+      : 'incomplete';
 
-      const allEmails = [
-        family.primary_contact_email,
-        family.parent2_email,
-        ...volunteerEmails
-      ].filter(Boolean);
+  // ==== NEW: Get volunteer emails for this family ====
+  // Get unique volunteer emails that aren't already in family guardian emails
+  const familyGuardianEmails = [
+    family.primary_contact_email,
+    family.parent2_email
+  ].filter(Boolean).map(e => e.toLowerCase().trim());
+  
+  const volunteerEmails = (familyVolunteers || [])
+    .map(v => v.email)
+    .filter(Boolean)
+    .map(e => e.toLowerCase().trim())
+    .filter(email => !familyGuardianEmails.includes(email)) // Don't duplicate guardian emails
+    .filter((email, index, self) => self.indexOf(email) === index); // Remove duplicates
 
-      summary.push({
-        family_id: family.id,
-        family_identifier: family.family_id,
-        family_name: family.primary_contact_name,
-        email: family.primary_contact_email,
-        parent2_email: family.parent2_email,
-        all_emails: allEmails,
-        players: (familyPlayers || []).map(p => ({
-          id: p.id,
-          first_name: p.first_name,
-          last_name: p.last_name,
-          full_name: `${p.first_name} ${p.last_name}`,
-          division: (p.division && p.division.name) || p.program_title || 'Unknown Division',
-          division_id: p.__resolved_division_id || (p.division && p.division.id) || null
-        })),
-        volunteers: (familyVolunteers || []).map(v => ({
-          role: v.role,
-          is_approved: v.is_approved,
-          name: v.name,
-          email: v.email
-        })),
-        required_shifts: finalRequiredShifts,
-        completed_shifts: completedShifts,
-        remaining_shifts: remainingShifts,
-        status: exInfo.is_exempt ? 'exempt' : (remainingShifts === 0 ? 'completed' : 'incomplete'),
-        is_exempt: exInfo.is_exempt,
-        exempt_reason: exInfo.exempt_reason || ''
-      });
-    }
+  // Combine all emails: guardians first, then volunteers
+  const allEmails = [
+    family.primary_contact_email,
+    family.parent2_email,
+    ...volunteerEmails
+  ].filter(Boolean);
 
-    console.log(`[DEBUG] Successfully built summary with ${summary.length} families`);
+  summary.push({
+    family_id: family.id,
+    family_identifier: family.family_id,
+    family_name: family.primary_contact_name,
+    email: family.primary_contact_email,
+    parent2_email: family.parent2_email,
+    all_emails: allEmails, // NOW INCLUDES VOLUNTEER EMAILS!
+    players: (familyPlayers || []).map(p => ({
+      id: p.id,
+      first_name: p.first_name,
+      last_name: p.last_name,
+      full_name: `${p.first_name} ${p.last_name}`,
+      division: (p.division && p.division.name) || p.program_title || 'Unknown Division',
+      division_id: p.__resolved_division_id || (p.division && p.division.id) || null
+    })),
+    volunteers: (familyVolunteers || []).map(v => ({
+      role: v.role,
+      is_approved: v.is_approved,
+      name: v.name,
+      email: v.email // Added email to volunteer info
+    })),
+    required_shifts: finalRequiredShifts,
+    completed_shifts: completedShifts,
+    remaining_shifts: remainingShifts,
+    status,
+    is_exempt: exInfo.is_exempt,
+    exempt_reason: exInfo.exempt_reason || ''
+  });
+}
+
     res.json(summary);
-    
   } catch (error) {
-    console.error('[DEBUG] Fatal error in summary endpoint:', error);
-    console.error('[DEBUG] Error stack:', error.stack);
-    res.status(500).json({ 
-      error: error.message,
-      details: error.stack || 'No stack trace available',
-      hint: 'Check server logs for more details'
-    });
+    console.error('Error in workbond summary:', error);
+    res.status(500).json({ error: error.message });
   }
 });
 

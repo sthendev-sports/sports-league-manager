@@ -43,7 +43,7 @@ router.get('/statistics', async (req, res) => {
       workBondStats,
       volunteerByDivision,
       monthlyTrends,
-      interestedRolesByDivision  // ADDED: New function call
+      interestedRolesByDivision
     ] = await Promise.all([
       getRegistrationStatistics(season_id, comparisonSeason?.id),
       getDivisionStatistics(season_id, comparisonSeason?.id),
@@ -51,7 +51,7 @@ router.get('/statistics', async (req, res) => {
       getWorkBondStatistics(season_id),
       getVolunteerByDivision(season_id),
       getMonthlyRegistrationTrends(season_id, comparisonSeason?.id),
-      getInterestedRolesByDivision(season_id)  // ADDED: New function
+      getInterestedRolesByDivision(season_id)
     ]);
 
     const dashboardData = {
@@ -82,7 +82,7 @@ router.get('/statistics', async (req, res) => {
       // Monthly Registration Trends
       monthlyTrends: monthlyTrends,
       
-      // NEW: Interested roles by division
+      // Interested roles by division
       interestedRolesByDivision: interestedRolesByDivision,
       
       // Season Info
@@ -188,7 +188,6 @@ async function getRegistrationStatistics(currentSeasonId, comparisonSeasonId) {
   };
 }
 
-// Get monthly registration trends
 // Get monthly registration trends
 async function getMonthlyRegistrationTrends(currentSeasonId, comparisonSeasonId) {
   // Get current season monthly registrations
@@ -340,7 +339,7 @@ async function getDivisionStatistics(currentSeasonId, comparisonSeasonId) {
         newPlayers: 0,
         returningPlayers: 0,
         withdrawnPlayers: 0,
-		travelPlayers: 0
+        travelPlayers: 0
       };
     }
     currentDivisionMap[divisionName].players.push(player);
@@ -356,8 +355,8 @@ async function getDivisionStatistics(currentSeasonId, comparisonSeasonId) {
     } else {
       currentDivisionMap[divisionName].returningPlayers++;
     }
-	
-	// ADDED: Count travel players
+    
+    // Count travel players
     if (player.is_travel_player) {
       currentDivisionMap[divisionName].travelPlayers++;
     }
@@ -373,7 +372,7 @@ async function getDivisionStatistics(currentSeasonId, comparisonSeasonId) {
         newPlayers: 0,
         returningPlayers: 0,
         withdrawnPlayers: 0,
-		travelPlayers: 0
+        travelPlayers: 0
       };
     }
     comparisonDivisionMap[divisionName].players.push(player);
@@ -389,8 +388,8 @@ async function getDivisionStatistics(currentSeasonId, comparisonSeasonId) {
     } else {
       comparisonDivisionMap[divisionName].returningPlayers++;
     }
-	
-	// ADDED: Count travel players for comparison season
+    
+    // Count travel players for comparison season
     if (player.is_travel_player) {
       comparisonDivisionMap[divisionName].travelPlayers++;
     }
@@ -457,19 +456,19 @@ async function getDivisionStatistics(currentSeasonId, comparisonSeasonId) {
 
     divisionStats.push({
       name: divisionName,
-      current: activeCurrentCount, // Current season: active players (excluding withdrawn)
-      previous: activeComparisonCount, // Comparison season: ALSO active players (excluding withdrawn)
+      current: activeCurrentCount,
+      previous: activeComparisonCount,
       trend: trend,
       newPlayers: currentData.newPlayers,
       returningPlayers: currentData.returningPlayers,
-	  travelPlayers: currentData.travelPlayers,
+      travelPlayers: currentData.travelPlayers,
       teams: currentTeamsPerDivisionCount[divisionName] || 0,
       withdrawnPlayers: currentData.withdrawnPlayers,
       totalRegistered: currentCount
     });
   });
 
-  // Add divisions that only existed in comparison season (with 0 current players)
+  // Add divisions that only existed in comparison season
   Object.keys(comparisonDivisionMap).forEach(divisionName => {
     if (!currentDivisionMap[divisionName]) {
       const comparisonData = comparisonDivisionMap[divisionName];
@@ -479,11 +478,11 @@ async function getDivisionStatistics(currentSeasonId, comparisonSeasonId) {
       divisionStats.push({
         name: divisionName,
         current: 0,
-        previous: activeComparisonCount, // Comparison season: active players (excluding withdrawn)
+        previous: activeComparisonCount,
         trend: 'down',
         newPlayers: 0,
         returningPlayers: 0,
-		travelPlayers: 0,
+        travelPlayers: 0,
         teams: 0,
         withdrawnPlayers: 0,
         totalRegistered: 0
@@ -650,7 +649,7 @@ async function getInterestedRolesByDivision(seasonId) {
     // Initialize division data structure
     const divisionData = {};
     
-    // Pre-populate with all divisions from DIVISION_SORT_ORDER
+    // Pre-populate with all divisions
     const defaultDivisions = [
       'T-Ball Division',
       'Baseball - Coach Pitch Division', 
@@ -759,7 +758,7 @@ async function getInterestedRolesByDivision(seasonId) {
   }
 }
 
-// Get work bond statistics - USING NEW SEASON-SPECIFIC SYSTEM
+// Get work bond statistics - FIXED WITH BATCHING
 async function getWorkBondStatistics(seasonId) {
   try {
     console.log('Getting work bond stats for season:', seasonId, 'using season_workbond table');
@@ -784,18 +783,41 @@ async function getWorkBondStatistics(seasonId) {
       };
     }
 
-    // Get season work bond records for these families
-    const { data: workbondRecords, error: workbondError } = await supabase
-      .from('family_season_workbond')
-      .select('family_id, received, notes')
-      .eq('season_id', seasonId)
-      .in('family_id', familyIds);
+    // BATCH THE WORKBOND QUERY - Split family IDs into batches of 100
+    const batchSize = 100;
+    const batches = [];
+    for (let i = 0; i < familyIds.length; i += batchSize) {
+      batches.push(familyIds.slice(i, i + batchSize));
+    }
+    console.log(`DEBUG: Splitting workbond query into ${batches.length} batches of up to ${batchSize} families`);
 
-    if (workbondError) throw workbondError;
+    // Fetch workbond records in batches
+    let allWorkbondRecords = [];
+    for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+      const batch = batches[batchIndex];
+      console.log(`DEBUG: Fetching workbond batch ${batchIndex + 1}/${batches.length} (${batch.length} families)...`);
+      
+      const { data: workbondRecords, error: workbondError } = await supabase
+        .from('family_season_workbond')
+        .select('family_id, received, notes')
+        .eq('season_id', seasonId)
+        .in('family_id', batch);
+
+      if (workbondError) {
+        console.error(`DEBUG: Workbond query error in batch ${batchIndex + 1}:`, workbondError);
+        throw workbondError;
+      }
+      
+      if (workbondRecords && workbondRecords.length) {
+        allWorkbondRecords = [...allWorkbondRecords, ...workbondRecords];
+      }
+    }
+    
+    console.log(`DEBUG: Total workbond records fetched: ${allWorkbondRecords.length}`);
 
     // Create a map of family_id -> workbond status
     const workbondMap = new Map();
-    workbondRecords.forEach(record => {
+    allWorkbondRecords.forEach(record => {
       workbondMap.set(record.family_id, record);
     });
 
@@ -803,15 +825,28 @@ async function getWorkBondStatistics(seasonId) {
     const familiesWithoutWorkbond = familyIds.filter(id => !workbondMap.has(id));
     
     if (familiesWithoutWorkbond.length > 0) {
-      // Check if these families have board member exemptions
-      const { data: familiesData, error: famError } = await supabase
-        .from('families')
-        .select('id, is_board_member')
-        .in('id', familiesWithoutWorkbond);
+      // Batch the families query for exemptions
+      const exemptBatches = [];
+      for (let i = 0; i < familiesWithoutWorkbond.length; i += batchSize) {
+        exemptBatches.push(familiesWithoutWorkbond.slice(i, i + batchSize));
+      }
+      
+      let allFamiliesData = [];
+      for (let batchIndex = 0; batchIndex < exemptBatches.length; batchIndex++) {
+        const batch = exemptBatches[batchIndex];
+        const { data: familiesData, error: famError } = await supabase
+          .from('families')
+          .select('id, is_board_member')
+          .in('id', batch);
 
-      if (!famError && familiesData) {
-        // Add exempt families to the map
-        familiesData.forEach(family => {
+        if (!famError && familiesData) {
+          allFamiliesData = [...allFamiliesData, ...familiesData];
+        }
+      }
+      
+      // Add exempt families to the map
+      if (allFamiliesData) {
+        allFamiliesData.forEach(family => {
           if (family.is_board_member) {
             workbondMap.set(family.id, {
               family_id: family.id,
@@ -823,20 +858,19 @@ async function getWorkBondStatistics(seasonId) {
       }
     }
 
-    // Count families missing work bond (not received AND not exempt)
+    // Count families missing work bond
     const pendingFamilies = familyIds.filter(familyId => {
       const workbond = workbondMap.get(familyId);
-      // Pending if: no record OR (record exists AND not received AND not exempt)
-      if (!workbond) return true; // No workbond record
-      if (workbond.received) return false; // Already received
-      if (workbond.notes && workbond.notes.includes('Exempt')) return false; // Exempt
-      return true; // Not received and not exempt
+      if (!workbond) return true;
+      if (workbond.received) return false;
+      if (workbond.notes && workbond.notes.includes('Exempt')) return false;
+      return true;
     });
 
     console.log('DEBUG: Families pending work bond:', pendingFamilies.length);
     console.log('DEBUG: Breakdown:', {
       totalFamilies: familyIds.length,
-      withWorkbondRecords: workbondRecords.length,
+      withWorkbondRecords: allWorkbondRecords.length,
       pending: pendingFamilies.length
     });
 
@@ -845,7 +879,7 @@ async function getWorkBondStatistics(seasonId) {
       families: pendingFamilies,
       debug: {
         totalFamilies: familyIds.length,
-        familiesWithWorkbondRecords: workbondRecords.length,
+        familiesWithWorkbondRecords: allWorkbondRecords.length,
         familiesPending: pendingFamilies.length
       }
     };

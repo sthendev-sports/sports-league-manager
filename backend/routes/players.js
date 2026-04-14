@@ -12,6 +12,8 @@ router.get('/', async (req, res) => {
   try {
     const { season_id, division_id, team_id } = req.query;
     
+    console.log('[PLAYERS API] Fetching players for season:', season_id);
+    
     // First, get players with their families
     let query = supabase
       .from('players')
@@ -31,55 +33,87 @@ router.get('/', async (req, res) => {
 
     if (error) throw error;
     
+    console.log(`[PLAYERS API] Found ${players?.length || 0} players`);
+    
     // Get family IDs to fetch workbond data
     const familyIds = players.map(p => p.family_id).filter(Boolean);
+    const uniqueFamilyIds = [...new Set(familyIds)];
     
-    if (familyIds.length > 0 && season_id) {
-      // Get workbond records for these families in this season
+    console.log('[PLAYERS API] Unique families:', uniqueFamilyIds.length);
+    
+    // If no families or no season_id, return players with default workbond
+    if (uniqueFamilyIds.length === 0 || !season_id) {
+      console.log('[PLAYERS API] No families or season_id, returning default workbond');
+      const playersWithDefaultWorkbond = players.map(player => ({
+        ...player,
+        season_workbond: {
+          received: false,
+          notes: ''
+        }
+      }));
+      return res.json(playersWithDefaultWorkbond);
+    }
+    
+    // BATCH the workbond query to avoid "fetch failed" with too many IDs
+    const batchSize = 100;
+    const batches = [];
+    for (let i = 0; i < uniqueFamilyIds.length; i += batchSize) {
+      batches.push(uniqueFamilyIds.slice(i, i + batchSize));
+    }
+    console.log(`[PLAYERS API] Splitting workbond query into ${batches.length} batches of ${batchSize}`);
+    
+    let allWorkbondRecords = [];
+    for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+      const batch = batches[batchIndex];
+      console.log(`[PLAYERS API] Fetching workbond batch ${batchIndex + 1}/${batches.length} (${batch.length} families)...`);
+      
       const { data: workbondRecords, error: workbondError } = await supabase
         .from('family_season_workbond')
         .select('*')
         .eq('season_id', season_id)
-        .in('family_id', familyIds);
-
+        .in('family_id', batch);
+      
       if (workbondError) {
-        console.error('Error fetching workbond records:', workbondError);
-      } else {
-        // Create a lookup map: family_id -> workbond record
-        const workbondMap = new Map();
-        workbondRecords.forEach(record => {
-          workbondMap.set(record.family_id, record);
-        });
-
-        // Add workbond data to players
-        const playersWithWorkbond = players.map(player => {
-          const workbond = workbondMap.get(player.family_id);
-          return {
-            ...player,
-            season_workbond: workbond || {
-              received: false,
-              notes: '',
-              // Add empty/default record if none exists
-            }
-          };
-        });
-
-        res.json(playersWithWorkbond);
-        return;
+        console.error(`[PLAYERS API] Workbond error in batch ${batchIndex + 1}:`, workbondError);
+        // Continue with other batches instead of failing completely
+        continue;
+      }
+      
+      if (workbondRecords && workbondRecords.length) {
+        console.log(`[PLAYERS API] Found ${workbondRecords.length} workbond records in batch ${batchIndex + 1}`);
+        allWorkbondRecords = [...allWorkbondRecords, ...workbondRecords];
       }
     }
     
-    // If no workbond data found or no season_id, return players with default workbond
-    const playersWithDefaultWorkbond = players.map(player => ({
-      ...player,
-      season_workbond: {
-        received: false,
-        notes: ''
-      }
-    }));
+    console.log(`[PLAYERS API] Total workbond records fetched: ${allWorkbondRecords.length}`);
     
-    res.json(playersWithDefaultWorkbond);
+    // Create a lookup map: family_id -> workbond record
+    const workbondMap = new Map();
+    allWorkbondRecords.forEach(record => {
+      workbondMap.set(record.family_id, record);
+      console.log(`[PLAYERS API] Mapped family ${record.family_id}: received=${record.received}`);
+    });
+    
+    // Add workbond data to players
+    const playersWithWorkbond = players.map(player => {
+      const workbond = workbondMap.get(player.family_id);
+      if (workbond) {
+        console.log(`[PLAYERS API] Player ${player.first_name} ${player.last_name} has workbond: received=${workbond.received}`);
+      }
+      return {
+        ...player,
+        season_workbond: workbond || {
+          received: false,
+          notes: ''
+        }
+      };
+    });
+    
+    console.log(`[PLAYERS API] Returning ${playersWithWorkbond.length} players with workbond data`);
+    res.json(playersWithWorkbond);
+    
   } catch (error) {
+    console.error('[PLAYERS API] Error:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -159,47 +193,61 @@ router.get('/draft/:divisionId', async (req, res) => {
 
     // Get players by program_title (which contains division names)
     const { data: players, error: playersError } = await supabase
-  .from('players')
-  .select(`
-    *,
-    family:families (*),
-    division:divisions (name),
-    team:teams (name, color)
-  `)
-  .eq('season_id', season_id); // Make sure we filter by season!
+      .from('players')
+      .select(`
+        *,
+        family:families (*),
+        division:divisions (name),
+        team:teams (name, color)
+      `)
+      .eq('season_id', season_id);
 
-if (playersError) throw playersError;
+    if (playersError) throw playersError;
 
-// Get family IDs from these players
-const familyIds = players.map(p => p.family_id).filter(Boolean);
-
-// Get workbond records for these families in this season
-const { data: workbondRecords, error: workbondError } = await supabase
-  .from('family_season_workbond')
-  .select('*')
-  .eq('season_id', season_id)
-  .in('family_id', familyIds);
-
-if (workbondError) throw workbondError;
-
-// Create a lookup map: family_id -> workbond record
-const workbondMap = new Map();
-workbondRecords.forEach(record => {
-  workbondMap.set(record.family_id, record);
-});
-
-// Add workbond data to players
-const playersWithWorkbond = players.map(player => {
-  const workbond = workbondMap.get(player.family_id);
-  return {
-    ...player,
-    season_workbond: workbond || {
-      received: false,
-      notes: '',
-      // Add empty/default record if none exists
+    // Get family IDs from these players
+    const familyIds = players.map(p => p.family_id).filter(Boolean);
+    const uniqueFamilyIds = [...new Set(familyIds)];
+    
+    console.log(`[DRAFT API] Unique families: ${uniqueFamilyIds.length}`);
+    
+    // BATCH workbond query
+    const batchSize = 100;
+    const batches = [];
+    for (let i = 0; i < uniqueFamilyIds.length; i += batchSize) {
+      batches.push(uniqueFamilyIds.slice(i, i + batchSize));
     }
-  };
-});
+    console.log(`[DRAFT API] Splitting workbond query into ${batches.length} batches`);
+    
+    let allWorkbondRecords = [];
+    for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+      const batch = batches[batchIndex];
+      console.log(`[DRAFT API] Fetching workbond batch ${batchIndex + 1}/${batches.length}...`);
+      
+      const { data: workbondRecords, error: workbondError } = await supabase
+        .from('family_season_workbond')
+        .select('*')
+        .eq('season_id', season_id)
+        .in('family_id', batch);
+      
+      if (!workbondError && workbondRecords) {
+        allWorkbondRecords = [...allWorkbondRecords, ...workbondRecords];
+      }
+    }
+    
+    console.log(`[DRAFT API] Total workbond records fetched: ${allWorkbondRecords.length}`);
+    
+    const workbondMap = new Map();
+    allWorkbondRecords.forEach(record => {
+      workbondMap.set(record.family_id, record);
+    });
+    
+    const playersWithWorkbond = players.map(player => {
+      const workbond = workbondMap.get(player.family_id);
+      return {
+        ...player,
+        season_workbond: workbond || { received: false, notes: '' }
+      };
+    });
 
     // Enhanced volunteer fetching with multiple strategies
     if (players && players.length > 0) {
@@ -253,34 +301,6 @@ const playersWithWorkbond = players.map(player => {
           } else {
             volunteersByEmail = emailVolunteers || [];
             console.log('Volunteers found by email matching:', volunteersByEmail.length);
-            
-            // Log which emails found matches
-            if (volunteersByEmail.length > 0) {
-              console.log('Email matches found:');
-              volunteersByEmail.forEach(volunteer => {
-                console.log(`- ${volunteer.name} (${volunteer.email}) -> ${volunteer.role}`);
-              });
-            }
-          }
-        }
-
-        // STRATEGY 3: Get ALL volunteers for this division/season to see what exists
-        const { data: allDivisionVolunteers, error: allDivisionError } = await supabase
-          .from('volunteers')
-          .select('*')
-          .eq('division_id', divisionId)
-          .eq('season_id', season_id)
-          .in('role', ['Manager', 'Assistant Coach', 'Team Parent', 'Coach']);
-
-        if (allDivisionError) {
-          console.error('Error fetching division volunteers:', allDivisionError);
-        } else {
-          console.log('Volunteers found by division/season:', allDivisionVolunteers?.length);
-          if (allDivisionVolunteers && allDivisionVolunteers.length > 0) {
-            console.log('Division volunteers:');
-            allDivisionVolunteers.forEach(volunteer => {
-              console.log(`- ${volunteer.name} | ${volunteer.role} | Email: ${volunteer.email} | Family ID: ${volunteer.family_id}`);
-            });
           }
         }
 
@@ -290,33 +310,10 @@ const playersWithWorkbond = players.map(player => {
           index === self.findIndex(t => t.id === v.id)
         );
 
-        console.log('=== COMBINED VOLUNTEER RESULTS ===');
         console.log('Total unique volunteers found:', uniqueVolunteers.length);
-        
-        if (uniqueVolunteers.length > 0) {
-          uniqueVolunteers.forEach(volunteer => {
-            console.log(`- ${volunteer.name} | ${volunteer.role} | Email: ${volunteer.email} | Family ID: ${volunteer.family_id}`);
-          });
-        } else {
-          console.log('NO VOLUNTEERS FOUND with any strategy');
-          
-          // Final check: Get ALL volunteers in this season regardless of role/division
-          const { data: allSeasonVolunteers, error: allSeasonError } = await supabase
-            .from('volunteers')
-            .select('*')
-            .eq('season_id', season_id);
-
-          if (!allSeasonError && allSeasonVolunteers && allSeasonVolunteers.length > 0) {
-            console.log('=== ALL VOLUNTEERS IN SEASON (any role/division) ===');
-            console.log('Total volunteers in season:', allSeasonVolunteers.length);
-            allSeasonVolunteers.forEach(volunteer => {
-              console.log(`- ${volunteer.name} | ${volunteer.role} | Division: ${volunteer.division_id} | Email: ${volunteer.email} | Family ID: ${volunteer.family_id}`);
-            });
-          }
-        }
 
         // Map volunteers to players
-        players.forEach(player => {
+        playersWithWorkbond.forEach(player => {
           player.volunteers = [];
           
           // Strategy 1: Match by family_id
@@ -342,14 +339,7 @@ const playersWithWorkbond = players.map(player => {
           player.volunteers = player.volunteers.filter((v, index, self) => 
             index === self.findIndex(t => t.id === v.id)
           );
-          
-          if (player.volunteers.length > 0) {
-            console.log(`>>> VOLUNTEERS ASSIGNED to ${player.first_name} ${player.last_name}:`, 
-              player.volunteers.map(v => `${v.name} (${v.role})`));
-          }
         });
-      } else {
-        console.log('No family IDs or emails found for players');
       }
     }
 
@@ -368,22 +358,12 @@ const playersWithWorkbond = players.map(player => {
     console.log('Teams found:', teams?.length);
 
     const result = {
-      players: players || [],
+      players: playersWithWorkbond || [],
       teams: teams || [],
       division: division.name
     };
 
-    // Final summary with volunteer counts
-    const playersWithVolunteers = result.players.filter(p => p.volunteers && p.volunteers.length > 0);
-    console.log('=== FINAL SUMMARY ===');
-    console.log('Players with volunteers:', playersWithVolunteers.length);
-    playersWithVolunteers.forEach(player => {
-      console.log(`- ${player.first_name} ${player.last_name}:`, 
-        player.volunteers.map(v => `${v.name} (${v.role})`));
-    });
-    
     console.log('=== DRAFT DATA DEBUG END ===');
-    
     res.json(result);
   } catch (error) {
     console.error('Complete error in draft route:', error);
@@ -494,7 +474,7 @@ router.post('/import', jsonParser, async (req, res) => {
               errors.push(`Row ${globalIndex + 1}: Missing first_name or last_name`);
               continue;
             }
-if (playerData.parent1_phone1) {
+            if (playerData.parent1_phone1) {
               playerData.parent1_phone1 = normalizePhoneForMatching(playerData.parent1_phone1);
             }
             if (playerData.parent2_phone1) {
@@ -510,19 +490,6 @@ if (playerData.parent1_phone1) {
               // Update existing player
               const updatedPlayer = await updateExistingPlayer(existingPlayer, playerData, resolveDivisionId);
               updatedPlayers.push(updatedPlayer);
-
-              // NEW: Also merge guardian/contact fields onto the existing family (if present)
-              try {
-  if (existingPlayer.family_id) {
-    await familyMatching.mergeFamilyDetails(existingPlayer.family_id, playerData, {
-      season_id: season_id,
-      clearWorkbondIfEmpty: true
-    });
-  }
-} catch (e) {
-  console.warn('Family merge (existing player) failed:', e?.message || e);
-}
-              
             } else {
               // New player - create family association
               let family = await familyMatching.findExistingFamily(playerData);
@@ -536,17 +503,17 @@ if (playerData.parent1_phone1) {
                 createdFamilies.add(family.id);
               }
 
-              // NEW: Ensure guardian/contact details are merged onto the family record
+              // Ensure guardian/contact details are merged onto the family record
               try {
-  if (family?.id) {
-    await familyMatching.mergeFamilyDetails(family.id, playerData, {
-      season_id: season_id,
-      clearWorkbondIfEmpty: true
-    });
-  }
-} catch (e) {
-  console.warn('Family merge (new player) failed:', e?.message || e);
-}
+                if (family?.id) {
+                  await familyMatching.mergeFamilyDetails(family.id, playerData, {
+                    season_id: season_id,
+                    clearWorkbondIfEmpty: true
+                  });
+                }
+              } catch (e) {
+                console.warn('Family merge (new player) failed:', e?.message || e);
+              }
 
               // Add player to family group
               if (!familyMap.has(family.id)) {
@@ -554,13 +521,12 @@ if (playerData.parent1_phone1) {
               }
               familyMap.get(family.id).push({ index: globalIndex, playerData, family, isNewFamily });
             }
-            
           } catch (error) {
             errors.push(`Row ${globalIndex + 1}: ${error.message}`);
           }
         }
 
-        // Second pass: Create NEW players for this batch (existing players were already handled)
+        // Second pass: Create NEW players for this batch
         for (const [familyId, familyPlayers] of familyMap.entries()) {
           try {
             const family = familyPlayers[0].family;
@@ -568,35 +534,28 @@ if (playerData.parent1_phone1) {
             // Create all NEW players for this family
             for (const { index, playerData } of familyPlayers) {
               const playerRecord = {
-  family_id: family.id,
-  season_id: season_id,
-  division_id: resolveDivisionId(playerData.program_title),
-  registration_no: playerData.registration_no,
-  first_name: playerData.first_name,
-  last_name: playerData.last_name,
-  birth_date: parseDate(playerData.birth_date),
-  gender: playerData.gender,
-  medical_conditions: playerData.medical_conditions,
-  is_new_player: parseBoolean(playerData.new_or_returning === 'New'),
-  is_returning: parseBoolean(playerData.new_or_returning === 'Returning'),
-  is_travel_player: parseBoolean(playerData.travel_player),
-  uniform_shirt_size: playerData.uniform_shirt_size,
-  uniform_pants_size: playerData.uniform_pants_size,
-  program_title: playerData.program_title,
-  payment_received: parsePaymentStatus(playerData.payment_status),
-  // NEW: Add registration_date from order_date
-  registration_date: parseRegistrationDate(playerData.order_date) || new Date().toISOString(), // Fallback to current date
-};
+                family_id: family.id,
+                season_id: season_id,
+                division_id: resolveDivisionId(playerData.program_title),
+                registration_no: playerData.registration_no,
+                first_name: playerData.first_name,
+                last_name: playerData.last_name,
+                birth_date: parseDate(playerData.birth_date),
+                gender: playerData.gender,
+                medical_conditions: playerData.medical_conditions,
+                is_new_player: parseBoolean(playerData.new_or_returning === 'New'),
+                is_returning: parseBoolean(playerData.new_or_returning === 'Returning'),
+                is_travel_player: parseBoolean(playerData.travel_player),
+                uniform_shirt_size: playerData.uniform_shirt_size,
+                uniform_pants_size: playerData.uniform_pants_size,
+                program_title: playerData.program_title,
+                payment_received: parsePaymentStatus(playerData.payment_status),
+                registration_date: parseRegistrationDate(playerData.order_date) || new Date().toISOString(),
+              };
 
               processedPlayers.push(playerRecord);
               newPlayers.push(playerRecord);
             }
-
-            // Create volunteers from parent information (only for new families)
-            //if (familyPlayers[0].isNewFamily) {
-              //await createFamilyVolunteers(family, season_id, familyPlayers[0].playerData);
-            //}
-            
           } catch (error) {
             familyPlayers.forEach(({ index }) => {
               errors.push(`Row ${index + 1}: ${error.message}`);
@@ -652,31 +611,31 @@ if (playerData.parent1_phone1) {
     }
 
     const response = { 
-  message: `${allProcessedPlayers.length + updatedPlayers.length} players processed successfully (${allProcessedPlayers.length} new, ${updatedPlayers.length} updated)`, 
-  data: {
-    newPlayers: allProcessedPlayers,
-    updatedPlayers: updatedPlayers
-  },
-  familyCount: createdFamilies.size,
-  warnings: allErrors
-};
+      message: `${allProcessedPlayers.length + updatedPlayers.length} players processed successfully (${allProcessedPlayers.length} new, ${updatedPlayers.length} updated)`, 
+      data: {
+        newPlayers: allProcessedPlayers,
+        updatedPlayers: updatedPlayers
+      },
+      familyCount: createdFamilies.size,
+      warnings: allErrors
+    };
 
-// Run workbond exemption check AFTER import
-console.log('Running workbond exemption check...');
-try {
-  await workbondExemptService.updateExemptionsAfterImport(season_id);
-} catch (exemptError) {
-  console.error('Error updating workbond exemptions:', exemptError);
-  // Don't fail the import, just log the error
-}
+    // Run workbond exemption check AFTER import
+    console.log('Running workbond exemption check...');
+    try {
+      await workbondExemptService.updateExemptionsAfterImport(season_id);
+    } catch (exemptError) {
+      console.error('Error updating workbond exemptions:', exemptError);
+      // Don't fail the import, just log the error
+    }
 
-if (allErrors.length > 0) {
-  response.message += ` (${allErrors.length} rows had errors)`;
-}
+    if (allErrors.length > 0) {
+      response.message += ` (${allErrors.length} rows had errors)`;
+    }
 
-console.log('=== PLAYER IMPORT COMPLETE (SMART MERGE) ===');
-console.log(`Summary: ${allProcessedPlayers.length} new players, ${updatedPlayers.length} updated players`);
-res.status(201).json(response);
+    console.log('=== PLAYER IMPORT COMPLETE (SMART MERGE) ===');
+    console.log(`Summary: ${allProcessedPlayers.length} new players, ${updatedPlayers.length} updated players`);
+    res.status(201).json(response);
   } catch (error) {
     console.error('=== PLAYER IMPORT ERROR ===');
     console.error('Import error:', error);
@@ -684,11 +643,9 @@ res.status(201).json(response);
   }
 });
 
-// NEW: Helper function to find existing player
+// Helper function to find existing player
 function findExistingPlayer(existingPlayers, playerData, seasonId) {
   if (!existingPlayers || !Array.isArray(existingPlayers)) return null;
-  
-  // Try multiple matching strategies
   
   // Strategy 1: Exact name match in same season
   const exactMatch = existingPlayers.find(player => 
@@ -727,7 +684,7 @@ function findExistingPlayer(existingPlayers, playerData, seasonId) {
   return null;
 }
 
-// NEW: Helper function to parse registration date from order_date
+// Helper function to parse registration date from order_date
 function parseRegistrationDate(orderDateString) {
   if (!orderDateString) return null;
   
@@ -747,7 +704,6 @@ function parseRegistrationDate(orderDateString) {
     
     // Handle MM/DD/YYYY HH:mm format (like "1/5/2026 19:35")
     if (cleanDateString.includes('/') && cleanDateString.includes(':')) {
-      // Split date and time
       const [datePart, timePart] = cleanDateString.split(' ');
       const [month, day, year] = datePart.split('/');
       
@@ -755,26 +711,23 @@ function parseRegistrationDate(orderDateString) {
         const paddedMonth = month.padStart(2, '0');
         const paddedDay = day.padStart(2, '0');
         
-        // Parse time (handle both HH:mm and HH:mm:ss)
         let hours, minutes;
         if (timePart.includes(':')) {
           const [h, m] = timePart.split(':');
           hours = parseInt(h, 10);
           minutes = parseInt(m, 10);
         } else {
-          // If no colon, assume it's just hours
           hours = parseInt(timePart, 10);
           minutes = 0;
         }
         
-        // Create date with time
         const date = new Date(Date.UTC(
           parseInt(year, 10),
-          parseInt(paddedMonth, 10) - 1, // Month is 0-indexed
+          parseInt(paddedMonth, 10) - 1,
           parseInt(paddedDay, 10),
           hours,
           minutes,
-          0 // Seconds
+          0
         ));
         
         if (!isNaN(date.getTime())) {
@@ -791,14 +744,13 @@ function parseRegistrationDate(orderDateString) {
         const day = parts[1].padStart(2, '0');
         const year = parts[2];
         
-        // Create date at noon UTC to avoid timezone issues
         const date = new Date(Date.UTC(
           parseInt(year, 10),
-          parseInt(month, 10) - 1, // Month is 0-indexed
+          parseInt(month, 10) - 1,
           parseInt(day, 10),
-          12, // Noon UTC
-          0,  // Minutes
-          0   // Seconds
+          12,
+          0,
+          0
         ));
         
         if (!isNaN(date.getTime())) {
@@ -809,15 +761,14 @@ function parseRegistrationDate(orderDateString) {
     
     // Handle YYYY-MM-DD format (without time)
     if (cleanDateString.match(/^\d{4}-\d{2}-\d{2}$/)) {
-      // Create date at noon UTC to avoid timezone issues
       const [year, month, day] = cleanDateString.split('-');
       const date = new Date(Date.UTC(
         parseInt(year, 10),
-        parseInt(month, 10) - 1, // Month is 0-indexed
+        parseInt(month, 10) - 1,
         parseInt(day, 10),
-        12, // Noon UTC
-        0,  // Minutes
-        0   // Seconds
+        12,
+        0,
+        0
       ));
       
       if (!isNaN(date.getTime())) {
@@ -840,11 +791,10 @@ function parseRegistrationDate(orderDateString) {
   }
 }
 
-// NEW: Helper function to update existing player
+// Helper function to update existing player
 async function updateExistingPlayer(existingPlayer, newPlayerData, resolveDivisionId) {
   const updates = {};
   
-  // Only update fields that have new data and are different from existing data
   if (newPlayerData.registration_no && newPlayerData.registration_no !== existingPlayer.registration_no) {
     updates.registration_no = newPlayerData.registration_no;
   }
@@ -856,10 +806,8 @@ async function updateExistingPlayer(existingPlayer, newPlayerData, resolveDivisi
     }
   }
   
-  // NEW: Handle registration_date from order_date
   if (newPlayerData.order_date) {
     const parsedRegistrationDate = parseRegistrationDate(newPlayerData.order_date);
-    // Compare ISO strings to check if dates are different
     const existingRegistrationDate = existingPlayer.registration_date ? new Date(existingPlayer.registration_date).toISOString() : null;
     
     if (parsedRegistrationDate && parsedRegistrationDate !== existingRegistrationDate) {
@@ -888,8 +836,6 @@ async function updateExistingPlayer(existingPlayer, newPlayerData, resolveDivisi
     updates.program_title = newPlayerData.program_title;
   }
 
-  // NEW: keep players.division_id in sync with program_title (when possible)
-  // Only set when we can confidently resolve an id for this season.
   if (typeof resolveDivisionId === 'function') {
     const resolvedDivisionId = resolveDivisionId(newPlayerData.program_title || existingPlayer.program_title);
     if (resolvedDivisionId && String(resolvedDivisionId) !== String(existingPlayer.division_id || '')) {
@@ -897,7 +843,6 @@ async function updateExistingPlayer(existingPlayer, newPlayerData, resolveDivisi
     }
   }
   
-  // Update boolean fields if they've changed
   if (newPlayerData.new_or_returning !== undefined) {
     const isNewPlayer = parseBoolean(newPlayerData.new_or_returning === 'New');
     if (isNewPlayer !== existingPlayer.is_new_player) {
@@ -920,7 +865,6 @@ async function updateExistingPlayer(existingPlayer, newPlayerData, resolveDivisi
     }
   }
   
-  // If there are updates to make, update the player
   if (Object.keys(updates).length > 0) {
     console.log(`Updating player ${existingPlayer.first_name} ${existingPlayer.last_name} with changes:`, updates);
     
@@ -946,7 +890,7 @@ async function updateExistingPlayer(existingPlayer, newPlayerData, resolveDivisi
 // Helper function: Parse boolean values safely
 function parseBoolean(value) {
   if (value === null || value === undefined || value === '') {
-    return false; // Default to false for empty values
+    return false;
   }
   
   if (typeof value === 'boolean') return value;
@@ -956,16 +900,15 @@ function parseBoolean(value) {
     if (lowerValue === 'false' || lowerValue === 'no' || lowerValue === '0' || lowerValue === 'n/a' || lowerValue === 'na') return false;
   }
   
-  return false; // Default to false for any other values
+  return false;
 }
 
-// Helper function: Parse payment status - FIXED for better detection
+// Helper function: Parse payment status
 function parsePaymentStatus(paymentStatus) {
   if (!paymentStatus) return false;
   
   const status = paymentStatus.toLowerCase().trim();
   
-  // Check for completed payment indicators
   if (status.includes('completed') || 
       status.includes('paid') || 
       status.includes('credit card') || 
@@ -976,21 +919,11 @@ function parsePaymentStatus(paymentStatus) {
     return true;
   }
   
-  // Check for pending indicators
-  if (status.includes('pending') || 
-      status.includes('unpaid') || 
-      status.includes('waiting') ||
-      status.includes('processing') ||
-      status === 'pending') {
-    return false;
-  }
-  
-  return false; // Default to false for unknown statuses
+  return false;
 }
 
 function normalizePhoneForMatching(phone) {
   if (!phone) return '';
-  // Remove all non-digits
   const digits = String(phone).replace(/\D/g, '');
   return digits;
 }
@@ -1006,17 +939,14 @@ async function createNewFamily(playerData, familyId) {
     parent2_last_name: playerData.parent2_lastname,
     parent2_email: playerData.parent2_email,
     parent2_phone: playerData.parent2_phone1,
-    // UPDATED: Map new player address columns to family address columns
     address_line_1: playerData.player_street || playerData.address_line_1,
-    address_line_2: playerData.address_line_2, // Keep existing if available
+    address_line_2: playerData.address_line_2,
     city: playerData.player_city || playerData.city,
     state: playerData.player_state || playerData.state,
     zip_code: playerData.player_postal_code || playerData.zip_code,
-    // IMPORTANT: Only set work_bond_check_received if explicitly provided
     work_bond_check_received: parseWorkbondStatus(playerData.workbond_check_status)
   };
 
-  // Fallback for primary contact name
   if (!familyRecord.primary_contact_name) {
     familyRecord.primary_contact_name = `${playerData.first_name} ${playerData.last_name}'s Parent`;
   }
@@ -1031,15 +961,14 @@ async function createNewFamily(playerData, familyId) {
   return newFamily;
 }
 
-// NEW: Helper function to parse workbond status - handles empty values correctly
+// Helper function: Parse workbond status
 function parseWorkbondStatus(workbondStatus) {
   if (!workbondStatus || workbondStatus.trim() === '') {
-    return false; // Empty string means NOT received
+    return false;
   }
   
   const status = workbondStatus.toLowerCase().trim();
   
-  // Check for received indicators
   if (status.includes('received') || 
       status.includes('yes') || 
       status.includes('true') ||
@@ -1048,62 +977,10 @@ function parseWorkbondStatus(workbondStatus) {
     return true;
   }
   
-  // Check for not received indicators
-  if (status.includes('pending') || 
-      status.includes('no') || 
-      status.includes('false') ||
-      status.includes('0') ||
-      status.includes('not') ||
-      status === 'pending') {
-    return false;
-  }
-  
-  return false; // Default to false for unknown statuses
+  return false;
 }
 
-// Helper function to create volunteers for a family
-async function createFamilyVolunteers(family, seasonId, playerData) {
-  const volunteers = [];
-
-  // Create volunteer from parent1 if they have a name
-  if (family.primary_contact_name && family.primary_contact_name !== `${playerData.first_name} ${playerData.last_name}'s Parent`) {
-    volunteers.push({
-      family_id: family.id,
-      season_id: seasonId,
-      name: family.primary_contact_name,
-      email: family.primary_contact_email,
-      phone: family.primary_contact_phone,
-      role: 'Parent', // Default role - can be updated to Manager/Coach/Team Parent during draft
-      can_pickup: true,
-    });
-  }
-
-  // Create volunteer from parent2 if available
-  if (family.parent2_first_name) {
-    const parent2Name = `${family.parent2_first_name} ${family.parent2_last_name || ''}`.trim();
-    volunteers.push({
-      family_id: family.id,
-      season_id: seasonId,
-      name: parent2Name,
-      email: family.parent2_email,
-      phone: family.parent2_phone,
-      role: 'Parent', // Default role
-      can_pickup: true
-    });
-  }
-
-  if (volunteers.length > 0) {
-    const { error } = await supabase
-      .from('volunteers')
-      .insert(volunteers);
-
-    if (error) {
-      console.error('Error creating volunteers:', error);
-    }
-  }
-}
-
-// Helper function to parse various date formats - FIXED for timezone issues
+// Helper function to parse various date formats
 function parseDate(dateString) {
   if (!dateString) return null;
   

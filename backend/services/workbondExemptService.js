@@ -41,7 +41,7 @@ class WorkbondExemptService {
     this.boardMembersCacheTime = null;
   }
 
-  // Main exemption check with all optimizations
+  // Main exemption check with all optimizations and BATCHING
   async checkAndUpdateWorkbondExemptions(seasonId, progressCallback = null) {
     try {
       console.time(`Exemption check season ${seasonId}`);
@@ -50,7 +50,7 @@ class WorkbondExemptService {
       if (progressCallback) progressCallback(0, 'Starting...');
       
       // 1. Get ALL data in parallel with minimal queries
-      const [familiesWithPlayers, allBoardMembers] = await Promise.all([
+      const [playersResponse, allBoardMembers] = await Promise.all([
         // Get players with their divisions
         supabase
           .from('players')
@@ -66,12 +66,12 @@ class WorkbondExemptService {
         this.getBoardMembersCached()
       ]);
 
-      if (familiesWithPlayers.error) {
-        console.error('Error fetching players:', familiesWithPlayers.error);
+      if (playersResponse.error) {
+        console.error('Error fetching players:', playersResponse.error);
         return;
       }
 
-      const playersData = familiesWithPlayers.data || [];
+      const playersData = playersResponse.data || [];
       
       if (playersData.length === 0) {
         console.log('No players found for this season');
@@ -82,17 +82,43 @@ class WorkbondExemptService {
 
       // 2. Extract unique family IDs
       const familyIds = [...new Set(playersData.map(p => p.family_id).filter(Boolean))];
+      console.log(`Total families to check: ${familyIds.length}`);
       
-      // 3. Get family emails in batch
-      const { data: allFamilies, error: familiesError } = await supabase
-        .from('families')
-        .select('id, primary_contact_email, parent2_email')
-        .in('id', familyIds);
-
-      if (familiesError) {
-        console.error('Error fetching family emails:', familiesError);
+      if (familyIds.length === 0) {
+        console.log('No families found');
         return;
       }
+
+      // 3. BATCH the family emails query to avoid "fetch failed"
+      const BATCH_SIZE = 100;
+      const batches = [];
+      for (let i = 0; i < familyIds.length; i += BATCH_SIZE) {
+        batches.push(familyIds.slice(i, i + BATCH_SIZE));
+      }
+      console.log(`Splitting families into ${batches.length} batches of ${BATCH_SIZE}`);
+      
+      let allFamilies = [];
+      for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+        const batch = batches[batchIndex];
+        console.log(`Fetching families batch ${batchIndex + 1}/${batches.length} (${batch.length} families)...`);
+        
+        const { data: familiesBatch, error: familiesError } = await supabase
+          .from('families')
+          .select('id, primary_contact_email, parent2_email')
+          .in('id', batch);
+        
+        if (familiesError) {
+          console.error(`Error fetching families batch ${batchIndex + 1}:`, familiesError);
+          // Continue with other batches
+          continue;
+        }
+        
+        if (familiesBatch && familiesBatch.length) {
+          allFamilies = [...allFamilies, ...familiesBatch];
+        }
+      }
+      
+      console.log(`Total families fetched: ${allFamilies.length}`);
 
       if (progressCallback) progressCallback(20, 'Building lookup maps...');
 
@@ -117,7 +143,6 @@ class WorkbondExemptService {
       if (progressCallback) progressCallback(30, 'Checking exemptions...');
 
       // 6. Process families in optimized batches
-      const BATCH_SIZE = 100;
       const familyEntries = Array.from(familiesMap.entries());
       const totalFamilies = familyEntries.length;
       
@@ -130,7 +155,7 @@ class WorkbondExemptService {
       const familiesTableUpdates = [];
 
       for (let i = 0; i < familyEntries.length; i += BATCH_SIZE) {
-        const batch = familyEntries.slice(i, i + batchSize);
+        const batch = familyEntries.slice(i, i + BATCH_SIZE);
         
         // Process batch
         for (const [familyId, familyData] of batch) {
@@ -271,26 +296,21 @@ class WorkbondExemptService {
     };
   }
 
-  // Optimized exemption check with FIXED Challenger logic
+  // Optimized exemption check with Challenger logic
   shouldFamilyBeExemptOptimized(familyId, players, 
                                boardMembersByFamilyId, boardMembersByEmail, familyEmails) {
     if (!players || players.length === 0) {
       return null;
     }
 
-    // DEBUG: Log player info
-    console.log(`Family ${familyId}: Checking ${players.length} player(s)`);
-
     // Rule 1: Check if ALL players are in Challenger Division
     const allChallenger = players.every(player => {
       const programTitle = (player.program_title || '').toLowerCase();
       const divisionName = (player.division_name || '').toLowerCase();
       
-      // Check for "challenger" in either field (case insensitive)
       const isChallenger = programTitle.includes('challenger') || 
                            divisionName.includes('challenger');
       
-      console.log(`  Player: ${player.program_title} (${player.division_name}) -> Challenger: ${isChallenger}`);
       return isChallenger;
     });
 
@@ -304,20 +324,6 @@ class WorkbondExemptService {
         exempt: true,
         reason: reason
       };
-    } else {
-      // Log which players are not in Challenger
-      const nonChallengerPlayers = players.filter(p => {
-        const programTitle = (p.program_title || '').toLowerCase();
-        const divisionName = (p.division_name || '').toLowerCase();
-        return !programTitle.includes('challenger') && !divisionName.includes('challenger');
-      });
-      
-      if (nonChallengerPlayers.length > 0) {
-        console.log(`✗ Family ${familyId}: ${nonChallengerPlayers.length} non-Challenger player(s) - NOT EXEMPT`);
-        nonChallengerPlayers.forEach(p => {
-          console.log(`  Non-Challenger: ${p.program_title} (${p.division_name})`);
-        });
-      }
     }
 
     // Rule 2: Check if family has a board member
@@ -504,18 +510,17 @@ class WorkbondExemptService {
   }
   
   async isFamilyExempt(familyId, seasonId) {
-  try {
-    const result = await this.quickCheckFamilyExemption(familyId, seasonId);
-    // Ensure we return the expected structure
-    return {
-      exempt: result.exempt || false,
-      reason: result.reason || ''
-    };
-  } catch (error) {
-    console.error('Error in isFamilyExempt:', error);
-    return { exempt: false, reason: 'Error checking exemption' };
+    try {
+      const result = await this.quickCheckFamilyExemption(familyId, seasonId);
+      return {
+        exempt: result.exempt || false,
+        reason: result.reason || ''
+      };
+    } catch (error) {
+      console.error('Error in isFamilyExempt:', error);
+      return { exempt: false, reason: 'Error checking exemption' };
+    }
   }
-}
 
   // Keep existing methods for backward compatibility
   async updateExemptionsAfterImport(seasonId) {
@@ -527,17 +532,35 @@ class WorkbondExemptService {
     try {
       if (!familyIds || familyIds.length === 0) return [];
       
-      // Use optimized approach
+      // Use optimized approach with batching
       const results = [];
       const boardMembers = await this.getBoardMembersCached();
       
-      // Get families and players in batch
-      const [familiesResponse, playersResponse] = await Promise.all([
-        supabase
+      // Batch the families query
+      const BATCH_SIZE = 100;
+      const batches = [];
+      for (let i = 0; i < familyIds.length; i += BATCH_SIZE) {
+        batches.push(familyIds.slice(i, i + BATCH_SIZE));
+      }
+      
+      let allFamilies = [];
+      for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+        const batch = batches[batchIndex];
+        const { data: familiesBatch, error: familiesError } = await supabase
           .from('families')
           .select('id, primary_contact_email, parent2_email')
-          .in('id', familyIds),
-        supabase
+          .in('id', batch);
+        
+        if (!familiesError && familiesBatch) {
+          allFamilies = [...allFamilies, ...familiesBatch];
+        }
+      }
+      
+      // Batch the players query
+      let allPlayers = [];
+      for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+        const batch = batches[batchIndex];
+        const { data: playersBatch, error: playersError } = await supabase
           .from('players')
           .select(`
             family_id,
@@ -546,18 +569,19 @@ class WorkbondExemptService {
             divisions!inner (name)
           `)
           .eq('season_id', seasonId)
-          .in('family_id', familyIds)
-      ]);
-      
-      const families = familiesResponse.data || [];
-      const players = playersResponse.data || [];
+          .in('family_id', batch);
+        
+        if (!playersError && playersBatch) {
+          allPlayers = [...allPlayers, ...playersBatch];
+        }
+      }
       
       // Build lookup maps
       const { familiesMap, boardMembersByFamilyId, boardMembersByEmail } = 
-        this.buildLookupMaps(families, boardMembers);
+        this.buildLookupMaps(allFamilies, boardMembers);
       
       // Group players
-      players.forEach(p => {
+      allPlayers.forEach(p => {
         if (familiesMap.has(p.family_id)) {
           familiesMap.get(p.family_id).players.push({
             program_title: p.program_title,

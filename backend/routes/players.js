@@ -75,7 +75,6 @@ router.get('/', async (req, res) => {
       
       if (workbondError) {
         console.error(`[PLAYERS API] Workbond error in batch ${batchIndex + 1}:`, workbondError);
-        // Continue with other batches instead of failing completely
         continue;
       }
       
@@ -94,17 +93,71 @@ router.get('/', async (req, res) => {
       console.log(`[PLAYERS API] Mapped family ${record.family_id}: received=${record.received}`);
     });
     
-    // Add workbond data to players
+    // NEW: Get all family players to check Challenger division status
+    // First, get all players grouped by family
+    const { data: allFamilyPlayers, error: familyPlayersError } = await supabase
+      .from('players')
+      .select('family_id, program_title, division_id, division:divisions(name)')
+      .eq('season_id', season_id)
+      .in('family_id', uniqueFamilyIds);
+    
+    if (familyPlayersError) {
+      console.error('[PLAYERS API] Error fetching family players for Challenger check:', familyPlayersError);
+    }
+    
+    // Group players by family_id
+    const playersByFamily = new Map();
+    if (allFamilyPlayers) {
+      allFamilyPlayers.forEach(player => {
+        const fid = player.family_id;
+        if (!fid) return;
+        if (!playersByFamily.has(fid)) playersByFamily.set(fid, []);
+        playersByFamily.get(fid).push(player);
+      });
+    }
+    
+    // Helper function to check if family has ONLY Challenger players (no other divisions)
+    const isFamilyOnlyChallenger = (familyId) => {
+      const familyPlayersList = playersByFamily.get(familyId) || [];
+      if (familyPlayersList.length === 0) return false;
+      
+      // Check if ALL players in this family are in Challenger division
+      const allChallenger = familyPlayersList.every(player => {
+        const programTitle = (player.program_title || '').toLowerCase();
+        const divisionName = (player.division?.name || '').toLowerCase();
+        return programTitle.includes('challenger') || divisionName.includes('challenger');
+      });
+      
+      return allChallenger;
+    };
+    
+    // Add workbond data to players with Challenger exemption
     const playersWithWorkbond = players.map(player => {
-      const workbond = workbondMap.get(player.family_id);
-      if (workbond) {
-        console.log(`[PLAYERS API] Player ${player.first_name} ${player.last_name} has workbond: received=${workbond.received}`);
+      let workbond = workbondMap.get(player.family_id);
+      let notes = workbond?.notes || '';
+      let received = workbond?.received || false;
+      
+      // Check if this family has ONLY Challenger players (no siblings in other divisions)
+      const isOnlyChallenger = isFamilyOnlyChallenger(player.family_id);
+      
+      if (isOnlyChallenger) {
+        // Mark as exempt if not already marked
+        if (!notes.includes('Challenger')) {
+          notes = notes ? `Challenger Division - Exempt; ${notes}` : 'Challenger Division - Exempt';
+        }
+        received = false; // Exempt families don't count as "received"
+        console.log(`[PLAYERS API] Family ${player.family_id} has ONLY Challenger players - marking exempt`);
       }
+      
+      if (workbond) {
+        console.log(`[PLAYERS API] Player ${player.first_name} ${player.last_name} has workbond: received=${received}`);
+      }
+      
       return {
         ...player,
-        season_workbond: workbond || {
-          received: false,
-          notes: ''
+        season_workbond: {
+          received: received,
+          notes: notes
         }
       };
     });

@@ -58,6 +58,7 @@ export default function WorkbondManagement() {
 
   // Families filter
   const [familyFilter, setFamilyFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all'); // 'all', 'exempt', 'completed', 'incomplete'
 
   // Shift form
   const [shiftForm, setShiftForm] = useState({
@@ -236,6 +237,7 @@ export default function WorkbondManagement() {
   // When changing seasons, reset local page filters so stale season data isn't "stuck" on-screen.
   useEffect(() => {
     setFamilyFilter('');
+    setStatusFilter('all');
     setShiftFamilyFilter('');
     setShiftFamilyPickerOpen(false);
     setShiftLogFilter('');
@@ -427,19 +429,35 @@ export default function WorkbondManagement() {
   const selectedFamilyPlayers = selectedShiftFamily ? getPlayersLine(selectedShiftFamily) : '';
   const selectedFamilyEmails = selectedShiftFamily ? getAllEmails(selectedShiftFamily) : [];
 
-  const filteredFamilies = useMemo(() => {
-    const q = familyFilter.trim().toLowerCase();
-    const arr = Array.isArray(summaryRows) ? summaryRows : [];
-    if (!q) return arr;
+  // Helper function to determine family status
+  const getFamilyStatus = (f) => {
+    if (f.is_exempt) return 'exempt';
+    if ((f.remaining_shifts ?? 0) === 0) return 'completed';
+    return 'incomplete';
+  };
 
+  // Apply both text filter and status filter
+  const filteredFamilies = useMemo(() => {
+    const arr = Array.isArray(summaryRows) ? summaryRows : [];
+    
     return arr.filter(f => {
+      // First apply status filter
+      if (statusFilter !== 'all') {
+        const status = getFamilyStatus(f);
+        if (status !== statusFilter) return false;
+      }
+      
+      // Then apply text search filter (if any)
+      const q = familyFilter.trim().toLowerCase();
+      if (!q) return true;
+      
       const label = getFamilyLabel(f).toLowerCase();
       const emails = getAllEmails(f).join(' ').toLowerCase();
       const players = getPlayersLine(f).toLowerCase();
       const reason = String(f?.exempt_reason || '').toLowerCase();
       return `${label} ${emails} ${players} ${reason}`.includes(q);
     });
-  }, [summaryRows, familyFilter]);
+  }, [summaryRows, familyFilter, statusFilter]);
 
   return (
     <div className="p-4">
@@ -539,14 +557,72 @@ export default function WorkbondManagement() {
       {/* Families */}
       {!loading && activeTab === 'families' && (
         <div className="rounded-lg border border-gray-200 bg-white p-4">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <h2 className="text-lg font-semibold text-gray-900">Families</h2>
-            <input
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm sm:w-80"
-              placeholder="Filter by family, email, player, exempt reason…"
-              value={familyFilter}
-              onChange={(e) => setFamilyFilter(e.target.value)}
-            />
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <h2 className="text-lg font-semibold text-gray-900">Families</h2>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                {/* Status Filter Dropdown */}
+                <select
+                  className="rounded-md border border-gray-300 px-3 py-2 text-sm"
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value)}
+                >
+                  <option value="all">All Statuses</option>
+                  <option value="exempt">Exempt</option>
+                  <option value="completed">Completed</option>
+                  <option value="incomplete">Incomplete</option>
+                </select>
+                
+                {/* Text Search Input */}
+                <input
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm sm:w-80"
+                  placeholder="Filter by family, email, player, exempt reason…"
+                  value={familyFilter}
+                  onChange={(e) => setFamilyFilter(e.target.value)}
+                />
+              </div>
+            </div>
+            
+            {/* Active filter indicators */}
+            {(statusFilter !== 'all' || familyFilter) && (
+              <div className="flex flex-wrap gap-2 items-center text-sm text-gray-600">
+                <span className="text-xs">Active filters:</span>
+                {statusFilter !== 'all' && (
+                  <span className="inline-flex items-center rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-700">
+                    Status: {statusFilter === 'exempt' ? 'Exempt' : statusFilter === 'completed' ? 'Completed' : 'Incomplete'}
+                    <button
+                      type="button"
+                      className="ml-1 text-blue-500 hover:text-blue-700"
+                      onClick={() => setStatusFilter('all')}
+                    >
+                      ×
+                    </button>
+                  </span>
+                )}
+                {familyFilter && (
+                  <span className="inline-flex items-center rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-700">
+                    Search: {familyFilter}
+                    <button
+                      type="button"
+                      className="ml-1 text-blue-500 hover:text-blue-700"
+                      onClick={() => setFamilyFilter('')}
+                    >
+                      ×
+                    </button>
+                  </span>
+                )}
+                <button
+                  type="button"
+                  className="text-xs text-gray-500 hover:text-gray-700 underline"
+                  onClick={() => {
+                    setStatusFilter('all');
+                    setFamilyFilter('');
+                  }}
+                >
+                  Clear all filters
+                </button>
+              </div>
+            )}
           </div>
 
           <div className="mt-4 overflow-x-auto">
@@ -565,6 +641,7 @@ export default function WorkbondManagement() {
               <tbody className="divide-y divide-gray-100">
                 {(filteredFamilies || []).map((f) => {
                   const emails = getAllEmails(f);
+                  const status = getFamilyStatus(f);
                   return (
                     <tr key={f.family_id} className="hover:bg-gray-50">
                       <td className="px-4 py-3 text-sm text-gray-900">{getFamilyLabel(f)}</td>
@@ -583,11 +660,11 @@ export default function WorkbondManagement() {
                       <td className="px-4 py-3 text-right text-sm">{f.completed_shifts ?? 0}</td>
                       <td className="px-4 py-3 text-right text-sm">{f.remaining_shifts ?? 0}</td>
                       <td className="px-4 py-3 text-sm">
-                        {f.is_exempt ? (
+                        {status === 'exempt' ? (
                           <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-700">
                             Exempt
                           </span>
-                        ) : (f.remaining_shifts ?? 0) === 0 ? (
+                        ) : status === 'completed' ? (
                           <span className="inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-xs text-green-700">
                             Completed
                           </span>

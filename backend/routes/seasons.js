@@ -12,6 +12,30 @@ const supabase = require('../config/database');
  * - DELETE /api/seasons/:id
  */
 
+// Helper function to clean team name by removing manager suffix
+function cleanTeamName(teamName) {
+  if (!teamName) return teamName;
+  
+  // Remove patterns like " - Manager Name", " -Manager", "- Manager", etc.
+  // This handles "Yankees - Smith", "Yankees -Smith", "Yankees- Smith", "Yankees-Smith"
+  const patterns = [
+    /\s*-\s*[^-]+$/,     // " - Manager Name"
+    /\s+-[^-]+$/,        // " -Manager Name"  
+    /-\s*[^-]+$/,        // "- Manager Name"
+  ];
+  
+  for (const pattern of patterns) {
+    if (pattern.test(teamName)) {
+      const cleaned = teamName.replace(pattern, '').trim();
+      // If after cleaning we got an empty string, return original
+      return cleaned || teamName;
+    }
+  }
+  
+  // If no pattern matches, return the original name
+  return teamName;
+}
+
 // Get all seasons
 router.get('/', async (req, res) => {
   try {
@@ -138,15 +162,16 @@ router.post('/', async (req, res) => {
         .order('created_at', { ascending: true });
       if (teamErr) throw teamErr;
 
-      // Insert teams into target (remap division_id)
+      // Insert teams into target (remap division_id and CLEAN the team name)
       const teamsToInsert = (sourceTeams || []).map(t => ({
         season_id: season.id,
-        name: t.name,
+        name: cleanTeamName(t.name), // <-- THIS IS THE FIX: Clean the team name
         division_id: t.division_id ? (divisionIdMap.get(t.division_id) || null) : null,
         color: t.color || null,
         manager_name: t.manager_name || null,
         manager_email: t.manager_email || null,
-        manager_phone: t.manager_phone || null,}));
+        manager_phone: t.manager_phone || null,
+      }));
 
       if (teamsToInsert.length) {
         const { error: insTeamErr } = await supabase.from('teams').insert(teamsToInsert);
@@ -203,7 +228,7 @@ router.put('/:id', async (req, res) => {
  * Copy division + team structure from one season to another.
  * Copies:
  *  - divisions: name, board_member_id, player_agent_* fields
- *  - teams: name, color, manager_* fields, division mapping
+ *  - teams: name (CLEANED - removes manager suffix), color, manager_* fields, division mapping
  * Does NOT copy players, volunteers, or any volunteer assignments on teams.
  */
 router.post('/copy-structure', async (req, res) => {
@@ -260,11 +285,11 @@ router.post('/copy-structure', async (req, res) => {
 
     if (teamErr) throw teamErr;
 
-    // Insert teams into target
+    // Insert teams into target - CLEAN the team name
     const teamsToInsert = (sourceTeams || []).map(t => ({
       season_id: target_season_id,
       division_id: t.division_id ? (divIdMap.get(t.division_id) || null) : null,
-      name: t.name,
+      name: cleanTeamName(t.name), // <-- THIS IS THE FIX: Clean the team name
       color: t.color || null,
       manager_name: t.manager_name || null,
       manager_phone: t.manager_phone || null,

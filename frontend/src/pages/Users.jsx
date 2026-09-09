@@ -38,6 +38,7 @@ const RESOURCE_CATEGORIES = {
     resources: [
       { key: 'dashboard', name: 'Dashboard' },
       { key: 'players', name: 'Players' },
+	  { key: 'all_stars', name: 'All-Stars' },
       { key: 'teams', name: 'Teams' },
       { key: 'uniforms', name: 'Team Uniforms' },
       { key: 'draft', name: 'Draft' },

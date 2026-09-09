@@ -11,6 +11,7 @@ import {
   Menu,
   X,
   Settings,
+  Star,
   HandHelping,
   Shirt,
   CalendarDays,
@@ -32,6 +33,7 @@ const Layout = ({ children }) => {
   const navigation = [
     { name: 'Dashboard', href: '/', icon: Home },
     { name: 'Players', href: '/players', icon: Users },
+	{ name: 'All-Stars', href: '/all-stars', icon: Star },
     { name: 'Teams', href: '/teams', icon: Trophy },
     { name: 'Draft', href: '/draft', icon: DraftingCompass },
     { name: 'Team Uniforms', href: '/team-uniforms', icon: Shirt },
@@ -77,6 +79,7 @@ const Layout = ({ children }) => {
   const PAGE_TO_RESOURCE = {
     '/': 'dashboard',
     '/players': 'players',
+	'/all-stars': 'all_stars',
     '/teams': 'teams',
     '/draft': 'draft',
     '/team-uniforms': 'uniforms',

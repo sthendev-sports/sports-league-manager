@@ -658,6 +658,28 @@ const GameScheduler = () => {
     return gameCounts;
   };
 
+  // Calculate opponent matchup counts for each team
+  const getOpponentCountsByTeam = () => {
+    const opponentCounts = {};
+
+    generatedGames.forEach(game => {
+      if (!opponentCounts[game.HomeTeam]) {
+        opponentCounts[game.HomeTeam] = {};
+      }
+      if (!opponentCounts[game.AwayTeam]) {
+        opponentCounts[game.AwayTeam] = {};
+      }
+
+      opponentCounts[game.HomeTeam][game.AwayTeam] =
+        (opponentCounts[game.HomeTeam][game.AwayTeam] || 0) + 1;
+
+      opponentCounts[game.AwayTeam][game.HomeTeam] =
+        (opponentCounts[game.AwayTeam][game.HomeTeam] || 0) + 1;
+    });
+
+    return opponentCounts;
+  };
+
   // Get slot counts per division
   const getDivisionSlotCounts = () => {
     const slotCounts = {};
@@ -847,438 +869,825 @@ const GameScheduler = () => {
   };
 
   // ========== FIXED: No same-day double games with proper day tracking ==========
+  // Generate a balanced schedule while preserving the original slot configuration behavior.
   const generateGames = () => {
-  if (!seasonStartDate) {
-    alert('Please set the season start date');
-    return;
-  }
+    if (!seasonStartDate) {
+      alert('Please set the season start date');
+      return;
+    }
 
-  if (!selectedSeason) {
-    alert('Please select a season');
-    return;
-  }
+    if (!selectedSeason) {
+      alert('Please select a season');
+      return;
+    }
 
-  if (isTestMode && !isTestConfigSaved) {
-    alert('Please configure test teams first using the "Configure Test Teams" button');
-    return;
-  }
+    if (isTestMode && !isTestConfigSaved) {
+      alert('Please configure test teams first using the "Configure Test Teams" button');
+      return;
+    }
 
-  try {
-    const teamsByDivision = getTeamsByDivision();
-    const games = [];
-    const unscheduledSlots = [];
-    let sortOrder = 1;
+    try {
+      const teamsByDivision = getTeamsByDivision();
+      const games = [];
+      const unscheduledMessages = [];
+      const gamesByDate = {};
+      let sortOrder = 1;
 
-    const startDate = new Date(seasonStartDate);
+      // Noon avoids daylight-saving and UTC date rollover problems.
+      const startDate = new Date(`${seasonStartDate}T12:00:00`);
 
-    const getFirstOccurrenceForDay = (day) => {
-      const dayOffset = daysOfWeek.indexOf(day);
-      const startDayOfWeek = startDate.getDay(); // 0=Sun
-      const startDayMapped = startDayOfWeek === 0 ? 6 : startDayOfWeek - 1; // Mon=0...Sun=6
+      const getFirstOccurrenceForDay = (day) => {
+        const targetDay = daysOfWeek.indexOf(day); // Monday = 0
+        const jsDay = startDate.getDay(); // Sunday = 0
+        const startDay = jsDay === 0 ? 6 : jsDay - 1;
+        let offset = targetDay - startDay;
+        if (offset < 0) offset += 7;
 
-      let daysToAdd = dayOffset - startDayMapped;
-      if (daysToAdd <= 0) {
-        daysToAdd += 7;
-      }
-
-      const firstDate = new Date(startDate);
-      firstDate.setDate(startDate.getDate() + daysToAdd);
-      return firstDate;
-    };
-
-    const getPairKey = (a, b) => [Math.min(a, b), Math.max(a, b)].join('-');
-
-    // Store games for each date to calculate end times later
-    const gamesByDate = {};
-
-    Object.entries(teamsByDivision).forEach(([divisionName, divisionTeams]) => {
-      const teamCount = divisionTeams.length;
-      const divisionSlots = scheduleConfig.filter(slot => slot.division === divisionName);
-      const divisionDurationMinutes = getDivisionDuration(divisionName);
-
-      if (divisionSlots.length === 0) {
-        console.log(`No slots assigned for ${divisionName}, skipping`);
-        return;
-      }
-
-      if (teamCount < 2) {
-        console.log(`Not enough teams in ${divisionName}, skipping`);
-        return;
-      }
-
-      const template = slotTemplates[teamCount];
-      if (!template || template.length === 0) {
-        console.log(`No slot template found for ${teamCount} teams in ${divisionName}, skipping`);
-        return;
-      }
-
-      const slotsPerWeek = divisionSlots.length;
-      const totalGamesNeeded = slotsPerWeek * seasonWeeks;
-      const expectedGamesPerTeam = (totalGamesNeeded * 2) / teamCount;
-
-      console.log(`\n${divisionName}:`);
-      console.log(`  Teams: ${teamCount}`);
-      console.log(`  Slots per week: ${slotsPerWeek}`);
-      console.log(`  Total weeks: ${seasonWeeks}`);
-      console.log(`  Expected games per team: ${expectedGamesPerTeam}`);
-      console.log(`  Template games per cycle: ${template.length}`);
-      console.log(`  Game Duration: ${divisionDurationMinutes / 60} hours`);
-
-      // Group slots by day
-      const slotsByDay = {};
-      divisionSlots.forEach(slot => {
-        if (!slotsByDay[slot.day]) {
-          slotsByDay[slot.day] = [];
-        }
-        slotsByDay[slot.day].push(slot);
-      });
-
-      Object.keys(slotsByDay).forEach(day => {
-        slotsByDay[day].sort((a, b) => a.time.localeCompare(b.time));
-      });
-
-      const divisionDays = Object.keys(slotsByDay).sort(
-        (a, b) => daysOfWeek.indexOf(a) - daysOfWeek.indexOf(b)
-      );
-
-      const firstOccurrences = {};
-      divisionDays.forEach(day => {
-        firstOccurrences[day] = getFirstOccurrenceForDay(day);
-      });
-
-      const teams = divisionTeams.map((team, idx) => ({
-        id: idx,
-        name: team.name
-      }));
-
-      // Trackers
-      const seasonGameCounts = new Array(teamCount).fill(0);
-      const weeklyGameCounts = new Array(teamCount).fill(0);
-      const homeCounts = new Array(teamCount).fill(0);
-      const awayCounts = new Array(teamCount).fill(0);
-      const consecutiveHome = new Array(teamCount).fill(0);
-      const consecutiveAway = new Array(teamCount).fill(0);
-
-      const lastOpponent = new Array(teamCount).fill(null);
-
-      // Build template queue once, then keep cycling through it.
-      // Every other cycle, reverse home/away to help balance home/away totals.
-      const buildTemplateCycle = (reverseHomeAway = false) => {
-        return template.map(([homeSeed, awaySeed]) => {
-          const home = homeSeed - 1;
-          const away = awaySeed - 1;
-
-          if (!reverseHomeAway) {
-            return { home, away };
-          }
-
-          return { home: away, away: home };
-        });
+        const result = new Date(startDate);
+        result.setDate(startDate.getDate() + offset);
+        return result;
       };
 
-      let cycleNumber = 0;
-      let templateQueue = buildTemplateCycle(false);
+      const pairKey = (a, b) => (a < b ? `${a}-${b}` : `${b}-${a}`);
 
-      const getNextTemplateCandidates = () => {
-        // Make sure queue always has enough options to look ahead
-        while (templateQueue.length < 20) {
-          cycleNumber++;
-          const reverse = cycleNumber % 2 === 1;
-          templateQueue.push(...buildTemplateCycle(reverse));
+      const shuffle = (items) => {
+        const copy = [...items];
+        for (let i = copy.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [copy[i], copy[j]] = [copy[j], copy[i]];
         }
+        return copy;
       };
 
-      for (let week = 1; week <= seasonWeeks; week++) {
-        console.log(`\nWeek ${week} for ${divisionName}`);
+      const dayDifference = (dateA, dateB) => {
+        if (!dateA || !dateB) return Number.POSITIVE_INFINITY;
+        const a = new Date(`${dateA}T12:00:00`);
+        const b = new Date(`${dateB}T12:00:00`);
+        return Math.abs(Math.round((a - b) / 86400000));
+      };
 
-        // Reset weekly game counts each week
-        for (let i = 0; i < teamCount; i++) {
-          weeklyGameCounts[i] = 0;
+      Object.entries(teamsByDivision).forEach(([divisionName, divisionTeams]) => {
+        const teamCount = divisionTeams.length;
+        const divisionSlots = scheduleConfig.filter(
+          (slot) => slot.division === divisionName
+        );
+        const divisionDurationMinutes = getDivisionDuration(divisionName);
+
+        if (divisionSlots.length === 0 || teamCount < 2) return;
+
+        const oneGamePerWeek =
+          divisionName === 'T-Ball Division' ||
+          divisionName === 'Challenger Division';
+        const gamesPerTeamPerWeek = oneGamePerWeek ? 1 : 2;
+        const requiredGamesPerWeek = (teamCount * gamesPerTeamPerWeek) / 2;
+
+        if (!Number.isInteger(requiredGamesPerWeek)) {
+          unscheduledMessages.push(
+            `${divisionName}: ${teamCount} teams cannot all play exactly ${gamesPerTeamPerWeek} game(s) per week without a bye.`
+          );
+          return;
         }
 
-        const teamsPlayedByDate = {};
+        if (divisionSlots.length < requiredGamesPerWeek) {
+          unscheduledMessages.push(
+            `${divisionName}: needs ${requiredGamesPerWeek} slots per week but only ${divisionSlots.length} are assigned.`
+          );
+          return;
+        }
 
-        const weekSlots = [];
-        divisionDays.forEach(day => {
-          const firstDate = firstOccurrences[day];
-          const gameDate = new Date(firstDate);
-          gameDate.setDate(firstDate.getDate() + ((week - 1) * 7));
-          const dateStr = formatDateForDisplay(gameDate);
-
-          slotsByDay[day].forEach(slot => {
-            weekSlots.push({
-              ...slot,
-              dateStr
-            });
-          });
+        const slotsByDay = {};
+        divisionSlots.forEach((slot) => {
+          if (!slotsByDay[slot.day]) slotsByDay[slot.day] = [];
+          slotsByDay[slot.day].push(slot);
         });
 
-        weekSlots.sort((a, b) => {
-          if (a.dateStr !== b.dateStr) return a.dateStr.localeCompare(b.dateStr);
-          return a.time.localeCompare(b.time);
+        Object.values(slotsByDay).forEach((daySlots) => {
+          daySlots.sort(
+            (a, b) =>
+              a.time.localeCompare(b.time) || a.field.localeCompare(b.field)
+          );
         });
 
-        for (const slot of weekSlots) {
-          if (!teamsPlayedByDate[slot.dateStr]) {
-            teamsPlayedByDate[slot.dateStr] = new Set();
-          }
+        const divisionDays = Object.keys(slotsByDay).sort(
+          (a, b) => daysOfWeek.indexOf(a) - daysOfWeek.indexOf(b)
+        );
 
-          const playedToday = teamsPlayedByDate[slot.dateStr];
+        const firstOccurrences = {};
+        divisionDays.forEach((day) => {
+          firstOccurrences[day] = getFirstOccurrenceForDay(day);
+        });
 
-          getNextTemplateCandidates();
+        const teamList = divisionTeams.map((team, index) => ({
+          index,
+          name: team.name
+        }));
 
-          let selectedMatchup = null;
-          let selectedIndex = -1;
+        // Season-long trackers. Pair counts are the primary balancing measurement.
+        const pairCounts = {};
 
-          // Look ahead a limited amount so we mostly preserve template order
-          const LOOKAHEAD = Math.min(12, templateQueue.length);
+        // Track which side has been home in each specific matchup. Overall
+        // home/away totals are not enough: without this tracker, Team A can
+        // be home every time it faces Team B while both teams still finish
+        // with balanced season totals against everyone else.
+        const pairHomeCounts = {};
+        const getPairHomeCount = (home, away) =>
+          pairHomeCounts[`${home}>${away}`] || 0;
 
-          const scoredCandidates = [];
+        const seasonGameCounts = new Array(teamCount).fill(0);
+        const homeCounts = new Array(teamCount).fill(0);
+        const awayCounts = new Array(teamCount).fill(0);
+        const consecutiveHome = new Array(teamCount).fill(0);
+        const consecutiveAway = new Array(teamCount).fill(0);
+        const lastOpponent = new Array(teamCount).fill(null);
+        const lastPlayedDate = new Array(teamCount).fill(null);
 
-          for (let i = 0; i < LOOKAHEAD; i++) {
-            const matchup = templateQueue[i];
-            const { home, away } = matchup;
+        // Field rotation is tracked independently for every team. The scheduler
+        // should not keep a team on the same field simply because that field is
+        // the first legal slot in the weekly grid. When a division has multiple
+        // fields available, prefer the field(s) that team has used the least.
+        const divisionFieldNames = [...new Set(divisionSlots.map((slot) => slot.field))].sort();
+        const teamFieldCounts = Array.from({ length: teamCount }, () =>
+          Object.fromEntries(divisionFieldNames.map((field) => [field, 0]))
+        );
+        const lastField = new Array(teamCount).fill(null);
 
-            // Cannot play twice on same day
-            if (playedToday.has(home) || playedToday.has(away)) {
-              continue;
+        const getPairCount = (a, b) => pairCounts[pairKey(a, b)] || 0;
+
+        // Build true round-robin rounds for even-sized divisions. Each round
+        // contains every team exactly once. Selecting two different rounds per
+        // week gives every team exactly two games while keeping opponent counts
+        // as even as mathematically possible across the entire season.
+        const buildRoundRobinRounds = () => {
+          if (teamCount % 2 !== 0 || teamCount < 4) return [];
+
+          const rotation = teamList.map((team) => team.index);
+          const rounds = [];
+
+          for (let round = 0; round < teamCount - 1; round++) {
+            const matchups = [];
+
+            for (let i = 0; i < teamCount / 2; i++) {
+              matchups.push([rotation[i], rotation[teamCount - 1 - i]]);
             }
 
-            const pairKey = getPairKey(home, away);
+            rounds.push(matchups);
 
+            // Circle method: keep the first team fixed and rotate the rest.
+            const fixed = rotation[0];
+            const rotating = rotation.slice(1);
+            rotating.unshift(rotating.pop());
+            rotation.splice(0, rotation.length, fixed, ...rotating);
+          }
+
+          return rounds;
+        };
+
+        const roundRobinRounds = buildRoundRobinRounds();
+        const roundUseCounts = new Array(roundRobinRounds.length).fill(0);
+
+        // Assign a prepared weekly matchup list to actual slots. This function may
+        // skip extra slots, but never schedules a team twice on the same date.
+        const assignMatchupsToSlots = (matchups, weekSlots) => {
+          const orderedMatchups = [...matchups].sort((a, b) => {
+            const aRepeat = lastOpponent[a[0]] === a[1] ? 1 : 0;
+            const bRepeat = lastOpponent[b[0]] === b[1] ? 1 : 0;
+            return bRepeat - aRepeat;
+          });
+
+          const usedSlots = new Set();
+          const teamsByDate = {};
+          const assignments = [];
+
+          // Temporary field usage for this weekly backtracking search. This is
+          // necessary because a team may have two games in the same week; the
+          // second game should already know which field was assigned to its first.
+          const tempFieldAdds = Array.from({ length: teamCount }, () => ({}));
+
+          const getProjectedFieldRange = (teamIndex, candidateField) => {
+            if (divisionFieldNames.length <= 1) return 0;
+
+            const counts = divisionFieldNames.map((field) =>
+              (teamFieldCounts[teamIndex][field] || 0) +
+              (tempFieldAdds[teamIndex][field] || 0) +
+              (field === candidateField ? 1 : 0)
+            );
+
+            return Math.max(...counts) - Math.min(...counts);
+          };
+
+          const recurse = (matchupIndex) => {
+            if (matchupIndex === orderedMatchups.length) return true;
+
+            const [teamA, teamB] = orderedMatchups[matchupIndex];
+
+            const candidateSlots = weekSlots
+              .map((slot, index) => ({ slot, index }))
+              .filter(({ slot, index }) => {
+                if (usedSlots.has(index)) return false;
+                const usedToday = teamsByDate[slot.dateStr];
+                return !usedToday || (!usedToday.has(teamA) && !usedToday.has(teamB));
+              })
+              .map(({ slot, index }) => {
+                let score = index;
+
+                // Prefer avoiding back-to-back calendar dates when possible.
+                // This stays a stronger preference than field rotation.
+                if (teamCount > 3) {
+                  if (dayDifference(lastPlayedDate[teamA], slot.dateStr) === 1) score += 50000;
+                  if (dayDifference(lastPlayedDate[teamB], slot.dateStr) === 1) score += 50000;
+                }
+
+                // Balance field usage for BOTH teams in the matchup. The range
+                // penalty looks at the team's projected season field totals after
+                // using this slot, so repeatedly assigning Angels to Field #1, for
+                // example, quickly becomes much more expensive than Field #2/#3.
+                if (divisionFieldNames.length > 1) {
+                  const usageA =
+                    (teamFieldCounts[teamA][slot.field] || 0) +
+                    (tempFieldAdds[teamA][slot.field] || 0);
+                  const usageB =
+                    (teamFieldCounts[teamB][slot.field] || 0) +
+                    (tempFieldAdds[teamB][slot.field] || 0);
+
+                  score += getProjectedFieldRange(teamA, slot.field) * 5000;
+                  score += getProjectedFieldRange(teamB, slot.field) * 5000;
+                  score += (usageA + usageB) * 500;
+
+                  // Small tie-breaker to avoid the exact same field as the team's
+                  // previous game when another equally balanced field is available.
+                  if (lastField[teamA] === slot.field) score += 250;
+                  if (lastField[teamB] === slot.field) score += 250;
+                }
+
+                return { slot, index, score };
+              })
+              .sort((a, b) => a.score - b.score);
+
+            for (const candidate of candidateSlots) {
+              const { slot, index } = candidate;
+              if (!teamsByDate[slot.dateStr]) teamsByDate[slot.dateStr] = new Set();
+
+              usedSlots.add(index);
+              teamsByDate[slot.dateStr].add(teamA);
+              teamsByDate[slot.dateStr].add(teamB);
+              tempFieldAdds[teamA][slot.field] =
+                (tempFieldAdds[teamA][slot.field] || 0) + 1;
+              tempFieldAdds[teamB][slot.field] =
+                (tempFieldAdds[teamB][slot.field] || 0) + 1;
+              assignments.push({ teamA, teamB, slot });
+
+              if (recurse(matchupIndex + 1)) return true;
+
+              assignments.pop();
+              tempFieldAdds[teamA][slot.field]--;
+              tempFieldAdds[teamB][slot.field]--;
+              usedSlots.delete(index);
+              teamsByDate[slot.dateStr].delete(teamA);
+              teamsByDate[slot.dateStr].delete(teamB);
+              if (teamsByDate[slot.dateStr].size === 0) {
+                delete teamsByDate[slot.dateStr];
+              }
+            }
+
+            return false;
+          };
+
+          return recurse(0) ? assignments : null;
+        };
+
+        // Build candidate weekly matchups. Standard divisions use a cycle so
+        // every team appears exactly twice. T-Ball/Challenger use a matching.
+        const buildWeeklyMatchups = () => {
+          const teamIndexes = teamList.map((team) => team.index);
+
+          if (gamesPerTeamPerWeek === 1) {
+            const remaining = [...teamIndexes];
+            const result = [];
+
+            while (remaining.length > 0) {
+              const teamA = remaining.shift();
+              const opponentIndex = remaining
+                .map((teamB, index) => ({
+                  index,
+                  score:
+                    getPairCount(teamA, teamB) * 10000 +
+                    (lastOpponent[teamA] === teamB ? 1000 : 0) +
+                    seasonGameCounts[teamB]
+                }))
+                .sort((a, b) => a.score - b.score)[0]?.index;
+
+              if (opponentIndex === undefined) return null;
+              const [teamB] = remaining.splice(opponentIndex, 1);
+              result.push([teamA, teamB]);
+            }
+
+            return result;
+          }
+
+          if (teamCount === 2) {
+            return [[0, 1], [0, 1]];
+          }
+
+          // Try many possible cycles and retain the one using the least-played
+          // pairings. This prevents one opponent from appearing far more often.
+          let bestCycle = null;
+          let bestScore = Number.POSITIVE_INFINITY;
+
+          for (let attempt = 0; attempt < 500; attempt++) {
+            const order = attempt === 0 ? [...teamIndexes] : shuffle(teamIndexes);
+            const cycle = [];
             let score = 0;
 
-            // Prefer template order: earlier items are better
-            score += i * 100;
-
-            // Prefer teams with fewer weekly games
-            score += (weeklyGameCounts[home] + weeklyGameCounts[away]) * 1000;
-
-            // Prefer teams with fewer season games
-            score += (seasonGameCounts[home] + seasonGameCounts[away]) * 100;
-
-            // Avoid 3rd straight home or away if possible
-            const nextHomeStreak = consecutiveHome[home] + 1;
-            const nextAwayStreak = consecutiveAway[away] + 1;
-
-            if (nextHomeStreak >= 3) score += 5000;
-            if (nextAwayStreak >= 3) score += 5000;
-            if (nextHomeStreak >= 4) score += 20000;
-            if (nextAwayStreak >= 4) score += 20000;
-
-            // Balance total home/away counts
-            score += Math.abs((homeCounts[home] + 1) - awayCounts[home]) * 40;
-            score += Math.abs(homeCounts[away] - (awayCounts[away] + 1)) * 40;
-
-            // Strongly avoid immediate rematch from each team's previous game
-            if (lastOpponent[home] === away || lastOpponent[away] === home) {
-              score += 12000;
+            for (let i = 0; i < order.length; i++) {
+              const teamA = order[i];
+              const teamB = order[(i + 1) % order.length];
+              cycle.push([teamA, teamB]);
+              score += getPairCount(teamA, teamB) * 100000;
+              if (lastOpponent[teamA] === teamB || lastOpponent[teamB] === teamA) {
+                score += 5000;
+              }
+              score += seasonGameCounts[teamA] + seasonGameCounts[teamB];
             }
 
-            scoredCandidates.push({
-              matchup,
-              index: i,
-              score
+            if (score < bestScore) {
+              bestScore = score;
+              bestCycle = cycle;
+            }
+          }
+
+          return bestCycle;
+        };
+
+        for (let week = 1; week <= seasonWeeks; week++) {
+          const weekSlots = [];
+
+          divisionDays.forEach((day) => {
+            const gameDate = new Date(firstOccurrences[day]);
+            gameDate.setDate(gameDate.getDate() + (week - 1) * 7);
+            const dateStr = formatDateForDisplay(gameDate);
+
+            slotsByDay[day].forEach((slot) => {
+              weekSlots.push({ ...slot, dateStr });
             });
+          });
+
+          weekSlots.sort(
+            (a, b) =>
+              a.dateStr.localeCompare(b.dateStr) ||
+              a.time.localeCompare(b.time) ||
+              a.field.localeCompare(b.field)
+          );
+
+          let weeklyAssignments = null;
+          let scheduledTarget = requiredGamesPerWeek;
+          let selectedRoundIndexes = null;
+
+          // For even-sized one-game-per-week divisions such as T-Ball and
+          // Challenger, schedule one complete round-robin round each week.
+          // Every team appears exactly once in a round, and no opponent repeats
+          // until all round-robin rounds have been used. With 14 teams over a
+          // 10-week season, every team therefore faces 10 different opponents.
+          if (
+            gamesPerTeamPerWeek === 1 &&
+            teamCount % 2 === 0 &&
+            roundRobinRounds.length > 0
+          ) {
+            const roundCandidates = roundRobinRounds
+              .map((matchups, roundIndex) => {
+                const pairCountScore = matchups.reduce(
+                  (sum, [teamA, teamB]) => sum + getPairCount(teamA, teamB),
+                  0
+                );
+
+                const immediateRematchScore = matchups.reduce(
+                  (sum, [teamA, teamB]) =>
+                    sum +
+                    (lastOpponent[teamA] === teamB || lastOpponent[teamB] === teamA
+                      ? 1
+                      : 0),
+                  0
+                );
+
+                return {
+                  roundIndex,
+                  matchups,
+                  score:
+                    roundUseCounts[roundIndex] * 1000000 +
+                    pairCountScore * 10000 +
+                    immediateRematchScore * 100
+                };
+              })
+              .sort((a, b) => a.score - b.score);
+
+            for (const candidate of roundCandidates) {
+              const assignments = assignMatchupsToSlots(candidate.matchups, weekSlots);
+              if (assignments) {
+                weeklyAssignments = assignments;
+                selectedRoundIndexes = [candidate.roundIndex];
+                break;
+              }
+            }
           }
 
-          if (scoredCandidates.length > 0) {
-            scoredCandidates.sort((a, b) => a.score - b.score);
-            selectedMatchup = scoredCandidates[0].matchup;
-            selectedIndex = scoredCandidates[0].index;
+          // For even-sized standard divisions, schedule two complete round-robin
+          // rounds each week. Across the season this guarantees that matchup
+          // counts differ by no more than one. For example, eight teams playing
+          // 20 games each will face five opponents three times and two opponents
+          // twice; no pairing will be scheduled four times.
+          if (
+            !weeklyAssignments &&
+            gamesPerTeamPerWeek === 2 &&
+            teamCount % 2 === 0 &&
+            teamCount > 2 &&
+            roundRobinRounds.length > 0
+          ) {
+            const roundPairs = [];
+
+            for (let first = 0; first < roundRobinRounds.length; first++) {
+              for (let second = first + 1; second < roundRobinRounds.length; second++) {
+                const matchups = [
+                  ...roundRobinRounds[first],
+                  ...roundRobinRounds[second]
+                ];
+
+                const pairCountScore = matchups.reduce(
+                  (sum, [teamA, teamB]) => sum + getPairCount(teamA, teamB),
+                  0
+                );
+
+                const immediateRematchScore = matchups.reduce(
+                  (sum, [teamA, teamB]) =>
+                    sum +
+                    (lastOpponent[teamA] === teamB || lastOpponent[teamB] === teamA
+                      ? 1
+                      : 0),
+                  0
+                );
+
+                roundPairs.push({
+                  first,
+                  second,
+                  matchups,
+                  score:
+                    (roundUseCounts[first] + roundUseCounts[second]) * 1000000 +
+                    pairCountScore * 10000 +
+                    immediateRematchScore * 100
+                });
+              }
+            }
+
+            roundPairs.sort((a, b) => a.score - b.score);
+
+            for (const candidate of roundPairs) {
+              const assignments = assignMatchupsToSlots(candidate.matchups, weekSlots);
+              if (assignments) {
+                weeklyAssignments = assignments;
+                selectedRoundIndexes = [candidate.first, candidate.second];
+                break;
+              }
+            }
           }
 
-          if (!selectedMatchup) {
-            unscheduledSlots.push(
-              `${divisionName} - Week ${week} - ${slot.dateStr} ${slot.time} ${slot.field} (no legal template matchup available)`
+          // Odd-sized divisions and unusual slot grids retain the flexible cycle
+          // fallback. This also protects scheduling if no pair of complete rounds
+          // can fit the selected dates.
+          for (let attempt = 0; attempt < 300 && !weeklyAssignments; attempt++) {
+            const weeklyMatchups = buildWeeklyMatchups();
+            if (!weeklyMatchups) break;
+            weeklyAssignments = assignMatchupsToSlots(weeklyMatchups, weekSlots);
+          }
+
+          // Some grids contain enough total slots but too many on the same day.
+          // Example: five teams need five games, but three Saturday slots are not
+          // usable because only two games can be played that day without a team
+          // playing twice. Instead of dropping the entire division, schedule the
+          // maximum legal number of games and rotate the reduced-game teams fairly.
+          if (!weeklyAssignments) {
+            const dailyLegalCapacity = Object.values(slotsByDay).reduce(
+              (total, daySlots) => total + Math.min(daySlots.length, Math.floor(teamCount / 2)),
+              0
+            );
+            const maxLegalGames = Math.min(requiredGamesPerWeek, dailyLegalCapacity, weekSlots.length);
+
+            for (
+              let target = maxLegalGames;
+              target >= Math.max(1, Math.floor(teamCount / 2)) && !weeklyAssignments;
+              target--
+            ) {
+              let bestPartial = null;
+              let bestPartialScore = Number.POSITIVE_INFINITY;
+
+              for (let attempt = 0; attempt < 500; attempt++) {
+                const candidateCycle = buildWeeklyMatchups();
+                if (!candidateCycle) break;
+
+                const ranked = candidateCycle
+                  .map((matchup) => {
+                    const [teamA, teamB] = matchup;
+                    return {
+                      matchup,
+                      score:
+                        getPairCount(teamA, teamB) * 100000 +
+                        (lastOpponent[teamA] === teamB || lastOpponent[teamB] === teamA ? 5000 : 0) +
+                        (seasonGameCounts[teamA] + seasonGameCounts[teamB]) * 100
+                    };
+                  })
+                  .sort((a, b) => a.score - b.score);
+
+                // Keep the least-played pairings while favoring teams with fewer
+                // total season games. Randomized cycle generation varies which
+                // team receives only one game in a constrained week.
+                const partialMatchups = ranked.slice(0, target).map((item) => item.matchup);
+                const assignments = assignMatchupsToSlots(partialMatchups, weekSlots);
+                if (!assignments) continue;
+
+                const projectedCounts = [...seasonGameCounts];
+                assignments.forEach(({ teamA, teamB }) => {
+                  projectedCounts[teamA]++;
+                  projectedCounts[teamB]++;
+                });
+
+                const spread = Math.max(...projectedCounts) - Math.min(...projectedCounts);
+                const total = projectedCounts.reduce((sum, count) => sum + count, 0);
+                const score = spread * 100000 + total;
+
+                if (score < bestPartialScore) {
+                  bestPartialScore = score;
+                  bestPartial = assignments;
+                }
+              }
+
+              if (bestPartial) {
+                weeklyAssignments = bestPartial;
+                scheduledTarget = target;
+              }
+            }
+          }
+
+          if (!weeklyAssignments) {
+            unscheduledMessages.push(
+              `${divisionName}, week ${week}: no legal games could fit the selected slots without a same-day doubleheader.`
             );
             continue;
           }
 
-          // Remove selected matchup from queue
-          templateQueue.splice(selectedIndex, 1);
+          if (selectedRoundIndexes) {
+            selectedRoundIndexes.forEach((roundIndex) => {
+              roundUseCounts[roundIndex]++;
+            });
+          }
 
-          const homeTeam = teams[selectedMatchup.home];
-          const awayTeam = teams[selectedMatchup.away];
+          if (scheduledTarget < requiredGamesPerWeek) {
+            unscheduledMessages.push(
+              `${divisionName}, week ${week}: scheduled ${scheduledTarget} of ${requiredGamesPerWeek} requested games. ` +
+              `The grid has too many slots on the same day; move at least ${requiredGamesPerWeek - scheduledTarget} slot(s) to another day for every team to play ${gamesPerTeamPerWeek} games.`
+            );
+          }
 
-          const game = {
-            SortOrder: sortOrder++,
-            RoundNo: week,
-            HomeTeam: homeTeam.name,
-            AwayTeam: awayTeam.name,
-            MatchDate: slot.dateStr,
-            StartTime: slot.time,
-            EndTime: slot.time, // Placeholder, will calculate after all games are created
-            Location: 'Sayreville Little League',
-            Field: slot.field,
-            Division: divisionName
+          // Home/away orientation is optimized for the entire week at once.
+          // This avoids the old greedy behavior where overall home/away totals
+          // looked balanced but the SAME team could remain home every time two
+          // specific opponents met.
+          weeklyAssignments.sort((a, b) =>
+            a.slot.dateStr.localeCompare(b.slot.dateStr) ||
+            a.slot.time.localeCompare(b.slot.time) ||
+            a.slot.field.localeCompare(b.slot.field)
+          );
+
+          const chooseWeeklyHomeAway = (assignments) => {
+            let best = null;
+            let bestScore = Number.POSITIVE_INFINITY;
+
+            const recurse = (
+              gameIndex,
+              tempHomeCounts,
+              tempAwayCounts,
+              tempConsecutiveHome,
+              tempConsecutiveAway,
+              tempPairHomeCounts,
+              runningScore,
+              orientations
+            ) => {
+              // All penalties are non-negative, so this branch can no longer
+              // beat the best result we already found.
+              if (runningScore >= bestScore) return;
+
+              if (gameIndex === assignments.length) {
+                // Final weekly tie-breaker: keep each team's season home/away
+                // totals as close as possible after satisfying matchup balance
+                // and streak rules.
+                const seasonBalancePenalty = tempHomeCounts.reduce(
+                  (sum, homeCount, teamIndex) =>
+                    sum + Math.abs(homeCount - tempAwayCounts[teamIndex]) * 100,
+                  0
+                );
+
+                const finalScore = runningScore + seasonBalancePenalty;
+                if (finalScore < bestScore) {
+                  bestScore = finalScore;
+                  best = orientations;
+                }
+                return;
+              }
+
+              const { teamA, teamB, slot } = assignments[gameIndex];
+              const options = [
+                { home: teamA, away: teamB },
+                { home: teamB, away: teamA }
+              ];
+
+              options.forEach(({ home, away }) => {
+                let score = 0;
+
+                // Highest priority: never create a third consecutive home or
+                // away game when another orientation can avoid it.
+                if (tempConsecutiveHome[home] >= 2) score += 100000000;
+                if (tempConsecutiveAway[away] >= 2) score += 100000000;
+
+                // Matchup-level home/away balance. For repeated opponents, the
+                // home designation should alternate. An even number of meetings
+                // should finish evenly split; an odd number may differ by one.
+                const directKey = `${home}>${away}`;
+                const reverseKey = `${away}>${home}`;
+                const directCount = tempPairHomeCounts[directKey] || 0;
+                const reverseCount = tempPairHomeCounts[reverseKey] || 0;
+                const projectedPairDifference = Math.abs(
+                  (directCount + 1) - reverseCount
+                );
+                score += projectedPairDifference * 1000000;
+
+                // Secondary season-wide home/away balance.
+                score +=
+                  Math.abs(
+                    (tempHomeCounts[home] + 1) - tempAwayCounts[home]
+                  ) * 1000;
+                score +=
+                  Math.abs(
+                    tempHomeCounts[away] - (tempAwayCounts[away] + 1)
+                  ) * 1000;
+
+                const nextHomeCounts = [...tempHomeCounts];
+                const nextAwayCounts = [...tempAwayCounts];
+                const nextConsecutiveHome = [...tempConsecutiveHome];
+                const nextConsecutiveAway = [...tempConsecutiveAway];
+                const nextPairHomeCounts = { ...tempPairHomeCounts };
+
+                nextHomeCounts[home]++;
+                nextAwayCounts[away]++;
+                nextPairHomeCounts[directKey] = directCount + 1;
+
+                nextConsecutiveHome[home]++;
+                nextConsecutiveAway[home] = 0;
+                nextConsecutiveAway[away]++;
+                nextConsecutiveHome[away] = 0;
+
+                recurse(
+                  gameIndex + 1,
+                  nextHomeCounts,
+                  nextAwayCounts,
+                  nextConsecutiveHome,
+                  nextConsecutiveAway,
+                  nextPairHomeCounts,
+                  runningScore + score,
+                  [...orientations, { teamA, teamB, home, away, slot }]
+                );
+              });
+            };
+
+            recurse(
+              0,
+              [...homeCounts],
+              [...awayCounts],
+              [...consecutiveHome],
+              [...consecutiveAway],
+              { ...pairHomeCounts },
+              0,
+              []
+            );
+
+            return best || assignments.map(({ teamA, teamB, slot }) => ({
+              teamA,
+              teamB,
+              home: teamA,
+              away: teamB,
+              slot
+            }));
           };
 
-          games.push(game);
+          const orientedAssignments = chooseWeeklyHomeAway(weeklyAssignments);
 
-          // Group by date for end time calculation
-          if (!gamesByDate[slot.dateStr]) {
-            gamesByDate[slot.dateStr] = [];
-          }
-          gamesByDate[slot.dateStr].push(game);
+          orientedAssignments.forEach(({ teamA, teamB, home, away, slot }) => {
+            const game = {
+              SortOrder: sortOrder++,
+              RoundNo: week,
+              HomeTeam: teamList[home].name,
+              AwayTeam: teamList[away].name,
+              MatchDate: slot.dateStr,
+              StartTime: slot.time,
+              EndTime: slot.time,
+              Location: 'Sayreville Little League',
+              Field: slot.field,
+              Division: divisionName
+            };
 
-          // Update trackers
-          playedToday.add(selectedMatchup.home);
-          playedToday.add(selectedMatchup.away);
+            games.push(game);
+            if (!gamesByDate[slot.dateStr]) gamesByDate[slot.dateStr] = [];
+            gamesByDate[slot.dateStr].push(game);
 
-          weeklyGameCounts[selectedMatchup.home]++;
-          weeklyGameCounts[selectedMatchup.away]++;
+            pairCounts[pairKey(teamA, teamB)] = getPairCount(teamA, teamB) + 1;
+            seasonGameCounts[teamA]++;
+            seasonGameCounts[teamB]++;
+            homeCounts[home]++;
+            awayCounts[away]++;
+            pairHomeCounts[`${home}>${away}`] = getPairHomeCount(home, away) + 1;
 
-          seasonGameCounts[selectedMatchup.home]++;
-          seasonGameCounts[selectedMatchup.away]++;
+            consecutiveHome[home]++;
+            consecutiveAway[home] = 0;
+            consecutiveAway[away]++;
+            consecutiveHome[away] = 0;
 
-          homeCounts[selectedMatchup.home]++;
-          awayCounts[selectedMatchup.away]++;
+            lastOpponent[teamA] = teamB;
+            lastOpponent[teamB] = teamA;
+            lastPlayedDate[teamA] = slot.dateStr;
+            lastPlayedDate[teamB] = slot.dateStr;
 
-          consecutiveHome[selectedMatchup.home]++;
-          consecutiveAway[selectedMatchup.home] = 0;
-
-          consecutiveAway[selectedMatchup.away]++;
-          consecutiveHome[selectedMatchup.away] = 0;
-
-          lastOpponent[selectedMatchup.home] = selectedMatchup.away;
-          lastOpponent[selectedMatchup.away] = selectedMatchup.home;
+            teamFieldCounts[teamA][slot.field] =
+              (teamFieldCounts[teamA][slot.field] || 0) + 1;
+            teamFieldCounts[teamB][slot.field] =
+              (teamFieldCounts[teamB][slot.field] || 0) + 1;
+            lastField[teamA] = slot.field;
+            lastField[teamB] = slot.field;
+          });
         }
+      });
 
-        console.log(`  Weekly game counts:`);
-        teams.forEach((team, idx) => {
-          console.log(
-            `    ${team.name}: ${weeklyGameCounts[idx]} games | Home ${homeCounts[idx]} | Away ${awayCounts[idx]}`
-          );
+      // Preserve the original end-time behavior for consecutive games on a field.
+      Object.values(gamesByDate).forEach((dateGames) => {
+        const gamesByField = {};
+        dateGames.forEach((game) => {
+          if (!gamesByField[game.Field]) gamesByField[game.Field] = [];
+          gamesByField[game.Field].push(game);
         });
-      }
 
-      console.log(`\nFinal game counts for ${divisionName}:`);
-      teams.forEach((team, idx) => {
-        console.log(
-          `  ${team.name}: ${seasonGameCounts[idx]} games | Home ${homeCounts[idx]} | Away ${awayCounts[idx]}`
-        );
-      });
+        Object.values(gamesByField).forEach((fieldGames) => {
+          fieldGames.sort((a, b) => a.StartTime.localeCompare(b.StartTime));
 
-      const minCount = Math.min(...seasonGameCounts);
-      const maxCount = Math.max(...seasonGameCounts);
-
-      console.log(`  Min: ${minCount}, Max: ${maxCount}, Difference: ${maxCount - minCount}`);
-      console.log(`  Expected per team: ${expectedGamesPerTeam}`);
-
-      Object.entries(slotsByDay).forEach(([day, slots]) => {
-        const maxGamesPossibleThatDay = Math.floor(teamCount / 2);
-        if (slots.length > maxGamesPossibleThatDay) {
-          console.warn(
-            `${divisionName}: ${day} has ${slots.length} slot(s), but with ${teamCount} teams you can only schedule ${maxGamesPossibleThatDay} game(s) that day without a same-day doubleheader.`
-          );
-        }
-      });
-    });
-
-    // Calculate end times for all games based on consecutive games on same field
-    Object.values(gamesByDate).forEach(dateGames => {
-      // Sort games by start time for each field
-      const gamesByField = {};
-      dateGames.forEach(game => {
-        if (!gamesByField[game.Field]) {
-          gamesByField[game.Field] = [];
-        }
-        gamesByField[game.Field].push(game);
-      });
-
-      // Sort each field's games by start time
-      Object.values(gamesByField).forEach(fieldGames => {
-        fieldGames.sort((a, b) => a.StartTime.localeCompare(b.StartTime));
-        
-        // Calculate end times
-        for (let i = 0; i < fieldGames.length; i++) {
-          const game = fieldGames[i];
-          const divisionDuration = getDivisionDuration(game.Division);
-          
-          // Check if there's a next game on the same field
-          if (i + 1 < fieldGames.length) {
+          for (let i = 0; i < fieldGames.length; i++) {
+            const game = fieldGames[i];
+            const divisionDuration = getDivisionDuration(game.Division);
+            const startMinutes = timeToMinutes(game.StartTime);
             const nextGame = fieldGames[i + 1];
-            const startMinutes = timeToMinutes(game.StartTime);
-            const nextStartMinutes = timeToMinutes(nextGame.StartTime);
-            const gapMinutes = nextStartMinutes - startMinutes;
-            
-            // If the gap is less than or equal to the division duration, use the next start time as end time
-            if (gapMinutes <= divisionDuration) {
-              game.EndTime = nextGame.StartTime;
+
+            if (nextGame) {
+              const nextStartMinutes = timeToMinutes(nextGame.StartTime);
+              const gapMinutes = nextStartMinutes - startMinutes;
+              game.EndTime =
+                gapMinutes <= divisionDuration
+                  ? nextGame.StartTime
+                  : minutesToTime(startMinutes + divisionDuration);
             } else {
-              // Otherwise use the division duration
-              const endMinutes = startMinutes + divisionDuration;
-              game.EndTime = minutesToTime(endMinutes);
+              game.EndTime = minutesToTime(startMinutes + divisionDuration);
             }
-          } else {
-            // Last game on field - use division duration
-            const startMinutes = timeToMinutes(game.StartTime);
-            const endMinutes = startMinutes + divisionDuration;
-            game.EndTime = minutesToTime(endMinutes);
           }
-        }
-      });
-    });
-
-    setGeneratedGames(games);
-
-    const finalGameCounts = {};
-    games.forEach(game => {
-      finalGameCounts[game.HomeTeam] = (finalGameCounts[game.HomeTeam] || 0) + 1;
-      finalGameCounts[game.AwayTeam] = (finalGameCounts[game.AwayTeam] || 0) + 1;
-    });
-
-    const countsList = Object.entries(finalGameCounts)
-      .sort((a, b) => b[1] - a[1])
-      .map(([team, count]) => `${team}: ${count} games`)
-      .join('\n');
-
-    const counts = Object.values(finalGameCounts);
-    const minGames = counts.length ? Math.min(...counts) : 0;
-    const maxGames = counts.length ? Math.max(...counts) : 0;
-    const difference = maxGames - minGames;
-
-    const sameDayIssues = [];
-    const gameMap = {};
-
-    games.forEach(game => {
-      if (!gameMap[game.MatchDate]) {
-        gameMap[game.MatchDate] = [];
-      }
-      gameMap[game.MatchDate].push(game);
-    });
-
-    Object.entries(gameMap).forEach(([date, dayGames]) => {
-      const teamCounts = {};
-      dayGames.forEach(game => {
-        teamCounts[game.HomeTeam] = (teamCounts[game.HomeTeam] || 0) + 1;
-        teamCounts[game.AwayTeam] = (teamCounts[game.AwayTeam] || 0) + 1;
+        });
       });
 
-      Object.entries(teamCounts).forEach(([team, count]) => {
-        if (count > 1) {
-          sameDayIssues.push(`${team} played ${count} times on ${date}`);
-        }
+      games.sort(
+        (a, b) =>
+          a.MatchDate.localeCompare(b.MatchDate) ||
+          a.StartTime.localeCompare(b.StartTime) ||
+          a.Field.localeCompare(b.Field)
+      );
+      games.forEach((game, index) => {
+        game.SortOrder = index + 1;
       });
-    });
 
-    const unscheduledMessage =
-      unscheduledSlots.length > 0
-        ? `\n\n⚠️ ${unscheduledSlots.length} slot(s) could not be scheduled.\n\nExamples:\n${unscheduledSlots.slice(0, 10).join('\n')}${unscheduledSlots.length > 10 ? '\n...' : ''}`
-        : '';
+      setGeneratedGames(games);
 
-    alert(
-      `Schedule generated successfully! Created ${games.length} games for ${seasonWeeks} weeks.\n\n` +
-      `Game Count Summary:\n${countsList}\n\n` +
-      `Min: ${minGames} games | Max: ${maxGames} games | Difference: ${difference} games\n\n` +
-      `${sameDayIssues.length > 0 ? '⚠️ Same-day double games detected:\n' + sameDayIssues.join('\n') : '✓ No same-day double games!'}${unscheduledMessage}`
-    );
-  } catch (error) {
-    console.error('Error generating games:', error);
-    alert('Error generating schedule: ' + error.message);
-  }
-};
+      const finalGameCounts = {};
+      games.forEach((game) => {
+        finalGameCounts[game.HomeTeam] = (finalGameCounts[game.HomeTeam] || 0) + 1;
+        finalGameCounts[game.AwayTeam] = (finalGameCounts[game.AwayTeam] || 0) + 1;
+      });
+
+      const countsList = Object.entries(finalGameCounts)
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([team, count]) => `${team}: ${count} games`)
+        .join('\n');
+
+      const warningText = unscheduledMessages.length
+        ? `\n\nWarnings:\n${unscheduledMessages.slice(0, 20).join('\n')}`
+        : '\n\n✓ No same-day double games were generated.';
+
+      alert(
+        `Schedule generated successfully! Created ${games.length} games for ${seasonWeeks} weeks.\n\n` +
+        `Game Count Summary:\n${countsList || 'No eligible divisions were found.'}${warningText}`
+      );
+    } catch (error) {
+      console.error('Error generating games:', error);
+      alert('Error generating schedule: ' + error.message);
+    }
+  };
 
   const getManagerName = (team) => {
     if (team.manager) {
@@ -1444,6 +1853,7 @@ const GameScheduler = () => {
   
   // Get game counts for display
   const gameCounts = getGameCountsPerTeam();
+  const opponentCountsByTeam = getOpponentCountsByTeam();
   
   // Get division slot counts
   const divisionSlotCounts = getDivisionSlotCounts();
@@ -1975,37 +2385,86 @@ const GameScheduler = () => {
                 <p className="text-sm text-gray-600 mb-3">
                   {divisionTeams.length} team{divisionTeams.length !== 1 ? 's' : ''} • {slotCount} slot{slotCount !== 1 ? 's' : ''}
                 </p>
+
                 <div className="space-y-2">
                   {divisionTeams.map((team, index) => {
                     const gameCount = gameCounts[team.name] || 0;
                     return (
-                      <div key={team.id} className="flex justify-between items-center text-sm">
-                        <span className="flex items-center">
-                          <span className="font-medium mr-2">{index + 1}.</span>
-                          {team.name}
-                          {generatedGames.length > 0 && (
-                            <span className={`ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                              gameCount > 0 ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'
-                            }`}>
-                              <CalendarClock className="h-3 w-3 mr-1" />
-                              {gameCount} {gameCount === 1 ? 'game' : 'games'}
-                            </span>
-                          )}
-                        </span>
-                        <span className="text-gray-500">
-                          {team.id.toString().startsWith('test-') ? '🔄 Placeholder' : `${team.players?.length || 0} players`}
-                        </span>
+                      <div key={team.id} className="border-b border-gray-100 pb-2 last:border-b-0 last:pb-0">
+                        <div className="flex justify-between items-center text-sm">
+                          <span className="flex items-center">
+                            <span className="font-medium mr-2">{index + 1}.</span>
+                            {team.name}
+                            {generatedGames.length > 0 && (
+                              <span className={`ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                                gameCount > 0 ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'
+                              }`}>
+                                <CalendarClock className="h-3 w-3 mr-1" />
+                                {gameCount} {gameCount === 1 ? 'game' : 'games'}
+                              </span>
+                            )}
+                          </span>
+                          <span className="text-gray-500">
+                            {team.id.toString().startsWith('test-') ? '🔄 Placeholder' : `${team.players?.length || 0} players`}
+                          </span>
+                        </div>
+
                       </div>
                     );
                   })}
                 </div>
                 {generatedGames.length > 0 && (
-                  <div className="mt-3 pt-2 border-t border-gray-100">
-                    <div className="flex justify-between items-center text-xs text-gray-500">
-                      <span>Division games:</span>
-                      <span className="font-medium">
-                        {divisionTeams.reduce((sum, team) => sum + (gameCounts[team.name] || 0), 0) / 2} games
+                  <div className="mt-4 pt-3 border-t border-gray-200">
+                    <div className="flex justify-between items-center mb-3">
+                      <h4 className="text-sm font-semibold text-gray-800">Matchup Counts</h4>
+                      <span className="text-xs text-gray-500">
+                        {divisionTeams.reduce((sum, team) => sum + (gameCounts[team.name] || 0), 0) / 2} division games
                       </span>
+                    </div>
+
+                    <div className="overflow-x-auto border border-gray-200 rounded-md">
+                      <table className="min-w-full text-xs">
+                        <thead className="bg-gray-50">
+                          <tr>
+                            <th className="px-2 py-2 text-left font-semibold text-gray-700 border-b border-gray-200">Team</th>
+                            {divisionTeams.map(opponent => (
+                              <th
+                                key={`header-${divisionName}-${opponent.id}`}
+                                className="px-2 py-2 text-center font-semibold text-gray-700 border-b border-gray-200 whitespace-nowrap"
+                                title={opponent.name}
+                              >
+                                {opponent.name}
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {divisionTeams.map(team => (
+                            <tr key={`matrix-${divisionName}-${team.id}`} className="border-b border-gray-100 last:border-b-0">
+                              <td className="px-2 py-2 font-medium text-gray-800 whitespace-nowrap">{team.name}</td>
+                              {divisionTeams.map(opponent => {
+                                const isSameTeam = team.name === opponent.name;
+                                const count = opponentCountsByTeam[team.name]?.[opponent.name] || 0;
+                                return (
+                                  <td
+                                    key={`cell-${divisionName}-${team.id}-${opponent.id}`}
+                                    className={`px-2 py-2 text-center font-semibold ${
+                                      isSameTeam
+                                        ? 'bg-gray-100 text-gray-400'
+                                        : count > 0
+                                          ? 'text-blue-700'
+                                          : 'text-red-500'
+                                    }`}
+                                    title={isSameTeam ? 'Same team' : `${team.name} vs ${opponent.name}: ${count} game${count === 1 ? '' : 's'}`}
+                                  >
+                                    {isSameTeam ? '—' : count}
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
                   </div>
                 )}

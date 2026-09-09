@@ -16,6 +16,7 @@ const DEFAULT_PERMISSIONS = {
     "Players": "RW",
     "Teams": "RW",
     "Draft": "RW",
+    "all_stars": "RW",
     "Team Uniforms": "RW",
     "Game Scheduler": "RW",
     "Workbond Management": "RW",
@@ -31,6 +32,7 @@ const DEFAULT_PERMISSIONS = {
     "Players": "RW",
     "Teams": "RW",
     "Draft": "RW",
+    "all_stars": "RW",
     "Team Uniforms": "RW",
     "Game Scheduler": "RW",
     "Workbond Management": "RW",
@@ -46,6 +48,7 @@ const DEFAULT_PERMISSIONS = {
     "Players": "R",
     "Teams": "R",
     "Draft": "X",
+    "all_stars": "X",
     "Team Uniforms": "R",
     "Game Scheduler": "R",
     "Workbond Management": "R",
@@ -61,6 +64,7 @@ const DEFAULT_PERMISSIONS = {
     "Players": "R",
     "Teams": "R",
     "Draft": "RW",
+    "all_stars": "RW",
     "Team Uniforms": "R",
     "Game Scheduler": "X",
     "Workbond Management": "X",
@@ -79,6 +83,7 @@ const DEFAULT_PERMISSIONS = {
     "Players": "R",
     "Teams": "R",
     "Draft": "R",
+    "all_stars": "R",
     "Team Uniforms": "RW",
     "Game Scheduler": "X",
     "Workbond Management": "X",
@@ -94,6 +99,7 @@ const DEFAULT_PERMISSIONS = {
     "Players": "R",
     "Teams": "X",
     "Draft": "X",
+    "all_stars": "X",
     "Team Uniforms": "X",
     "Game Scheduler": "X",
     "Workbond Management": "RW",
@@ -107,7 +113,6 @@ const DEFAULT_PERMISSIONS = {
 };
 
 async function ensureDefaultsExist() {
-  // If table is empty, seed defaults
   const { data, error } = await supabase.from(TABLE).select('role').limit(1);
   if (error) throw error;
   if (data && data.length > 0) return;
@@ -147,15 +152,12 @@ async function getPermissionsForRole(role) {
 }
 
 async function upsertRolePermissions(role, permissions) {
-  // Upsert by role
   const { data, error } = await supabase
     .from(TABLE)
     .upsert({ role, permissions }, { onConflict: 'role' })
     .select();
 
   if (error) throw error;
-
-  // Refresh cache
   await loadAllPermissions(true);
   return data?.[0] || null;
 }

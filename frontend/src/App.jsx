@@ -26,6 +26,9 @@ import FamilyManager from './pages/FamilyManager';
 import { AuthProvider } from './context/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import CheckWorkbond from './pages/CheckWorkbond';
+import AllStarManagement from './pages/AllStarManagement';
+
+
 
 function App() {
   // Wake up the Render backend (free tier may spin down when idle).
@@ -54,6 +57,9 @@ function App() {
                   path="/players"
                   element={<ProtectedRoute element={<Players />} />}
                 />
+				<Route path="/all-stars" 
+				 element={<ProtectedRoute element={<AllStarManagement />} />} 
+				 />
                 <Route
                   path="/teams"
                   element={<ProtectedRoute element={<Teams />} />}

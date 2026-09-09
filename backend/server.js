@@ -43,6 +43,7 @@ const paymentDataRoutes = require('./routes/paymentData');
 const volunteerRoutes = require('./routes/volunteers');
 const volunteerImportRoutes = require('./routes/volunteerImport'); // NEW
 const boardMemberRoutes = require('./routes/boardMembers');
+const allStarsRoutes = require('./routes/all-stars');
 //const draftRoutes = require('./routes/draft');
 const seasonExportRoutes = require('./routes/season-export');
 const gamesRoutes = require('./routes/games');
@@ -68,6 +69,7 @@ app.use('/api/email-settings', emailSettingsRoutes);
 app.use('/api/notifications', notificationsRoutes);
 app.use('/api/role-permissions', rolePermissionsRoutes);
 app.use('/api/seasons', seasonRoutes);
+app.use('/api/all-stars', allStarsRoutes);
 //app.use('/api/players', playerRoutes);
 app.use('/api/players', authMiddleware, permissionEnforcer, playerRoutes);
 app.use('/api', configurationRoutes);      // Handles /api/divisions

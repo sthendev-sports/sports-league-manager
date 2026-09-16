@@ -281,19 +281,31 @@ const handleBulkAssignTrainings = async () => {
   const loadSeasons = async () => {
     try {
       console.log('Loading seasons...');
-      const response = await authFetch('/api/seasons');
-      if (!response.ok) {
-        throw new Error(await buildAuthErrorMessage(response, 'Failed to load seasons'));
+
+      const [allResponse, activeResponse] = await Promise.all([
+        authFetch('/api/seasons'),
+        authFetch('/api/seasons/active')
+      ]);
+
+      if (!allResponse.ok) {
+        throw new Error(await buildAuthErrorMessage(allResponse, 'Failed to load seasons'));
       }
-      const data = await response.json();
+
+      const data = await allResponse.json();
+      const activeSeason = activeResponse.ok ? await activeResponse.json() : null;
+
       console.log('Loaded seasons:', data);
+      console.log('Active season:', activeSeason);
       setSeasons(data || []);
 
-      // Set default season if none selected
+      // Default to the league's active season. If no season is marked active,
+      // fall back to the first available season so the page still works.
       if (data.length > 0 && !selectedSeason) {
-        setSelectedSeason(data[0].id);
-        // Also set in new volunteer form
-        setNewVolunteer(prev => ({ ...prev, season_id: data[0].id }));
+        const defaultSeasonId = activeSeason?.id || data[0].id;
+        setSelectedSeason(defaultSeasonId);
+
+        // Also use the same active season when opening the Add Volunteer form.
+        setNewVolunteer(prev => ({ ...prev, season_id: defaultSeasonId }));
       }
     } catch (error) {
       console.error('Error loading seasons:', error);
@@ -460,7 +472,7 @@ const handleBulkAssignTrainings = async () => {
       phone: '',
       role: 'Parent',
       division_id: '',
-      season_id: seasons[0]?.id || '',
+      season_id: selectedSeason || seasons[0]?.id || '',
       team_id: '',
       notes: '',
       training_completed: false,
@@ -604,7 +616,7 @@ const handleBulkAssignTrainings = async () => {
         phone: "555-123-4567",
         role: "Parent",
         division_id: divisions[0]?.id,
-        season_id: seasons[0]?.id,
+        season_id: selectedSeason || seasons[0]?.id,
         team_id: teams[0]?.id,
         notes: "Test volunteer from debug",
         training_completed: false

@@ -20,10 +20,18 @@ const FamilyManager = () => {
 
   const loadSeasons = async () => {
     try {
-      const response = await api.get('/seasons');
-      setSeasons(response.data);
-      if (response.data.length > 0) {
-        setSelectedSeason(response.data[0].id);
+      const [activeRes, allRes] = await Promise.all([
+        api.get('/seasons/active').catch(() => ({ data: null })),
+        api.get('/seasons').catch(() => ({ data: [] }))
+      ]);
+
+      const activeSeason = activeRes?.data || null;
+      const allSeasons = Array.isArray(allRes?.data) ? allRes.data : [];
+
+      setSeasons(allSeasons);
+
+      if (allSeasons.length > 0) {
+        setSelectedSeason(activeSeason?.id || allSeasons[0].id);
       }
     } catch (error) {
       console.error('Error loading seasons:', error);

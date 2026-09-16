@@ -241,15 +241,17 @@ const Teams = () => {
       console.log('Loading teams data...');
       
       // Load teams with enhanced details including players and volunteers
-      const [teamsRes, divisionsRes, seasonsRes] = await Promise.all([
+      const [teamsRes, divisionsRes, seasonsRes, activeSeasonRes] = await Promise.all([
         api.get('/teams/with-details'),
         divisionsAPI.getAll(),
         seasonsAPI.getAll(),
+        seasonsAPI.getActive().catch(() => ({ data: null })),
       ]);
 
       let teamsData = Array.isArray(teamsRes.data) ? teamsRes.data : [];
       const divisionsData = Array.isArray(divisionsRes.data) ? divisionsRes.data : [];
       const seasonsData = Array.isArray(seasonsRes.data) ? seasonsRes.data : [];
+      const activeSeason = activeSeasonRes?.data || null;
       
       // If a season is selected, enhance players with workbond data for that season
       if (selectedSeason) {
@@ -286,9 +288,10 @@ const Teams = () => {
       setDivisions(divisionsData);
       setSeasons(seasonsData);
       
-      // Set first season as default if none selected
+      // Default to the league's active season. If no season is marked active,
+      // fall back to the first available season so the page still works.
       if (!selectedSeason && Array.isArray(seasonsData) && seasonsData.length > 0) {
-        setSelectedSeason(seasonsData[0].id);
+        setSelectedSeason(activeSeason?.id || seasonsData[0].id);
       }
       
     } catch (error) {

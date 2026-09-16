@@ -90,10 +90,20 @@ const TeamUniforms = () => {
 
   const loadSeasons = async () => {
     try {
-      const response = await seasonsAPI.getAll();
-      setSeasons(response.data || []);
-      if (response.data && response.data.length > 0) {
-        setSelectedSeason(response.data[0].id);
+      const [activeRes, allRes] = await Promise.all([
+        seasonsAPI.getActive().catch(() => ({ data: null })),
+        seasonsAPI.getAll().catch(() => ({ data: [] }))
+      ]);
+
+      const activeSeason = activeRes?.data || null;
+      const allSeasons = Array.isArray(allRes?.data) ? allRes.data : [];
+
+      setSeasons(allSeasons);
+
+      // Default to the league's active season. If no season is marked active,
+      // fall back to the first available season so the page still works.
+      if (!selectedSeason && allSeasons.length > 0) {
+        setSelectedSeason(activeSeason?.id || allSeasons[0].id);
       }
     } catch (error) {
       console.error('Error loading seasons:', error);
